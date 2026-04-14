@@ -1,0 +1,47 @@
+{
+  "dependencies": {
+    "autoprefixer": "^10.4.27",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.2",
+    "form-data": "^4.0.5",
+    "google-auth-library": "^9.15.1",
+    "helmet": "^8.1.0",
+    "hpp": "^0.2.3",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.1.1",
+    "mysql": "^2.18.1",
+    "mysql2": "^3.22.0",
+    "pdfkit": "^0.18.0",
+    "postcss": "^8.5.8",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^4.2.1",
+    "tailwindcss-animate": "^1.0.7"
+  },
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "Naturanzafood E-commerce Backend API",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "predev": "kill-port 5000 || echo Port 5000 is already free",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ecommerce",
+    "food",
+    "organic",
+    "naturanzafood",
+    "api"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "kill-port": "^2.0.1",
+    "nodemon": "^3.1.14"
+  }
+}

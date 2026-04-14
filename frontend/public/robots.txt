@@ -1,0 +1,12 @@
+# Naturanza Food - Robots.txt
+# Allow all crawlers
+
+User-agent: *
+Allow: /
+
+# Disallow admin and API routes
+Disallow: /admin/
+Disallow: /api/
+
+# Sitemap location
+Sitemap: https://naturanzafood.com/sitemap.xml
