@@ -1,7 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { db } = require('../config/db');
 const { createInvoicePdfBuffer } = require('../utils/invoicePdf');
+const { getAdminSettings } = require('../utils/adminSettings');
+const { insertAdminNotifications, getAdminRecipients } = require('../utils/adminNotifications');
+const { sendEmail } = require('../utils/emailService');
 
 const ALLOWED_ORDER_STATUSES = new Set([
   'pending',
@@ -109,34 +113,80 @@ const insertNotificationForAdmins = async (
   message,
   payload = null,
   excludeUserId = null,
-) => {
-  let adminQuery = "SELECT id FROM users WHERE role = 'admin'";
-  const queryParams = [];
-
-  if (Number.isInteger(excludeUserId)) {
-    adminQuery += ' AND id <> ?';
-    queryParams.push(excludeUserId);
-  }
-
-  const [adminRows] = await connection.query(adminQuery, queryParams);
-
-  if (!adminRows.length) {
-    return;
-  }
-
-  const values = adminRows.map((adminRow) => [
-    adminRow.id,
+) =>
+  insertAdminNotifications(connection, {
     type,
     title,
     message,
-    payload ? JSON.stringify(payload) : null,
-  ]);
+    payload,
+    excludeUserId,
+  });
 
-  await connection.query(
-    `INSERT INTO notifications (user_id, type, title, message, payload)
-     VALUES ?`,
-    [values],
-  );
+const formatOrderNumber = (orderId) => `ORD-${String(orderId).padStart(6, '0')}`;
+
+const sendAdminAlertEmails = async ({
+  order,
+  orderId,
+  totalAmount,
+  lowStockEvents,
+  adminSettings,
+  excludeUserId,
+}) => {
+  const shouldSendOrderEmail =
+    adminSettings.emailNotifications && adminSettings.orderNotifications;
+  const shouldSendLowStockEmail =
+    adminSettings.emailNotifications &&
+    adminSettings.lowStockAlerts &&
+    lowStockEvents.length > 0;
+
+  if (!shouldSendOrderEmail && !shouldSendLowStockEmail) {
+    return;
+  }
+
+  const recipients = await getAdminRecipients(db.promise(), excludeUserId);
+  const emailList = recipients.map((row) => row.email).filter(Boolean);
+
+  if (!emailList.length) {
+    return;
+  }
+
+  const to = emailList.join(",");
+
+  if (shouldSendOrderEmail) {
+    const orderNumber = formatOrderNumber(orderId);
+    const subject = `New order received: ${orderNumber}`;
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #1f2937;">
+        <h2 style="margin: 0 0 8px; color: #0f172a;">New Order Received</h2>
+        <p style="margin: 0 0 10px;">Order ${orderNumber} has been placed.</p>
+        <p style="margin: 0 0 6px;">Customer: ${order?.customer_name || "Guest"}</p>
+        <p style="margin: 0 0 6px;">Email: ${order?.customer_email || "-"}</p>
+        <p style="margin: 0;">Total: ${Number(totalAmount || 0).toFixed(2)}</p>
+      </div>
+    `;
+
+    await sendEmail({ to, subject, html });
+  }
+
+  if (shouldSendLowStockEmail) {
+    const subject = "Low stock alert";
+    const itemsHtml = lowStockEvents
+      .map(
+        (event) =>
+          `<li>${event.product_name} - ${event.stock_quantity} left</li>`,
+      )
+      .join("");
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #1f2937;">
+        <h2 style="margin: 0 0 8px; color: #0f172a;">Low Stock Alert</h2>
+        <p style="margin: 0 0 10px;">The following products are running low:</p>
+        <ul style="margin: 0; padding-left: 18px;">${itemsHtml}</ul>
+      </div>
+    `;
+
+    await sendEmail({ to, subject, html });
+  }
 };
 
 const insertOrderStatusHistory = async (
@@ -427,14 +477,13 @@ router.post('/create', authenticateToken, async (req, res) => {
       0,
     );
 
-    const subtotal = safeNumber(req.body?.subtotal, calculatedSubtotal);
+    // SECURITY: Never trust client-supplied financial values.
+    // Always compute totals server-side from verified DB prices.
+    const subtotal = calculatedSubtotal;
     const discountAmount = safeNumber(req.body?.discount_amount, 0);
     const tax = safeNumber(req.body?.tax, 0);
     const shippingCost = safeNumber(req.body?.shipping_cost, 0);
-    const totalAmount = safeNumber(
-      req.body?.total_amount,
-      subtotal - discountAmount + tax + shippingCost,
-    );
+    const totalAmount = Math.max(0, subtotal - discountAmount + tax + shippingCost);
 
     const paymentMethod = normalizePaymentMethod(req.body?.payment_method);
     const allowedPaymentMethods = await getAllowedPaymentMethods(connection);
@@ -476,6 +525,9 @@ router.post('/create', authenticateToken, async (req, res) => {
       new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
 
     const paymentDetailsPayload = req.body?.payment_details || null;
+    const adminSettings = await getAdminSettings(connection);
+    const lowStockEvents = [];
+    const lowStockThreshold = Number(adminSettings.lowStockThreshold) || 10;
 
     const [orderInsertResult] = await connection.query(
       `INSERT INTO orders
@@ -526,6 +578,19 @@ router.post('/create', authenticateToken, async (req, res) => {
       const quantity = safeNumber(item.quantity, 0);
       const newStock = previousStock - quantity;
 
+      if (
+        adminSettings.lowStockAlerts &&
+        previousStock >= lowStockThreshold &&
+        newStock < lowStockThreshold
+      ) {
+        lowStockEvents.push({
+          product_id: item.product_id,
+          product_name: item.name,
+          stock_quantity: newStock,
+          threshold: lowStockThreshold,
+        });
+      }
+
       await connection.query('UPDATE products SET stock_quantity = ? WHERE id = ?', [
         newStock,
         item.product_id,
@@ -572,19 +637,38 @@ router.post('/create', authenticateToken, async (req, res) => {
       { order_id: orderId },
     );
 
-    await insertNotificationForAdmins(
-      connection,
-      'admin_order_created',
-      'New Order Received',
-      `A new order #${orderId} has been placed and requires processing.`,
-      {
-        order_id: orderId,
-        user_id: req.user.id,
-        total_amount: safeNumber(totalAmount, 0),
-        payment_status: paymentStatus,
-      },
-      req.user.id,
-    );
+    if (adminSettings.orderNotifications) {
+      await insertNotificationForAdmins(
+        connection,
+        'admin_order_created',
+        'New Order Received',
+        `A new order #${orderId} has been placed and requires processing.`,
+        {
+          order_id: orderId,
+          user_id: req.user.id,
+          total_amount: safeNumber(totalAmount, 0),
+          payment_status: paymentStatus,
+        },
+        req.user.id,
+      );
+    }
+
+    if (adminSettings.lowStockAlerts && lowStockEvents.length > 0) {
+      for (const event of lowStockEvents) {
+        await insertNotificationForAdmins(
+          connection,
+          'admin_low_stock',
+          'Low Stock Alert',
+          `${event.product_name} is low on stock (${event.stock_quantity} left).`,
+          {
+            product_id: event.product_id,
+            stock_quantity: event.stock_quantity,
+            threshold: event.threshold,
+          },
+          req.user.id,
+        );
+      }
+    }
 
     await connection.commit();
 
@@ -596,6 +680,25 @@ router.post('/create', authenticateToken, async (req, res) => {
     );
 
     const [order] = await hydrateOrders(connection, orderRows);
+
+    if (
+      adminSettings.emailNotifications &&
+      (adminSettings.orderNotifications ||
+        (adminSettings.lowStockAlerts && lowStockEvents.length > 0))
+    ) {
+      const alertContext = {
+        order,
+        orderId,
+        totalAmount,
+        lowStockEvents,
+        adminSettings,
+        excludeUserId: req.user.id,
+      };
+
+      setImmediate(() => {
+        sendAdminAlertEmails(alertContext).catch(() => undefined);
+      });
+    }
 
     res.status(201).json({
       message: 'Order created successfully',

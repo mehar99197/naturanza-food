@@ -1,10 +1,34 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
-import { AUTH_SESSION_SYNC_EVENT, userAPI } from "@/services/api";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  AUTH_SESSION_SYNC_EVENT,
+  clearUserAccessToken,
+  userAPI,
+} from "@/services/api";
 
 const AuthContext = createContext(null);
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const resolveApiBaseUrl = () => {
+  const configuredApiUrl = String(import.meta.env.VITE_API_URL || "").trim();
+  if (configuredApiUrl) {
+    return configuredApiUrl;
+  }
+
+  if (typeof window !== "undefined") {
+    const protocol = String(window.location.protocol || "http:");
+    const hostname = String(window.location.hostname || "localhost");
+    const apiPort = Number.parseInt(
+      String(import.meta.env.VITE_API_PORT || "5000"),
+      10,
+    );
+    const safePort = Number.isFinite(apiPort) && apiPort > 0 ? apiPort : 5000;
+
+    return `${protocol}//${hostname}:${safePort}/api`;
+  }
+
+  return "http://localhost:5000/api";
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
 const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "");
 
 const resolveUserFromPayload = (payload) =>
@@ -29,18 +53,12 @@ const normalizeProfileImageUrl = (imageUrl) => {
     return `${API_ORIGIN}${normalizedPath}`;
   }
 
-  // Handle DB-stored relative paths like "images/avatars/..." or "uploads/..."
   if (/^(images|uploads)\//i.test(normalizedPath)) {
     return `${API_ORIGIN}/${normalizedPath}`;
   }
 
   return normalizedPath;
 };
-
-const hasUserProfileImage = (candidate) =>
-  Boolean(
-    candidate?.profile_image || candidate?.profileImage || candidate?.avatar,
-  );
 
 const isValidUserObject = (candidate) => {
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
@@ -88,19 +106,28 @@ const normalizeUserObject = (candidate) => {
   return normalized;
 };
 
-const getStoredAuthToken = () =>
-  localStorage.getItem("authToken") || sessionStorage.getItem("authToken");
+const safeLocalStorage = {
+  getItem(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  },
+  setItem(key, value) {
+    try { localStorage.setItem(key, value); } catch {}
+  },
+  removeItem(key) {
+    try { localStorage.removeItem(key); } catch {}
+  },
+};
 
 const getCachedUserData = () => {
-  const cachedUser = localStorage.getItem("userData");
-  if (!cachedUser) {
+  const raw = safeLocalStorage.getItem("userData");
+  if (!raw) {
     return null;
   }
 
   try {
-    return normalizeUserObject(JSON.parse(cachedUser));
-  } catch (parseError) {
-    localStorage.removeItem("userData");
+    return normalizeUserObject(JSON.parse(raw));
+  } catch (error) {
+    safeLocalStorage.removeItem("userData");
     return null;
   }
 };
@@ -114,27 +141,28 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => {
-    const token = getStoredAuthToken();
-    return token ? getCachedUserData() : null;
-  });
-  const [loading, setLoading] = useState(() => Boolean(getStoredAuthToken()));
+  const [user, setUser] = useState(() => getCachedUserData());
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const bootstrapRunIdRef = useRef(0);
+
+  const isAuthFailureStatus = (statusCode) =>
+    statusCode === 401 || statusCode === 403;
 
   const applyUserState = (nextUser) => {
     const normalizedUser = normalizeUserObject(nextUser);
     setUser(normalizedUser);
 
     if (normalizedUser) {
-      localStorage.setItem("userData", JSON.stringify(normalizedUser));
-      if (hasUserProfileImage(normalizedUser)) {
-        localStorage.setItem("profileImage", normalizedUser.profile_image);
+      safeLocalStorage.setItem("userData", JSON.stringify(normalizedUser));
+      if (normalizedUser.profile_image) {
+        safeLocalStorage.setItem("profileImage", normalizedUser.profile_image);
       } else {
-        localStorage.removeItem("profileImage");
+        safeLocalStorage.removeItem("profileImage");
       }
     } else {
-      localStorage.removeItem("userData");
-      localStorage.removeItem("profileImage");
+      safeLocalStorage.removeItem("userData");
+      safeLocalStorage.removeItem("profileImage");
     }
 
     return normalizedUser;
@@ -143,59 +171,60 @@ export const AuthProvider = ({ children }) => {
   const refreshProfile = async () => {
     try {
       const profileResponse = await userAPI.getProfile();
-      const refreshedUser = applyUserState(
-        resolveUserFromPayload(profileResponse),
-      );
-      return refreshedUser;
+      return applyUserState(resolveUserFromPayload(profileResponse));
     } catch (err) {
+      const statusCode = Number(err?.response?.status || 0);
+      if (isAuthFailureStatus(statusCode)) {
+        clearUserAccessToken();
+        applyUserState(null);
+      }
       return null;
     }
   };
 
-  // Check for existing token and fetch user profile on mount
-  useEffect(() => {
-    const verifyAuth = async () => {
-      const token = getStoredAuthToken();
+  const bootstrapAuth = async () => {
+    const runId = ++bootstrapRunIdRef.current;
 
-      if (!token) {
-        applyUserState(null);
-        setLoading(false);
+    try {
+      setLoading(true);
+      await userAPI.refreshToken();
+      if (bootstrapRunIdRef.current !== runId) {
         return;
       }
 
-      const cachedUser = getCachedUserData();
-      if (cachedUser) {
-        applyUserState(cachedUser);
+      const profile = await userAPI.getProfile();
+      if (bootstrapRunIdRef.current !== runId) {
+        return;
       }
 
-      try {
-        const profile = await userAPI.getProfile();
-        const resolvedUser = applyUserState(resolveUserFromPayload(profile));
-        if (!resolvedUser) {
-          throw new Error("Invalid profile response");
-        }
-        setError(null);
-      } catch (err) {
-        // Only clear tokens if it's an authentication error (401 or 403)
-        if (err.response?.status === 401 || err.response?.status === 403) {
-          console.log("Token is invalid or expired, clearing...");
-          localStorage.removeItem("authToken");
-          sessionStorage.removeItem("authToken");
-          applyUserState(null);
-        } else {
-          // For network errors, keep token and preserve cached user if available
-          console.log("Network error during auth verification, keeping token");
-          const fallbackUser = cachedUser || getCachedUserData();
-          if (!fallbackUser) {
-            applyUserState(null);
-          }
-        }
+      const resolvedUser = applyUserState(resolveUserFromPayload(profile));
+      if (!resolvedUser) {
+        throw new Error("Invalid profile response");
+      }
+      setError(null);
+    } catch (err) {
+      if (bootstrapRunIdRef.current !== runId) {
+        return;
       }
 
-      setLoading(false);
+      const statusCode = Number(err?.response?.status || 0);
+      if (isAuthFailureStatus(statusCode)) {
+        clearUserAccessToken();
+        applyUserState(null);
+      }
+    } finally {
+      if (bootstrapRunIdRef.current === runId) {
+        setLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    void bootstrapAuth();
+
+    return () => {
+      bootstrapRunIdRef.current += 1;
     };
-
-    verifyAuth();
   }, []);
 
   useEffect(() => {
@@ -203,72 +232,39 @@ export const AuthProvider = ({ children }) => {
       return undefined;
     }
 
-    const syncUserSessionState = async () => {
-      const token = getStoredAuthToken();
-
-      if (!token) {
-        applyUserState(null);
-        setLoading(false);
-        return;
-      }
-
-      const cachedUser = getCachedUserData();
-      if (cachedUser) {
-        applyUserState(cachedUser);
-      }
-
-      await refreshProfile();
-      setLoading(false);
-    };
-
     const handleSessionSync = (event) => {
       const source = String(event?.detail?.source || "").toLowerCase();
       if (source.startsWith("admin-")) {
         return;
       }
 
-      void syncUserSessionState();
-    };
-
-    const handleStorageSync = (event) => {
-      if (
-        event?.key &&
-        !["authToken", "userData"].includes(event.key)
-      ) {
+      if (source === "user-logout" || source === "user-token-refresh-failed") {
+        clearUserAccessToken();
+        applyUserState(null);
+        setLoading(false);
         return;
       }
 
-      void syncUserSessionState();
+      if (source === "user-token-refresh" || source === "user-refresh") {
+        return;
+      }
+
+      void refreshProfile();
     };
 
     window.addEventListener(AUTH_SESSION_SYNC_EVENT, handleSessionSync);
-    window.addEventListener("storage", handleStorageSync);
-
     return () => {
       window.removeEventListener(AUTH_SESSION_SYNC_EVENT, handleSessionSync);
-      window.removeEventListener("storage", handleStorageSync);
     };
   }, []);
 
-  // Register function
   const register = async (userData) => {
     try {
       setError(null);
       const response = await userAPI.register(userData);
-
-      if (response.token) {
-        localStorage.setItem("authToken", response.token);
-        // Fetch user profile after login
-        try {
-          const profileResponse = await userAPI.getProfile();
-          const profileUser = applyUserState(
-            resolveUserFromPayload(profileResponse),
-          );
-          if (!profileUser) {
-            throw new Error("Invalid profile response");
-          }
-        } catch (profileErr) {
-          // Set user from response if available
+      if (response.accessToken || response.token) {
+        const profileUser = await refreshProfile();
+        if (!profileUser) {
           applyUserState(
             response.user || { email: userData.email, name: userData.name },
           );
@@ -276,10 +272,9 @@ export const AuthProvider = ({ children }) => {
         return { success: true };
       }
 
-      return {
-        success: false,
-        message: response.error || "Registration failed",
-      };
+      const message = response.error || "Registration failed";
+      setError(message);
+      return { success: false, message };
     } catch (err) {
       const message = err.response?.data?.error || "Registration failed";
       setError(message);
@@ -287,39 +282,34 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Login function
   const login = async (email, password, rememberMe = false) => {
+    void rememberMe;
+
     try {
       setError(null);
       const response = await userAPI.login({ email, password });
 
-      if (response.token) {
-        if (rememberMe) {
-          localStorage.setItem("authToken", response.token);
-        } else {
-          sessionStorage.setItem("authToken", response.token);
+      if (response.accessToken || response.token) {
+        const loginRole = String(response?.user?.role || "")
+          .trim()
+          .toLowerCase();
+
+        if (loginRole === "admin") {
+          const message = "Admin accounts must use the admin login page.";
+          setError(message);
+          return {
+            success: false,
+            message,
+            isAdmin: true,
+            redirect: "/admin/login",
+          };
         }
 
-        // Fetch user profile
-        try {
-          const profileResponse = await userAPI.getProfile();
-          const profileUser = applyUserState(
-            resolveUserFromPayload(profileResponse),
-          );
-          if (!profileUser) {
-            throw new Error("Invalid profile response");
-          }
-        } catch (profileErr) {
-          // Set user from login response if available
-          const fallbackUser = applyUserState(response.user || { email });
-
-          // Retry profile hydration in background to avoid stale/no-image login state.
-          if (!hasUserProfileImage(fallbackUser)) {
-            setTimeout(() => {
-              void refreshProfile();
-            }, 120);
-          }
+        const profileUser = await refreshProfile();
+        if (!profileUser) {
+          applyUserState(response.user || { email });
         }
+
         return { success: true };
       }
 
@@ -327,25 +317,28 @@ export const AuthProvider = ({ children }) => {
       setError(message);
       return { success: false, message };
     } catch (err) {
-      const message = err.response?.data?.error || "Login failed";
+      const responseData = err.response?.data || {};
+      const message = responseData.error || "Login failed";
+      const isAdmin = Boolean(responseData.isAdmin);
       setError(message);
-      return { success: false, message };
+      return {
+        success: false,
+        message,
+        isAdmin,
+        redirect: responseData.redirect || null,
+      };
     }
   };
 
-  // Google Sign-In with ID token verification on backend
   const loginWithGoogle = async (idToken) => {
     try {
       setError(null);
       const response = await userAPI.loginWithGoogle(idToken);
 
-      if (response.token) {
-        localStorage.setItem("authToken", response.token);
-        const googleUser = applyUserState(resolveUserFromPayload(response));
-
-        // Social login payloads may be minimal; refresh full profile to get stored image/details.
-        if (!googleUser || !hasUserProfileImage(googleUser)) {
-          await refreshProfile();
+      if (response.accessToken || response.token) {
+        const profileUser = await refreshProfile();
+        if (!profileUser) {
+          applyUserState(resolveUserFromPayload(response));
         }
         return { success: true };
       }
@@ -360,25 +353,22 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Logout function
   const logout = async () => {
     try {
       await userAPI.logout();
     } catch (err) {
+      // Local cleanup still happens if network logout fails.
     } finally {
-      localStorage.removeItem("authToken");
-      sessionStorage.removeItem("authToken");
-      localStorage.removeItem("userData");
+      clearUserAccessToken();
       applyUserState(null);
       setError(null);
     }
   };
 
-  // Forgot Password
   const forgotPassword = async (email) => {
     try {
       setError(null);
-      const response = await userAPI.forgotPassword({ email });
+      await userAPI.forgotPassword({ email });
       return { success: true, message: "Reset link sent to your email" };
     } catch (err) {
       const message = err.response?.data?.error || "Failed to send reset link";
@@ -387,11 +377,10 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Reset Password
   const resetPassword = async (token, newPassword) => {
     try {
       setError(null);
-      const response = await userAPI.resetPassword({ token, newPassword });
+      await userAPI.resetPassword({ token, newPassword });
       return { success: true, message: "Password reset successfully" };
     } catch (err) {
       const message = err.response?.data?.error || "Password reset failed";
@@ -400,7 +389,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Update user profile
   const updateProfile = async (updates) => {
     try {
       setError(null);

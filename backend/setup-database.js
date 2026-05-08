@@ -8,7 +8,7 @@
 const mysql = require("mysql2/promise");
 const fs = require("fs");
 const path = require("path");
-require("dotenv").config();
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 const { ensureProductionSchema } = require("./utils/schemaCompatibility");
 
 const config = {
@@ -100,10 +100,15 @@ async function setupDatabase() {
         await ensureProductionSchema(connection);
 
         if (shouldSeed) {
-            console.log("5) Loading seed data...");
-            await runSqlFile(connection, path.join(__dirname, "seed-test-data.sql"), {
-                ignoreDuplicateErrors: true,
-            });
+            const seedPath = path.join(__dirname, "seed-test-data.sql");
+            if (fs.existsSync(seedPath)) {
+                console.log("5) Loading seed data...");
+                await runSqlFile(connection, seedPath, {
+                    ignoreDuplicateErrors: true,
+                });
+            } else {
+                console.log("5) Seed file (seed-test-data.sql) not found, skipping seed data.");
+            }
         }
 
         console.log("6) Verifying record counts...");

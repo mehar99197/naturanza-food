@@ -224,18 +224,18 @@ export function AdminShipping() {
 
   return (
     <AdminLayout>
-      <div className="mx-auto w-full max-w-7xl space-y-4 sm:space-y-5">
+      <div className="mx-auto w-full max-w-[1240px] space-y-4 sm:space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-[2rem] font-bold text-gray-900 sm:text-3xl">Shipping Center</h1>
-            <p className="text-sm text-gray-600 sm:text-base">
+            <h1 className="text-[2rem] font-bold text-slate-900 sm:text-3xl">Shipping Center</h1>
+            <p className="text-sm text-slate-600 sm:text-base">
               Manage courier details and shipment statuses using real order records.
             </p>
           </div>
           <button
             type="button"
             onClick={() => void refreshShipments()}
-            className="inline-flex h-9 self-end items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 sm:h-auto sm:min-h-[42px] sm:self-auto sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2 sm:text-sm"
+            className="inline-flex h-10 self-end items-center gap-1.5 rounded-xl border border-emerald-200/90 bg-white px-3 text-[13px] font-semibold text-emerald-800 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 sm:h-11 sm:self-auto sm:gap-2 sm:rounded-2xl sm:px-4 sm:text-sm"
           >
             <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading ? "animate-spin" : ""}`} />
             Refresh
@@ -243,21 +243,21 @@ export function AdminShipping() {
         </div>
 
         {error ? (
-          <div className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
             <AlertCircle className="h-5 w-5" />
             {error}
           </div>
         ) : null}
 
         <section className="md:hidden">
-          <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm">
+          <div className="rounded-2xl border border-emerald-100 bg-white p-2.5 shadow-[0_10px_24px_rgba(15,64,28,0.08)]">
             <div className="grid grid-cols-4 gap-1.5">
               {quickSummaryItems.map((item) => (
-                <article key={item.key} className="rounded-xl border border-gray-200 bg-gray-50 px-1.5 py-2">
-                  <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
+                <article key={item.key} className="rounded-xl border border-emerald-100 bg-[#f7fbf7] px-1.5 py-2">
+                  <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
                     {item.label}
                   </p>
-                  <p className="mt-0.5 truncate text-sm font-extrabold text-gray-900">{item.value}</p>
+                  <p className="mt-0.5 truncate text-sm font-extrabold text-slate-900">{item.value}</p>
                 </article>
               ))}
             </div>
@@ -265,31 +265,31 @@ export function AdminShipping() {
         </section>
 
         <div className="hidden grid-cols-2 gap-4 md:grid lg:grid-cols-4">
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Total Shipments</p>
-            <p className="mt-2 text-2xl font-bold text-gray-900">{metrics.total}</p>
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Shipments</p>
+            <p className="mt-2 text-2xl font-bold text-slate-900">{metrics.total}</p>
           </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">In Transit</p>
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">In Transit</p>
             <p className="mt-2 text-2xl font-bold text-indigo-700">{metrics.inTransit}</p>
           </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Delivered</p>
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Delivered</p>
             <p className="mt-2 text-2xl font-bold text-emerald-700">{metrics.delivered}</p>
           </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Pending/Packed</p>
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pending/Packed</p>
             <p className="mt-2 text-2xl font-bold text-amber-600">{metrics.pending}</p>
           </div>
         </div>
 
         <section className="md:hidden">
-          <div className="inline-flex rounded-full border border-gray-200 bg-white p-1 shadow-sm">
+          <div className="inline-flex rounded-full border border-emerald-100 bg-white p-1 shadow-sm">
             <button
               type="button"
               onClick={() => setMobileView("queue")}
               className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                mobileView === "queue" ? "bg-[#2a5f1e] text-white" : "text-gray-600"
+                mobileView === "queue" ? "bg-emerald-700 text-white" : "text-slate-600"
               }`}
             >
               Queue
@@ -298,7 +298,7 @@ export function AdminShipping() {
               type="button"
               onClick={() => setMobileView("detail")}
               className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                mobileView === "detail" ? "bg-[#2a5f1e] text-white" : "text-gray-600"
+                mobileView === "detail" ? "bg-emerald-700 text-white" : "text-slate-600"
               }`}
             >
               Detail
@@ -307,20 +307,20 @@ export function AdminShipping() {
         </section>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[62%_38%]">
-          <div className={`rounded-2xl border border-gray-200 bg-white shadow-sm ${mobileView === "detail" ? "hidden md:block" : "block"}`}>
-            <div className="border-b border-gray-100 p-4">
-              <p className="text-lg font-bold text-gray-900">Shipment Queue</p>
+          <div className={`rounded-3xl border border-emerald-100 bg-white shadow-[0_14px_30px_rgba(15,64,28,0.08)] ${mobileView === "detail" ? "hidden md:block" : "block"}`}>
+            <div className="border-b border-emerald-100 p-4">
+              <p className="text-lg font-bold text-slate-900">Shipment Queue</p>
             </div>
 
-            <div className="border-b border-gray-100 p-4">
+            <div className="border-b border-emerald-100 p-4">
               <div className="mb-3 relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-500" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder="Search by order/customer/tracking"
-                  className="w-full rounded-xl border border-gray-200 py-2.5 pl-10 pr-3 text-sm focus:border-green-500 focus:outline-none"
+                  className="w-full rounded-xl border border-emerald-100 py-2.5 pl-10 pr-3 text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                 />
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -335,10 +335,10 @@ export function AdminShipping() {
                     key={item.value}
                     type="button"
                     onClick={() => setStatusFilter(item.value)}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 ${
                       statusFilter === item.value
-                        ? "bg-[#2a5f1e] text-white"
-                        : "bg-gray-100 text-gray-600"
+                        ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
+                        : "bg-emerald-100 text-slate-600 hover:bg-emerald-200/70 hover:text-emerald-800"
                     }`}
                   >
                     {item.label}
@@ -347,7 +347,7 @@ export function AdminShipping() {
               </div>
             </div>
 
-            <div className="max-h-[64vh] overflow-y-auto divide-y divide-gray-100">
+            <div className="max-h-[64vh] overflow-y-auto divide-y divide-emerald-100">
               {shippingRows.length > 0 ? (
                 <>
                   {shippingRows.map((order, index) => {
@@ -362,11 +362,11 @@ export function AdminShipping() {
                         type="button"
                         onClick={() => openEditor(order)}
                         className={`w-full p-4 text-left transition-colors ${
-                          isActive ? "bg-emerald-50" : "hover:bg-gray-50"
+                          isActive ? "bg-emerald-50" : "hover:bg-emerald-50/40"
                         }`}
                       >
                         <div className="mb-1.5 flex items-center justify-between gap-2">
-                          <p className="text-sm font-bold text-gray-900">ORD-{String(order.id).padStart(6, "0")}</p>
+                          <p className="text-sm font-bold text-slate-900">ORD-{String(order.id).padStart(6, "0")}</p>
                           <span
                             className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                               shipmentBadgeClass[shipmentStatus] || "bg-gray-100 text-gray-700"
@@ -375,13 +375,13 @@ export function AdminShipping() {
                             {shipmentStatusLabel[shipmentStatus] || shipmentStatus}
                           </span>
                         </div>
-                        <p className="truncate text-xs text-gray-600">
+                        <p className="truncate text-xs text-slate-600">
                           {order.customer_name || order.customer_email || "Customer"}
                         </p>
-                        <p className="mt-1 truncate text-xs text-gray-500">
+                        <p className="mt-1 truncate text-xs text-slate-500">
                           {order.shipment?.courier_name || "No courier"} · {order.shipment?.tracking_number || "No tracking"}
                         </p>
-                        <p className="mt-1 text-xs text-gray-400">Order date: {formatDate(order.order_date || order.created_at)}</p>
+                        <p className="mt-1 text-xs text-slate-400">Order date: {formatDate(order.order_date || order.created_at)}</p>
                       </button>
                     </div>
                   );
@@ -392,7 +392,7 @@ export function AdminShipping() {
                       <button
                         type="button"
                         onClick={() => setShowAllMobileRows((prev) => !prev)}
-                        className="inline-flex min-h-[36px] items-center rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                        className="inline-flex min-h-[36px] items-center rounded-lg border border-emerald-200 px-3 text-xs font-semibold text-slate-700 hover:bg-emerald-50"
                       >
                         {showAllMobileRows
                           ? "Show fewer shipments"
@@ -402,31 +402,31 @@ export function AdminShipping() {
                   ) : null}
                 </>
               ) : (
-                <p className="p-4 text-sm text-gray-500">No shipment records found.</p>
+                <p className="p-4 text-sm text-slate-500">No shipment records found.</p>
               )}
             </div>
           </div>
 
-          <div className={`rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6 ${mobileView === "queue" ? "hidden md:block" : "block"}`}>
+          <div className={`rounded-3xl border border-emerald-100 bg-white p-5 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6 ${mobileView === "queue" ? "hidden md:block" : "block"}`}>
             {selectedOrder ? (
               <div className="space-y-4">
                 <button
                   type="button"
                   onClick={() => setMobileView("queue")}
-                  className="inline-flex min-h-[36px] items-center rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 md:hidden"
+                  className="inline-flex min-h-[36px] items-center rounded-lg border border-emerald-200 px-3 text-xs font-semibold text-slate-700 hover:bg-emerald-50 md:hidden"
                 >
                   Back to queue
                 </button>
 
                 <div>
-                  <p className="text-xl font-bold text-gray-900">ORD-{String(selectedOrder.id).padStart(6, "0")}</p>
-                  <p className="text-sm text-gray-500">
+                  <p className="text-xl font-bold text-slate-900">ORD-{String(selectedOrder.id).padStart(6, "0")}</p>
+                  <p className="text-sm text-slate-500">
                     {selectedOrder.customer_name || selectedOrder.customer_email || "Customer"}
                   </p>
                 </div>
 
                 <div className="space-y-3">
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Courier Name
                     <input
                       type="text"
@@ -434,12 +434,12 @@ export function AdminShipping() {
                       onChange={(event) =>
                         setFormData((prev) => ({ ...prev, courier_name: event.target.value }))
                       }
-                      className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-green-500 focus:outline-none"
+                      className="mt-1.5 w-full rounded-xl border border-emerald-100 px-3 py-2.5 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                       placeholder="Leopard / TCS / BlueEX"
                     />
                   </label>
 
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Tracking Number
                     <input
                       type="text"
@@ -447,19 +447,19 @@ export function AdminShipping() {
                       onChange={(event) =>
                         setFormData((prev) => ({ ...prev, tracking_number: event.target.value }))
                       }
-                      className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-green-500 focus:outline-none"
+                      className="mt-1.5 w-full rounded-xl border border-emerald-100 px-3 py-2.5 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                       placeholder="TRK-XXXXXXXX"
                     />
                   </label>
 
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Shipment Status
                     <select
                       value={formData.shipment_status}
                       onChange={(event) =>
                         setFormData((prev) => ({ ...prev, shipment_status: event.target.value }))
                       }
-                      className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-green-500 focus:outline-none"
+                      className="mt-1.5 w-full rounded-xl border border-emerald-100 px-3 py-2.5 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                     >
                       <option value="pending">Pending</option>
                       <option value="packed">Packed</option>
@@ -469,17 +469,17 @@ export function AdminShipping() {
                     </select>
                   </label>
 
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Estimated Delivery
                     <div className="relative mt-1.5">
-                      <Calendar className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                      <Calendar className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                       <input
                         type="date"
                         value={formData.estimated_delivery}
                         onChange={(event) =>
                           setFormData((prev) => ({ ...prev, estimated_delivery: event.target.value }))
                         }
-                        className="w-full rounded-xl border border-gray-200 py-2.5 pl-10 pr-3 text-sm focus:border-green-500 focus:outline-none"
+                        className="w-full rounded-xl border border-emerald-100 py-2.5 pl-10 pr-3 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                       />
                     </div>
                   </label>
@@ -489,14 +489,14 @@ export function AdminShipping() {
                   type="button"
                   disabled={saving}
                   onClick={() => void saveShipment()}
-                  className="inline-flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl bg-[#2a5f1e] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#224f18] disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl bg-[#16a34a] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(22,163,74,0.32)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#15803d] disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   Save Shipment
                 </button>
 
-                <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs text-gray-600">
-                  <p className="mb-1 inline-flex items-center gap-1 font-semibold text-gray-700">
+                <div className="rounded-xl border border-emerald-100 bg-[#f0f8f2] p-3 text-xs text-slate-600">
+                  <p className="mb-1 inline-flex items-center gap-1 font-semibold text-slate-700">
                     <Package className="h-3.5 w-3.5" />
                     Order Status: {selectedOrder.status}
                   </p>
@@ -511,14 +511,14 @@ export function AdminShipping() {
                 <div className="mb-3 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
                   <Truck className="h-6 w-6" />
                 </div>
-                <p className="text-lg font-semibold text-gray-900">Select a Shipment</p>
-                <p className="mt-1 max-w-sm text-sm text-gray-500">
+                <p className="text-lg font-semibold text-slate-900">Select a Shipment</p>
+                <p className="mt-1 max-w-sm text-sm text-slate-500">
                   Pick an order from the shipment queue to edit courier, tracking, and delivery details.
                 </p>
                 <button
                   type="button"
                   onClick={() => setMobileView("queue")}
-                  className="mt-3 inline-flex min-h-[36px] items-center rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 md:hidden"
+                  className="mt-3 inline-flex min-h-[36px] items-center rounded-lg border border-emerald-200 px-3 text-xs font-semibold text-slate-700 hover:bg-emerald-50 md:hidden"
                 >
                   Go to queue
                 </button>

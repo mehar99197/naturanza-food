@@ -5,18 +5,23 @@ import {
   Heart,
   Menu,
   X,
-  Leaf,
   User,
   Search,
   TrendingUp,
   LogOut,
   UserCircle,
-  Settings,
   Home,
   ShoppingBag,
   Info,
   MessageCircle,
+  HelpCircle,
+  Truck,
+  RotateCcw,
+  Shield,
+  FileText,
   ChevronRight,
+  Settings,
+  Package,
 } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
@@ -36,7 +41,6 @@ export function Navigation() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [profileImage, setProfileImage] = useState(null);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
@@ -45,6 +49,7 @@ export function Navigation() {
   const [isWishlistBadgePulsing, setIsWishlistBadgePulsing] = useState(false);
   const [isWishlistIconBumping, setIsWishlistIconBumping] = useState(false);
   const [isAuthResolvedVisible, setIsAuthResolvedVisible] = useState(true);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [activeNavIndicator, setActiveNavIndicator] = useState({
     left: 0,
     width: 0,
@@ -54,6 +59,7 @@ export function Navigation() {
   const [hoveredNavPath, setHoveredNavPath] = useState(null);
   const desktopNavRef = useRef(null);
   const desktopLinkRefs = useRef({});
+  const userMenuRef = useRef(null);
   const previousTotalItemsRef = useRef(0);
   const previousWishlistTotalItemsRef = useRef(0);
   const hasInitializedWishlistCountRef = useRef(false);
@@ -116,26 +122,11 @@ export function Navigation() {
       if (e.key === "Escape" && isSearchOpen) {
         setIsSearchOpen(false);
       }
-      if (e.key === "Escape" && isUserMenuOpen) {
-        setIsUserMenuOpen(false);
-      }
     };
 
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [isSearchOpen, isUserMenuOpen]);
-
-  // Close user menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (isUserMenuOpen && !e.target.closest(".user-menu-container")) {
-        setIsUserMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isUserMenuOpen]);
+  }, [isSearchOpen]);
 
   // Prevent body scroll when mobile menu is open
   useEffect(() => {
@@ -225,7 +216,6 @@ export function Navigation() {
 
   const handleLogout = () => {
     logout();
-    setIsUserMenuOpen(false);
     setProfileImage(null);
     setImageLoadFailed(false);
     localStorage.removeItem("profileImage");
@@ -249,13 +239,13 @@ export function Navigation() {
 
   const handleWishlistClick = () => {
     if (!user) {
+      setIsMobileMenuOpen(false);
       navigate("/login", {
         state: { from: { pathname: location.pathname } },
       });
       return;
     }
 
-    setIsUserMenuOpen(false);
     setIsMobileMenuOpen(false);
     navigate("/profile/wishlist");
   };
@@ -266,6 +256,77 @@ export function Navigation() {
     { path: "/about", label: "About", icon: Info },
     { path: "/contact", label: "Contact", icon: MessageCircle },
   ];
+
+  const mobileQuickLinks = [
+    { key: "home", path: "/", label: "Home", icon: Home, theme: "shop" },
+    {
+      key: "shop",
+      path: "/shop",
+      label: "Shop",
+      icon: ShoppingBag,
+      theme: "shop",
+    },
+    ...(user
+      ? [
+          {
+            key: "faq",
+            path: "/faq",
+            label: "FAQ",
+            icon: HelpCircle,
+            theme: "support",
+          },
+        ]
+      : [
+          {
+            key: "orders",
+            path: "/orders",
+            label: "Track Order",
+            icon: ShoppingCart,
+            theme: "account",
+          },
+        ]),
+    {
+      key: "contact",
+      path: "/contact",
+      label: "Contact",
+      icon: MessageCircle,
+      theme: "support",
+    },
+  ];
+
+  const mobileSupportLinks = [
+    { key: "shipping", path: "/shipping", label: "Shipping", icon: Truck },
+    { key: "returns", path: "/returns", label: "Returns", icon: RotateCcw },
+    { key: "privacy", path: "/privacy", label: "Privacy", icon: Shield },
+    { key: "terms", path: "/terms", label: "Terms", icon: FileText },
+  ];
+
+  const quickLinkThemeClasses = {
+    shop: {
+      iconActive: "bg-green-100 text-green-700",
+      iconIdle: "bg-green-50 text-green-600",
+      cardActive: "border-green-200 bg-green-50/80",
+      cardIdle: "border-green-100/70 bg-white active:bg-green-50/40",
+      textActive: "text-green-900",
+      chevronActive: "text-green-500",
+    },
+    account: {
+      iconActive: "bg-emerald-100 text-emerald-700",
+      iconIdle: "bg-emerald-50 text-emerald-600",
+      cardActive: "border-emerald-200 bg-emerald-50/80",
+      cardIdle: "border-emerald-100/70 bg-white active:bg-emerald-50/40",
+      textActive: "text-emerald-900",
+      chevronActive: "text-emerald-500",
+    },
+    support: {
+      iconActive: "bg-blue-100 text-blue-700",
+      iconIdle: "bg-blue-50 text-blue-600",
+      cardActive: "border-blue-200 bg-blue-50/80",
+      cardIdle: "border-blue-100/70 bg-white active:bg-blue-50/40",
+      textActive: "text-blue-900",
+      chevronActive: "text-blue-500",
+    },
+  };
 
   const isActive = (path) => location.pathname === path;
 
@@ -379,6 +440,23 @@ export function Navigation() {
       clearTimeout(timerId);
     };
   }, [wishlistTotalItems]);
+
+  // Close user menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+
+    if (isUserMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isUserMenuOpen]);
 
   return (
     <>
@@ -523,7 +601,7 @@ export function Navigation() {
               </button>
 
               {/* User Menu */}
-              <div className="hidden md:block relative user-menu-container">
+              <div className="hidden md:block">
                 {isAuthHydrating ? (
                   <div
                     aria-hidden="true"
@@ -543,111 +621,77 @@ export function Navigation() {
                     }`}
                   >
                     {user ? (
-                      <>
-                        <button
-                          onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                          aria-label="Open user menu"
-                          className={`flex items-center justify-center md:hover:bg-green-50/80 rounded-full shadow-sm md:hover:shadow-md group overflow-hidden transition-all duration-300 ${
-                            isScrolled ? "p-1" : "p-1.5"
-                          }`}
-                        >
-                          <div className="absolute inset-0 bg-gradient-to-br from-green-400/20 to-emerald-400/20 opacity-0 md:group-hover:opacity-100 rounded-full"></div>
-                          {resolvedProfileImage ? (
-                            <img
-                              src={resolvedProfileImage}
-                              alt={user?.name || "User profile"}
-                              onError={() => setImageLoadFailed(true)}
-                              className={`rounded-full object-cover shadow-md relative z-10 ring-2 ring-white ${
-                                isScrolled ? "w-7 h-7" : "w-8 h-8"
-                              }`}
-                            />
-                          ) : (
-                            <div
-                              className={`rounded-full bg-gradient-to-br from-green-500 via-emerald-500 to-green-600 flex items-center justify-center text-white font-bold text-xs shadow-md relative z-10 ring-2 ring-white ${
-                                isScrolled ? "w-7 h-7" : "w-8 h-8"
-                              }`}
-                            >
-                              {userInitial}
-                            </div>
-                          )}
-                        </button>
-
-                        {/* User Dropdown */}
-                        {isUserMenuOpen && (
-                          <div className="absolute right-0 mt-3 w-56 glass-effect rounded-3xl shadow-3d-hover border border-green-100/50 py-2 z-50 overflow-hidden">
-                            <div className="px-4 py-3 border-b border-gray-100">
-                              <p className="text-xs font-bold text-gray-900 mb-1">
-                                My Account
-                              </p>
-                              <p className="text-[10px] text-gray-500 truncate">
-                                {user.email}
-                              </p>
-                            </div>
-                            <Link
-                              to="/profile"
-                              onClick={() => setIsUserMenuOpen(false)}
-                              className="flex items-center gap-3 px-4 py-2.5 text-gray-700 md:hover:bg-green-50/80 group"
-                            >
-                              <UserCircle className="w-4 h-4 text-gray-500 md:group-hover:text-green-600" />
-                              <span className="text-xs font-medium md:group-hover:text-green-700">
-                                My Profile
-                              </span>
-                            </Link>
-                            <Link
-                              to="/orders"
-                              onClick={() => setIsUserMenuOpen(false)}
-                              className="flex items-center gap-3 px-4 py-2.5 text-gray-700 md:hover:bg-green-50/80 group"
-                            >
-                              <ShoppingCart className="w-4 h-4 text-gray-500 md:group-hover:text-green-600" />
-                              <span className="text-xs font-medium md:group-hover:text-green-700">
-                                My Orders
-                              </span>
-                            </Link>
-                            <Link
-                              to="/profile/wishlist"
-                              onClick={() => setIsUserMenuOpen(false)}
-                              className="flex items-center gap-3 px-4 py-2.5 text-gray-700 md:hover:bg-green-50/80 group"
-                            >
-                              <Heart className="w-4 h-4 text-gray-500 md:group-hover:text-green-600" />
-                              <span className="text-xs font-medium md:group-hover:text-green-700">
-                                My Wishlist
-                              </span>
-                              {wishlistTotalItems > 0 && (
-                                <span
-                                  className={`ml-auto inline-flex min-w-[20px] h-5 items-center justify-center rounded-full bg-rose-100 text-rose-600 text-[10px] font-semibold px-1.5 ${
-                                    isWishlistBadgePulsing ? "cart-badge-pulse" : ""
-                                  }`}
-                                >
-                                  {wishlistBadgeLabel}
-                                </span>
-                              )}
-                            </Link>
-                            <div className="border-t border-gray-100 mt-1">
-                              <button
-                                onClick={handleLogout}
-                                className="w-full flex items-center gap-3 px-4 py-2.5 text-red-600 md:hover:bg-red-50/80 group"
-                              >
-                                <LogOut className="w-4 h-4 md:group-" />
-                                <span className="text-xs font-medium">
-                                  Logout
-                                </span>
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <Link
-                        to="/login"
-                        className={`flex items-center gap-2 bg-gradient-to-r from-[#16A34A] to-[#15803D] text-white border border-[#166534] rounded-full shadow-md shadow-green-900/10 md:hover:from-[#15803D] md:hover:to-[#166534] md:hover:shadow-lg md:hover:shadow-green-900/20 font-semibold text-sm overflow-hidden group active:scale-95 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#86EFAC] focus-visible:ring-offset-2 ${
-                          isScrolled
-                            ? "px-3 py-1"
-                            : "px-4 py-1.5 md:px-4 md:py-1.5"
+                      <button
+                        onClick={() => navigate("/profile")}
+                        aria-label="Go to profile"
+                        className={`flex items-center justify-center md:hover:bg-green-50/80 rounded-full shadow-sm md:hover:shadow-md group overflow-hidden transition-all duration-300 ${
+                          isScrolled ? "p-1" : "p-1.5"
                         }`}
                       >
-                        <User className="w-4 h-4 md:w-4 md:h-4 relative z-10" />
-                        <span className="relative z-10">Sign In</span>
-                      </Link>
+                        <div className="absolute inset-0 bg-gradient-to-br from-green-400/20 to-emerald-400/20 opacity-0 md:group-hover:opacity-100 rounded-full"></div>
+                        {resolvedProfileImage ? (
+                          <img
+                            src={resolvedProfileImage}
+                            alt={user?.name || "User profile"}
+                            onError={() => setImageLoadFailed(true)}
+                            className={`rounded-full object-cover shadow-md relative z-10 ring-2 ring-white ${
+                              isScrolled ? "w-7 h-7" : "w-8 h-8"
+                            }`}
+                          />
+                        ) : (
+                          <div
+                            className={`rounded-full bg-gradient-to-br from-green-500 via-emerald-500 to-green-600 flex items-center justify-center text-white font-bold text-xs shadow-md relative z-10 ring-2 ring-white ${
+                              isScrolled ? "w-7 h-7" : "w-8 h-8"
+                            }`}
+                          >
+                            {userInitial}
+                          </div>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="relative" ref={userMenuRef}>
+                        <button
+                          onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                          className={`relative md:hover:bg-green-50/80 shadow-sm md:hover:shadow-md group flex-shrink-0 active:scale-95 transition-all duration-300 ${
+                            isScrolled
+                              ? "p-1 sm:p-1.5 md:p-1.5 rounded-md md:rounded-lg"
+                              : "p-1.5 sm:p-2 md:p-2 rounded-md md:rounded-lg"
+                          }`}
+                          aria-label="User menu"
+                        >
+                          <div className="absolute inset-0 bg-gradient-to-br from-green-400/20 to-emerald-400/20 opacity-0 md:group-hover:opacity-100 rounded-2xl overflow-hidden"></div>
+                          <User className="w-4 h-4 sm:w-5 sm:h-5 md:w-4 md:h-4 text-gray-700 md:group-hover:text-green-600 transition-colors duration-300 relative z-10" />
+                        </button>
+                        
+                        {/* Dropdown Menu */}
+                        {isUserMenuOpen && (
+                          <div className="absolute right-0 mt-2 w-52 bg-white rounded-2xl shadow-2xl shadow-green-900/10 border border-gray-100 py-2 z-50 overflow-hidden">
+                            <div className="px-3 py-2 border-b border-gray-100">
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Account</p>
+                            </div>
+                            <Link
+                              to="/login"
+                              onClick={() => setIsUserMenuOpen(false)}
+                              className="flex items-center gap-3 px-4 py-2.5 text-gray-700 hover:bg-green-50 active:bg-green-100 transition-colors group"
+                            >
+                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-green-50 group-hover:bg-green-100 transition-colors">
+                                <User className="w-4 h-4 text-green-600" />
+                              </div>
+                              <span className="text-sm font-medium">Sign In</span>
+                            </Link>
+                            <Link
+                              to="/register"
+                              onClick={() => setIsUserMenuOpen(false)}
+                              className="flex items-center gap-3 px-4 py-2.5 text-gray-700 hover:bg-green-50 active:bg-green-100 transition-colors group"
+                            >
+                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-50 group-hover:bg-emerald-100 transition-colors">
+                                <UserCircle className="w-4 h-4 text-emerald-600" />
+                              </div>
+                              <span className="text-sm font-medium">Create Account</span>
+                            </Link>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -706,7 +750,7 @@ export function Navigation() {
 
           {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto bg-gray-50/40">
-            <div className="px-4 py-5 flex flex-col">
+            <div className="px-4 py-4 flex flex-col">
               {/* ── Auth section ── */}
               {isAuthHydrating ? (
                 <div className="bg-white rounded-2xl p-4 mb-6 border border-gray-100 shadow-sm animate-pulse">
@@ -749,9 +793,9 @@ export function Navigation() {
                       <Link
                         to="/profile"
                         onClick={() => setIsMobileMenuOpen(false)}
-                        className="flex items-center gap-3 py-2.5 px-2 rounded-xl text-gray-700 active:bg-green-50"
+                        className="flex items-center gap-3 py-2.5 px-2 rounded-xl text-gray-700 active:bg-emerald-50"
                       >
-                        <UserCircle className="w-[18px] h-[18px] text-green-500 flex-shrink-0" />
+                        <UserCircle className="w-[18px] h-[18px] text-emerald-500 flex-shrink-0" />
                         <span className="text-sm font-medium flex-1">
                           My Profile
                         </span>
@@ -760,33 +804,14 @@ export function Navigation() {
                       <Link
                         to="/orders"
                         onClick={() => setIsMobileMenuOpen(false)}
-                        className="flex items-center gap-3 py-2.5 px-2 rounded-xl text-gray-700 active:bg-green-50"
+                        className="flex items-center gap-3 py-2.5 px-2 rounded-xl text-gray-700 active:bg-emerald-50"
                       >
-                        <ShoppingCart className="w-[18px] h-[18px] text-green-500 flex-shrink-0" />
+                        <ShoppingCart className="w-[18px] h-[18px] text-emerald-500 flex-shrink-0" />
                         <span className="text-sm font-medium flex-1">
                           My Orders
                         </span>
                         <ChevronRight className="w-4 h-4 text-gray-400 opacity-50" />
                       </Link>
-                      <button
-                        onClick={handleWishlistClick}
-                        className="w-full flex items-center gap-3 py-2.5 px-2 rounded-xl text-gray-700 active:bg-green-50"
-                      >
-                        <Heart className="w-[18px] h-[18px] text-green-500 flex-shrink-0" />
-                        <span className="text-sm font-medium flex-1 text-left">
-                          My Wishlist
-                        </span>
-                        {wishlistTotalItems > 0 && (
-                          <span
-                            className={`inline-flex min-w-[20px] h-5 items-center justify-center rounded-full bg-rose-100 text-rose-600 text-[10px] font-semibold px-1.5 ${
-                              isWishlistBadgePulsing ? "cart-badge-pulse" : ""
-                            }`}
-                          >
-                            {wishlistBadgeLabel}
-                          </span>
-                        )}
-                        <ChevronRight className="w-4 h-4 text-gray-400 opacity-50" />
-                      </button>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-2.5 mb-6">
@@ -812,83 +837,116 @@ export function Navigation() {
 
               {/* ── Navigation section ── */}
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400 px-1 mb-2">
-                Navigation
+                Quick Links
               </p>
-              <div className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm mb-5">
-                {navLinks.map((link, index) => {
-                  const Icon = link.icon;
-                  const active = isActive(link.path);
-                  return (
-                    <div key={link.path}>
-                      <Link
-                        to={link.path}
-                        onClick={() => setIsMobileMenuOpen(false)}
-                        className={`flex items-center gap-3.5 py-3.5 px-4 border-l-[3px] ${
-                          active
-                            ? "bg-green-50/60 text-[#14532D] border-[#22C55E]"
-                            : "text-[#334155] border-transparent active:bg-gray-50"
+              <div className="grid grid-cols-2 gap-1.5 mb-3.5">
+                {mobileQuickLinks.map((item) => {
+                  const Icon = item.icon;
+                  const active = item.path ? isActive(item.path) : false;
+                  const theme =
+                    quickLinkThemeClasses[item.theme] || quickLinkThemeClasses.shop;
+
+                  const innerContent = (
+                    <>
+                      <div
+                        className={`inline-flex h-7 w-7 xs:h-8 xs:w-8 items-center justify-center rounded-lg ${
+                          active ? theme.iconActive : theme.iconIdle
                         }`}
                       >
-                        <Icon
-                          className={`w-[18px] h-[18px] flex-shrink-0 ${
-                            active ? "text-[#166534]" : "text-gray-400"
-                          }`}
-                        />
-                        <span
-                          className={`flex-1 text-sm font-medium ${active ? "text-[#14532D]" : ""}`}
-                        >
-                          {link.label}
-                        </span>
-                        <ChevronRight
-                          className={`w-4 h-4 flex-shrink-0 opacity-50 ${
-                            active ? "text-[#22C55E]" : "text-gray-400"
-                          }`}
-                        />
+                        <Icon className="h-3.5 w-3.5 xs:h-4 xs:w-4" />
+                      </div>
+                      <span
+                        className={`mt-1.5 text-[13px] xs:text-sm font-semibold leading-snug ${
+                          active ? theme.textActive : "text-[#334155]"
+                        }`}
+                      >
+                        {item.label}
+                      </span>
+                      <div className="mt-1.5 flex items-center justify-end">
+                        {item.badge ? (
+                          <span className="inline-flex min-w-[20px] h-5 items-center justify-center rounded-full bg-rose-100 text-rose-600 text-[10px] font-semibold px-1.5">
+                            {item.badge}
+                          </span>
+                        ) : (
+                          <ChevronRight
+                            className={`h-3.5 w-3.5 xs:h-4 xs:w-4 ${
+                              active ? theme.chevronActive : "text-gray-400"
+                            }`}
+                          />
+                        )}
+                      </div>
+                    </>
+                  );
+
+                  if (item.path) {
+                    return (
+                      <Link
+                        key={item.key}
+                        to={item.path}
+                        onClick={() => setIsMobileMenuOpen(false)}
+                        className={`flex min-h-[88px] xs:min-h-[96px] flex-col justify-between rounded-xl border px-2.5 py-2 xs:px-3 xs:py-2.5 shadow-sm active:scale-[0.98] transition-all duration-200 ${
+                          active ? theme.cardActive : theme.cardIdle
+                        }`}
+                      >
+                        {innerContent}
                       </Link>
-                      {index < navLinks.length - 1 && (
-                        <div className="h-px bg-gray-100 mx-4" />
-                      )}
-                    </div>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={item.onClick}
+                      className={`flex min-h-[88px] xs:min-h-[96px] flex-col justify-between rounded-xl border px-2.5 py-2 xs:px-3 xs:py-2.5 text-left shadow-sm active:scale-[0.98] transition-all duration-200 ${theme.cardIdle}`}
+                    >
+                      {innerContent}
+                    </button>
                   );
                 })}
               </div>
 
-              {/* ── Quick Categories ── */}
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400 px-1 mb-2">
-                Shop by Category
-              </p>
-              <div className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm mb-6">
-                {[
-                  { label: "Herbal Oils", path: "/shop?category=herbal-oils" },
-                  {
-                    label: "Organic Powders",
-                    path: "/shop?category=organic-powders",
-                  },
-                  { label: "Herbal Tea", path: "/shop?category=herbal-tea" },
-                  { label: "Supplements", path: "/shop?category=supplements" },
-                ].map((cat, index, arr) => (
-                  <div key={cat.label}>
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400 mb-2">
+                  Support
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {mobileSupportLinks.map((item) => {
+                    const Icon = item.icon;
+                    return (
                     <Link
-                      to={cat.path}
+                      key={item.key}
+                      to={item.path}
                       onClick={() => setIsMobileMenuOpen(false)}
-                      className="flex items-center gap-3.5 py-3.5 px-4 text-gray-700 active:bg-gray-50 border-l-[3px] border-transparent"
+                      className="inline-flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50/60 px-2.5 py-2 text-xs font-semibold text-gray-700 active:bg-blue-100/60"
                     >
-                      <Leaf className="w-[18px] h-[18px] flex-shrink-0 text-green-400" />
-                      <span className="flex-1 text-sm font-medium">
-                        {cat.label}
-                      </span>
-                      <ChevronRight className="w-4 h-4 text-gray-400 opacity-50 flex-shrink-0" />
+                      <div className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-blue-100 text-blue-600 mr-1">
+                        <Icon className="h-3 w-3" />
+                      </div>
+                      <span className="flex-1">{item.label}</span>
+                      <ChevronRight className="h-3.5 w-3.5 text-blue-400" />
                     </Link>
-                    {index < arr.length - 1 && (
-                      <div className="h-px bg-gray-100 mx-4" />
-                    )}
-                  </div>
-                ))}
+                    );
+                  })}
+                </div>
               </div>
+
+              {totalItems > 0 && (
+                <Link
+                  to="/checkout"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="mb-4 inline-flex w-full items-center justify-between rounded-2xl border border-green-200 bg-gradient-to-r from-green-600 to-emerald-600 px-4 py-3 text-white shadow-md"
+                >
+                  <span className="text-sm font-semibold">Proceed to Checkout</span>
+                  <span className="inline-flex min-w-[22px] h-[22px] items-center justify-center rounded-full bg-white/20 px-1.5 text-[11px] font-bold">
+                    {totalItems}
+                  </span>
+                </Link>
+              )}
 
               {/* ── Logout ── */}
               {user && (
-                <div className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
+                <div className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm mb-1">
                   <button
                     onClick={() => {
                       handleLogout();
@@ -905,7 +963,7 @@ export function Navigation() {
               )}
 
               {/* bottom breathing room */}
-              <div className="h-8" />
+              <div className="h-5" />
             </div>
           </div>
         </div>

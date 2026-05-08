@@ -245,19 +245,19 @@ export function AdminOrders() {
         </section>
 
         <div className="hidden grid-cols-2 gap-4 md:grid lg:grid-cols-4">
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Total Orders</p>
             <p className="mt-2 text-2xl font-bold text-gray-900">{orderStats.total}</p>
           </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Pending</p>
             <p className="mt-2 text-2xl font-bold text-amber-700">{orderStats.pending}</p>
           </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Shipped</p>
             <p className="mt-2 text-2xl font-bold text-indigo-700">{orderStats.shipped}</p>
           </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Delivered</p>
             <p className="mt-2 text-2xl font-bold text-emerald-700">{orderStats.delivered}</p>
           </div>

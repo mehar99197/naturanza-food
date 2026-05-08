@@ -78,64 +78,6 @@ const ORDER_THEME = {
   },
 };
 
-const sampleRecentOrders = [
-  {
-    id: 9012,
-    customer_name: "Ayesha Khan",
-    customer_email: "ayesha@example.com",
-    total_amount: 128.5,
-    status: "processing",
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 9011,
-    customer_name: "Bilal Ahmed",
-    customer_email: "bilal@example.com",
-    total_amount: 88.0,
-    status: "pending",
-    created_at: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    id: 9010,
-    customer_name: "Sara Ali",
-    customer_email: "sara@example.com",
-    total_amount: 156.3,
-    status: "shipped",
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-  },
-  {
-    id: 9009,
-    customer_name: "Usman Tariq",
-    customer_email: "usman@example.com",
-    total_amount: 63.45,
-    status: "delivered",
-    created_at: new Date(Date.now() - 14400000).toISOString(),
-  },
-];
-
-const sampleTopProducts = [
-  { id: 1, name: "Organic Moringa Powder", total_sold: 96, total_revenue: 1864 },
-  { id: 2, name: "Immunity Herbal Tea", total_sold: 78, total_revenue: 1510 },
-  { id: 3, name: "Turmeric Wellness Blend", total_sold: 70, total_revenue: 1262 },
-  { id: 4, name: "Ashwagandha Capsules", total_sold: 64, total_revenue: 1188 },
-  { id: 5, name: "Pure Neem Extract", total_sold: 53, total_revenue: 942 },
-];
-
-const createSampleSalesRows = () => {
-  const values = [1240, 1480, 1325, 1690, 1820, 1765, 1950];
-  const orders = [18, 22, 20, 26, 28, 27, 31];
-
-  return values.map((revenue, index) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (6 - index));
-
-    return {
-      date: date.toISOString(),
-      revenue,
-      orders: orders[index],
-    };
-  });
-};
 
 const toStatusKey = (status) => {
   const key = String(status || "pending").toLowerCase();
@@ -250,7 +192,7 @@ export function AdminDashboard() {
 
   const salesRows = useMemo(() => {
     if (!salesReport.length) {
-      return createSampleSalesRows();
+      return [];
     }
 
     return [...salesReport].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -360,22 +302,10 @@ export function AdminDashboard() {
       returned: Number(statsData.totalReturns || 0),
     };
 
-    const hasLiveData = Object.values(liveValues).some((value) => value > 0);
-    const fallbackValues = {
-      pending: 8,
-      processing: 14,
-      shipped: 10,
-      delivered: 36,
-      cancelled: 3,
-      returned: 2,
-    };
-
-    const source = hasLiveData ? liveValues : fallbackValues;
-
     return Object.entries(ORDER_THEME).map(([key, config]) => ({
       key,
       label: config.label,
-      value: source[key],
+      value: liveValues[key],
       icon: config.icon,
       surface: config.surface,
       color: config.color,
@@ -393,12 +323,12 @@ export function AdminDashboard() {
   );
 
   const displayedOrders = useMemo(
-    () => (recentOrders.length ? recentOrders.slice(0, 6) : sampleRecentOrders),
+    () => (recentOrders.length ? recentOrders.slice(0, 6) : []),
     [recentOrders],
   );
 
   const topProducts = useMemo(
-    () => (productSales.length ? productSales.slice(0, 5) : sampleTopProducts),
+    () => (productSales.length ? productSales.slice(0, 5) : []),
     [productSales],
   );
 

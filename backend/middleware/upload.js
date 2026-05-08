@@ -76,10 +76,12 @@ const uploadAndCompress = (fieldName, folder = 'products', options = {}) => {
         upload.single(fieldName)(req, res, async (err) => {
             if (err) {
                 if (err instanceof multer.MulterError) {
+                    console.error('Multer error:', err);
                     return res.status(400).json({ 
                         error: `Upload error: ${err.message}` 
                     });
                 }
+                console.error('Upload error:', err);
                 return res.status(400).json({ 
                     error: err.message 
                 });
@@ -120,7 +122,7 @@ const uploadAndCompress = (fieldName, folder = 'products', options = {}) => {
                 next();
             } catch (error) {
                 console.error('Image compression error:', error);
-                res.status(500).json({ 
+                return res.status(500).json({ 
                     error: `Failed to process image: ${error.message}` 
                 });
             }

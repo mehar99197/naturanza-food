@@ -92,7 +92,7 @@ export function FeaturedProducts() {
  ) : (
  <div 
  ref={trackRef}
- className="flex flex-nowrap overflow-x-auto gap-3 xs:gap-4 sm:gap-5 md:grid md:grid-cols-2 lg:grid-cols-4 md:gap-5 lg:gap-6 px-0 py-1.5 sm:py-2 md:py-1 mb-10 sm:mb-12 md:mb-14 lg:mb-16 scrollbar-hide snap-x snap-mandatory scroll-smooth md:overflow-visible md:snap-none"
+ className="flex flex-nowrap overflow-x-auto gap-0 md:grid md:grid-cols-2 lg:grid-cols-4 md:gap-5 lg:gap-6 px-0 py-1.5 sm:py-2 md:py-1 mb-10 sm:mb-12 md:mb-14 lg:mb-16 scrollbar-hide snap-x snap-mandatory scroll-smooth md:overflow-visible md:snap-none"
  style={{
  scrollbarWidth: 'none',
  msOverflowStyle: 'none',
@@ -102,7 +102,7 @@ export function FeaturedProducts() {
  {featuredProducts.map((product, index) => (
  <div
  key={product.id}
- className="featured-mobile-card snap-center flex-shrink-0 py-1 w-[86vw] min-w-[86vw] xs:w-[72vw] xs:min-w-[72vw] sm:w-[52vw] sm:min-w-[52vw] md:w-full md:min-w-0 rounded-2xl animate-fade-in-up opacity-0 [animation-fill-mode:forwards]"
+ className="featured-mobile-card snap-center flex-shrink-0 py-1 w-full min-w-full md:w-auto md:min-w-0 rounded-2xl animate-fade-in-up opacity-0 [animation-fill-mode:forwards]"
  style={{ animationDelay: `${index * 80}ms` }}
  >
  <ProductCard product={product} viewMode="grid" />

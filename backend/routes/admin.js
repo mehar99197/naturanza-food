@@ -1,12 +1,20 @@
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
+const { db } = require("../config/db");
+const chatPool = require("../db/connection");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const { issueAccessToken, verifyAccessToken, toExpiryDate } = require("../utils/jwtTokens");
+const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/tokenStore");
+const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
+const { syncDefaultAdminPassword } = require("../utils/envSync");
 const {
   createUserSession,
   revokeSessionByToken,
+  revokeSessionsByUserId,
 } = require("../utils/sessionManager");
+
+const { toNullableString, toBoolean } = require("../utils/helpers");
 
 const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
   process.env.IP_LOOKUP_TIMEOUT_MS || "2000",
@@ -14,6 +22,48 @@ const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
 );
 const LOCATION_CACHE_TTL_MS = 1000 * 60 * 60 * 6;
 const adminLoginLocationCache = new Map();
+const LOGIN_MAX_ATTEMPTS =
+  Number.parseInt(process.env.LOGIN_MAX_ATTEMPTS || "5", 10) || 5;
+const LOGIN_LOCK_MINUTES =
+  Number.parseInt(process.env.LOGIN_LOCK_MINUTES || "15", 10) || 15;
+
+const isAccountLocked = (userRecord) => {
+  const lockUntil = userRecord?.locked_until
+    ? new Date(userRecord.locked_until)
+    : null;
+
+  if (!lockUntil || Number.isNaN(lockUntil.getTime())) {
+    return false;
+  }
+
+  return lockUntil > new Date();
+};
+
+const markFailedLoginAttempt = async (userRecord) => {
+  const currentAttempts = Number(userRecord?.failed_login_attempts || 0);
+  const nextAttempt = currentAttempts + 1;
+  const shouldLock = nextAttempt >= LOGIN_MAX_ATTEMPTS;
+
+  await db
+    .promise()
+    .query(
+      "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
+      [
+        shouldLock ? 0 : nextAttempt,
+        shouldLock ? new Date(Date.now() + LOGIN_LOCK_MINUTES * 60 * 1000) : null,
+        userRecord.id,
+      ],
+    );
+};
+
+const resetLoginFailures = async (userId) => {
+  await db
+    .promise()
+    .query(
+      "UPDATE users SET failed_login_attempts = 0, locked_until = NULL, last_login = NOW() WHERE id = ?",
+      [userId],
+    );
+};
 
 const normalizeIpAddress = (rawIp) => {
   let value = String(rawIp || "").trim();
@@ -299,130 +349,134 @@ router.post("/login", async (req, res) => {
     }
 
     // Find user and verify they are an admin
-    db.query(
+    const [results] = await db.promise().query(
       "SELECT * FROM users WHERE email = ?",
       [normalizedEmail],
-      async (err, results) => {
-        if (err) {
-          void recordAdminLoginHistorySafely({
-            req,
-            attemptedEmail: normalizedEmail,
-            status: "failed",
-            failureReason: "Database error",
-          });
-
-          return res.status(500).json({
-            success: false,
-            error: "Database error",
-          });
-        }
-
-        if (results.length === 0) {
-          void recordAdminLoginHistorySafely({
-            req,
-            attemptedEmail: normalizedEmail,
-            status: "failed",
-            failureReason: "Email not found",
-          });
-
-          return res.status(401).json({
-            success: false,
-            error: "Invalid email or password",
-          });
-        }
-
-        const user = results[0];
-
-        if (!user.is_active) {
-          void recordAdminLoginHistorySafely({
-            req,
-            userId: user.id,
-            attemptedEmail: user.email,
-            status: "failed",
-            failureReason: "Account disabled",
-          });
-
-          return res.status(403).json({
-            success: false,
-            error: "Account is disabled. Contact super admin.",
-          });
-        }
-
-        // Check if user is admin
-        if (user.role !== "admin") {
-          void recordAdminLoginHistorySafely({
-            req,
-            userId: user.id,
-            attemptedEmail: user.email,
-            status: "failed",
-            failureReason: "Not an admin",
-          });
-
-          return res.status(403).json({
-            success: false,
-            error: "Access denied. Admin privileges required.",
-          });
-        }
-
-        // Compare password
-        const isValidPassword = await bcrypt.compare(password, user.password);
-        if (!isValidPassword) {
-          void recordAdminLoginHistorySafely({
-            req,
-            userId: user.id,
-            attemptedEmail: user.email,
-            status: "failed",
-            failureReason: "Invalid password",
-          });
-
-          return res.status(401).json({
-            success: false,
-            error: "Invalid email or password",
-          });
-        }
-
-        // Generate JWT token
-        const token = jwt.sign(
-          { id: user.id, email: user.email, role: user.role },
-          process.env.JWT_SECRET,
-          { expiresIn: "24h" },
-        );
-
-        try {
-          await createUserSession(db.promise(), {
-            userId: user.id,
-            token,
-            provider: "admin-password",
-            ipAddress: getRequestIp(req),
-            userAgent: req.headers["user-agent"] || null,
-          });
-        } catch (sessionError) {
-          console.warn(
-            "Could not persist admin session:",
-            sessionError.message,
-          );
-        }
-
-        void recordAdminLoginHistorySafely({
-          req,
-          userId: user.id,
-          attemptedEmail: user.email,
-          status: "success",
-        });
-
-        res.json({
-          success: true,
-          message: "Admin login successful",
-          token,
-          admin: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-          },
-        });
-      },
     );
+
+    if (results.length === 0) {
+      void recordAdminLoginHistorySafely({
+        req,
+        attemptedEmail: normalizedEmail,
+        status: "failed",
+        failureReason: "Email not found",
+      });
+
+      return res.status(401).json({
+        success: false,
+        error: "Invalid email or password",
+      });
+    }
+
+    const user = results[0];
+
+    if (!user.is_active) {
+      void recordAdminLoginHistorySafely({
+        req,
+        userId: user.id,
+        attemptedEmail: user.email,
+        status: "failed",
+        failureReason: "Account disabled",
+      });
+
+      return res.status(403).json({
+        success: false,
+        error: "Account is disabled. Contact super admin.",
+      });
+    }
+
+    if (isAccountLocked(user)) {
+      return res.status(423).json({
+        success: false,
+        error: "Account temporarily locked due to multiple failed attempts.",
+      });
+    }
+
+    // Check if user is admin
+    if (user.role !== "admin") {
+      void recordAdminLoginHistorySafely({
+        req,
+        userId: user.id,
+        attemptedEmail: user.email,
+        status: "failed",
+        failureReason: "Not an admin",
+      });
+
+      return res.status(403).json({
+        success: false,
+        error: "Access denied. Admin privileges required.",
+      });
+    }
+
+    // Compare password
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    if (!isValidPassword) {
+      await markFailedLoginAttempt(user);
+      void recordAdminLoginHistorySafely({
+        req,
+        userId: user.id,
+        attemptedEmail: user.email,
+        status: "failed",
+        failureReason: "Invalid password",
+      });
+
+      return res.status(401).json({
+        success: false,
+        error: "Invalid email or password",
+      });
+    }
+
+    await resetLoginFailures(user.id);
+
+    const accessToken = issueAccessToken(user);
+    const token = accessToken.token;
+
+    try {
+      await createUserSession(db.promise(), {
+        userId: user.id,
+        token,
+        provider: "admin-password",
+        ipAddress: getRequestIp(req),
+        userAgent: req.headers["user-agent"] || null,
+      });
+    } catch (sessionError) {
+      console.warn(
+        "Could not persist admin session:",
+        sessionError.message,
+      );
+    }
+
+    void recordAdminLoginHistorySafely({
+      req,
+      userId: user.id,
+      attemptedEmail: user.email,
+      status: "success",
+    });
+
+    // Parse admin_permissions
+    let adminPermissions = user.admin_permissions;
+    if (typeof adminPermissions === 'string') {
+      try {
+        adminPermissions = JSON.parse(adminPermissions);
+      } catch (e) {
+        adminPermissions = null;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "Admin login successful",
+      token,
+      accessTokenExpiresIn: accessToken.expiresInSeconds,
+      admin: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        admin_role: user.admin_role || 'super_admin',
+        admin_permissions: adminPermissions,
+      },
+    });
   } catch (error) {
     console.error("Admin login error:", error);
     void recordAdminLoginHistorySafely({
@@ -447,8 +501,11 @@ router.get("/verify", authenticateToken, isAdmin, (req, res) => {
     success: true,
     admin: {
       id: req.user.id,
+      name: req.user.name,
       email: req.user.email,
       role: req.user.role,
+      admin_role: req.user.admin_role || 'super_admin',
+      admin_permissions: req.user.admin_permissions,
     },
   });
 });
@@ -469,9 +526,391 @@ router.post("/logout", authenticateToken, isAdmin, (req, res) => {
     return;
   }
 
-  revokeSessionByToken(db.promise(), token)
+  Promise.resolve()
+    .then(async () => {
+      try {
+        const payload = verifyAccessToken(token);
+        const expiryDate = toExpiryDate(payload);
+        await blacklistAccessToken(db.promise(), {
+          jti: payload.jti,
+          userId: Number(payload.sub || 0) || null,
+          token,
+          expiresAt: expiryDate,
+          reason: "admin_logout",
+        });
+      } catch (error) {
+        // Token may already be expired.
+      }
+
+      await revokeSessionByToken(db.promise(), token);
+    })
     .then(finalizeLogout)
     .catch(() => finalizeLogout());
+});
+
+// ============================================
+// ADMIN FORGOT PASSWORD ENDPOINTS (No auth required)
+// ============================================
+
+const { sendEmail, sendPasswordResetEmail } = require("../utils/emailService");
+const {
+  createPasswordResetToken,
+  validatePasswordResetToken,
+  markTokenAsUsed,
+  invalidateAllUserTokens,
+} = require("../utils/passwordResetTokens");
+
+// Admin Forgot Password - Send reset link
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const defaultAdminEmail = String(process.env.DEFAULT_ADMIN_EMAIL || "")
+      .trim()
+      .toLowerCase();
+
+    if (!normalizedEmail) {
+      return res.status(400).json({
+        success: false,
+        error: "Email is required",
+      });
+    }
+
+    if (!defaultAdminEmail) {
+      return res.status(500).json({
+        success: false,
+        error: "Default admin email is not configured.",
+      });
+    }
+
+    if (normalizedEmail !== defaultAdminEmail) {
+      return res.status(400).json({
+        success: false,
+        error: "Only the super admin email can request a password reset link.",
+      });
+    }
+
+    // Check if admin exists
+    const [users] = await db.promise().query(
+      "SELECT id, name, email, role, admin_role FROM users WHERE email = ? LIMIT 1",
+      [normalizedEmail]
+    );
+
+    if (
+      users.length === 0 ||
+      users[0].role !== "admin" ||
+      users[0].admin_role !== "super_admin"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Only the super admin email can request a password reset link.",
+      });
+    }
+
+    const admin = users[0];
+
+    // Generate password reset token
+    const tokenData = await createPasswordResetToken(db.promise(), admin.id, admin.email);
+
+    if (!tokenData || !tokenData.token) {
+      console.error("Failed to generate password reset token for admin:", admin.email);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to generate password reset link. Please try again.",
+      });
+    }
+
+    // Send password reset email
+    const emailResult = await sendPasswordResetEmail(admin.email, admin.name, tokenData.token, true);
+
+    if (!emailResult.success) {
+      console.error("Failed to send admin password reset email:", emailResult.error);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to send password reset email. Please try again later.",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Password reset link sent to the super admin email.",
+    });
+  } catch (error) {
+    console.error("Admin forgot password error:", error);
+    res.status(500).json({
+      success: false,
+      error: "An error occurred. Please try again later.",
+    });
+  }
+});
+
+// Admin Reset Password - Verify token and update password
+router.post("/reset-password", async (req, res) => {
+  try {
+    const { token, password, confirmPassword } = req.body;
+    const defaultAdminEmail = String(process.env.DEFAULT_ADMIN_EMAIL || "")
+      .trim()
+      .toLowerCase();
+
+    // Validation
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: "Reset token is required",
+      });
+    }
+
+    if (!password || password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: "Password must be at least 8 characters long",
+      });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        error: "Passwords do not match",
+      });
+    }
+
+    // Validate the token
+    const tokenValidation = await validatePasswordResetToken(db.promise(), token);
+
+    if (!tokenValidation) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid or expired reset link. Please request a new password reset.",
+      });
+    }
+
+    if (!tokenValidation.valid) {
+      return res.status(400).json({
+        success: false,
+        error:
+          tokenValidation.reason ||
+          "Invalid or expired reset link. Please request a new password reset.",
+      });
+    }
+
+    // Verify the user is an admin
+    const [users] = await db.promise().query(
+      "SELECT id, role, email, admin_role, password FROM users WHERE id = ?",
+      [tokenValidation.userId]
+    );
+
+    if (
+      !defaultAdminEmail ||
+      users.length === 0 ||
+      users[0].role !== "admin" ||
+      users[0].admin_role !== "super_admin" ||
+      String(users[0].email || "").trim().toLowerCase() !== defaultAdminEmail
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid reset link. Please request a new password reset.",
+      });
+    }
+
+    if (users[0].password) {
+      const isSamePassword = await bcrypt.compare(password, users[0].password);
+      if (isSamePassword) {
+        return res.status(400).json({
+          success: false,
+          error: "New password must be different from your current password.",
+        });
+      }
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Update password
+    await db.promise().query(
+      "UPDATE users SET password = ?, updated_at = NOW() WHERE id = ?",
+      [hashedPassword, tokenValidation.userId]
+    );
+
+    try {
+      await syncDefaultAdminPassword(users[0]?.email, password);
+    } catch (envError) {
+      console.warn("Failed to sync DEFAULT_ADMIN_PASSWORD:", envError.message);
+    }
+
+    // Invalidate the token
+    await markTokenAsUsed(db.promise(), tokenValidation.tokenId);
+    await invalidateAllUserTokens(db.promise(), tokenValidation.userId);
+    await revokeSessionsByUserId(db.promise(), tokenValidation.userId);
+    await revokeRefreshTokensByUserId(
+      db.promise(),
+      tokenValidation.userId,
+      "password_reset",
+    );
+
+    res.json({
+      success: true,
+      message: "Password reset successfully. You can now log in with your new password.",
+    });
+  } catch (error) {
+    console.error("Admin reset password error:", error);
+    res.status(500).json({
+      success: false,
+      error: "An error occurred. Please try again later.",
+    });
+  }
+});
+
+const requireAdminKey = (req, res, next) => {
+  const expectedKey = String(process.env.ADMIN_API_KEY || "").trim();
+  const providedKey = String(req.headers["x-admin-key"] || "").trim();
+
+  if (!expectedKey || !providedKey || providedKey !== expectedKey) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized",
+    });
+  }
+
+  return next();
+};
+
+router.use("/chats", requireAdminKey);
+router.use("/stats", requireAdminKey);
+
+router.get("/chats", async (req, res) => {
+  try {
+    const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(
+      Math.max(Number.parseInt(req.query.limit, 10) || 20, 1),
+      100,
+    );
+    const offset = (page - 1) * limit;
+
+    const [[countRow]] = await chatPool.query(
+      "SELECT COUNT(*) AS total FROM chat_sessions",
+    );
+
+    const [rows] = await chatPool.query(
+      `SELECT s.id, s.ip_address, s.user_agent, s.created_at, s.updated_at,
+              COUNT(m.id) AS message_count
+       FROM chat_sessions s
+       LEFT JOIN chat_messages m ON m.session_id = s.id
+       GROUP BY s.id
+       ORDER BY s.updated_at DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset],
+    );
+
+    res.json({
+      success: true,
+      page,
+      limit,
+      total: Number(countRow?.total || 0),
+      sessions: rows.map((session) => ({
+        id: session.id,
+        ip_address: session.ip_address,
+        user_agent: session.user_agent,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        message_count: Number(session.message_count || 0),
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: "Database error" });
+  }
+});
+
+router.get("/chats/:sessionId", async (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || "").trim();
+
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Session id is required",
+      });
+    }
+
+    const [rows] = await chatPool.query(
+      `SELECT id, role, content, created_at
+       FROM chat_messages
+       WHERE session_id = ?
+       ORDER BY created_at ASC`,
+      [sessionId],
+    );
+
+    res.json({
+      success: true,
+      sessionId,
+      messages: rows.map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        timestamp: message.created_at,
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: "Database error" });
+  }
+});
+
+router.delete("/chats/:sessionId", async (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || "").trim();
+
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Session id is required",
+      });
+    }
+
+    await chatPool.query("DELETE FROM chat_messages WHERE session_id = ?", [
+      sessionId,
+    ]);
+    const [result] = await chatPool.query(
+      "DELETE FROM chat_sessions WHERE id = ?",
+      [sessionId],
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Session not found",
+      });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: "Database error" });
+  }
+});
+
+router.get("/stats", async (req, res) => {
+  try {
+    const [[totalSessionsRow]] = await chatPool.query(
+      "SELECT COUNT(*) AS total FROM chat_sessions",
+    );
+    const [[totalMessagesRow]] = await chatPool.query(
+      "SELECT COUNT(*) AS total FROM chat_messages",
+    );
+    const [[todaySessionsRow]] = await chatPool.query(
+      "SELECT COUNT(*) AS total FROM chat_sessions WHERE created_at >= CURDATE()",
+    );
+    const [[todayMessagesRow]] = await chatPool.query(
+      "SELECT COUNT(*) AS total FROM chat_messages WHERE created_at >= CURDATE()",
+    );
+
+    res.json({
+      success: true,
+      total_sessions: Number(totalSessionsRow?.total || 0),
+      total_messages: Number(totalMessagesRow?.total || 0),
+      today_sessions: Number(todaySessionsRow?.total || 0),
+      today_messages: Number(todayMessagesRow?.total || 0),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: "Database error" });
+  }
 });
 
 // All other admin routes require authentication and admin role
@@ -556,78 +995,126 @@ router.get("/dashboard/stats", async (req, res) => {
 });
 
 // Recent orders
-router.get("/dashboard/recent-orders", (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
-  const query = `
-        SELECT o.*, u.name as customer_name, u.email as customer_email
-        FROM orders o
-        JOIN users u ON o.user_id = u.id
-        ORDER BY o.created_at DESC
-        LIMIT ?
+router.get("/dashboard/recent-orders", async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+    const [results] = await db.promise().query(`
+      SELECT o.*, u.name as customer_name, u.email as customer_email
+      FROM orders o
+      JOIN users u ON o.user_id = u.id
+      ORDER BY o.created_at DESC
+      LIMIT ?
+    `, [limit]);
+    res.json(results);
+  } catch (error) {
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+// Admin settings
+router.get("/settings", async (req, res) => {
+  try {
+    const settings = await getAdminSettings(db.promise());
+    res.json(settings);
+  } catch (error) {
+    res.status(500).json({ error: "Could not load settings" });
+  }
+});
+
+router.put("/settings", async (req, res) => {
+  try {
+    const settings = await updateAdminSettings(db.promise(), req.body || {});
+    res.json(settings);
+  } catch (error) {
+    res.status(500).json({ error: "Could not update settings" });
+  }
+});
+
+router.post("/settings/test-email", async (req, res) => {
+  try {
+    const settings = await getAdminSettings(db.promise());
+    const targetEmail = String(req.body?.email || settings.storeEmail || "").trim();
+
+    if (!targetEmail) {
+      return res.status(400).json({ error: "Email address is required" });
+    }
+
+    const subject = "Naturanza Admin Test Email";
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #1f2937;">
+        <h2 style="margin: 0 0 8px; color: #0f172a;">Test Email Successful</h2>
+        <p style="margin: 0 0 12px;">This is a test email from your Naturanza admin settings.</p>
+        <p style="margin: 0; font-size: 12px; color: #6b7280;">Sent to ${targetEmail}</p>
+      </div>
     `;
 
-  db.query(query, [limit], (err, results) => {
-    if (err) {
-      return res.status(500).json({ error: "Database error" });
+    const result = await sendEmail({
+      to: targetEmail,
+      subject,
+      html,
+    });
+
+    if (!result?.success) {
+      return res.status(500).json({ error: result?.error || "Failed to send email" });
     }
-    res.json(results);
-  });
+
+    res.json({ message: "Test email sent", messageId: result.messageId || null });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to send test email" });
+  }
 });
 
 // Sales report
-router.get("/reports/sales", (req, res) => {
-  const { start_date, end_date } = req.query;
-
-  let query = `
-        SELECT 
-            DATE(created_at) as date,
-            COUNT(*) as orders,
-            SUM(total_amount) as revenue,
-            AVG(total_amount) as average_order_value
-        FROM orders
-        WHERE status != 'cancelled'
+router.get("/reports/sales", async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    let query = `
+      SELECT 
+          DATE(created_at) as date,
+          COUNT(*) as orders,
+          SUM(total_amount) as revenue,
+          AVG(total_amount) as average_order_value
+      FROM orders
+      WHERE status != 'cancelled'
     `;
-  const params = [];
+    const params = [];
 
-  if (start_date && end_date) {
-    query += " AND created_at BETWEEN ? AND ?";
-    params.push(start_date, end_date);
-  }
-
-  query += " GROUP BY DATE(created_at) ORDER BY date DESC";
-
-  db.query(query, params, (err, results) => {
-    if (err) {
-      return res.status(500).json({ error: "Database error" });
+    if (start_date && end_date) {
+      query += " AND created_at BETWEEN ? AND ?";
+      params.push(start_date, end_date);
     }
+
+    query += " GROUP BY DATE(created_at) ORDER BY date DESC";
+
+    const [results] = await db.promise().query(query, params);
     res.json(results);
-  });
+  } catch (error) {
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
 // Product sales report
-router.get("/reports/products", (req, res) => {
-  const query = `
-        SELECT 
-            p.id, 
-            p.name, 
-            p.price,
-            SUM(oi.quantity) as total_sold,
-            SUM(oi.subtotal) as total_revenue
-        FROM order_items oi
-        JOIN products p ON oi.product_id = p.id
-        JOIN orders o ON oi.order_id = o.id
-        WHERE o.status != 'cancelled'
-        GROUP BY p.id
-        ORDER BY total_sold DESC
-        LIMIT 20
-    `;
-
-  db.query(query, (err, results) => {
-    if (err) {
-      return res.status(500).json({ error: "Database error" });
-    }
+router.get("/reports/products", async (req, res) => {
+  try {
+    const [results] = await db.promise().query(`
+      SELECT 
+          p.id, 
+          p.name, 
+          p.price,
+          SUM(oi.quantity) as total_sold,
+          SUM(oi.subtotal) as total_revenue
+      FROM order_items oi
+      JOIN products p ON oi.product_id = p.id
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.status != 'cancelled'
+      GROUP BY p.id
+      ORDER BY total_sold DESC
+      LIMIT 20
+    `);
     res.json(results);
-  });
+  } catch (error) {
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
 // Reviews management
@@ -678,58 +1165,30 @@ router.get("/reviews", async (req, res) => {
   }
 });
 
-router.patch("/reviews/:id/approval", async (req, res) => {
+
+// DELETE review
+router.delete("/reviews/:id", async (req, res) => {
   try {
     const reviewId = Number(req.params.id);
     if (!Number.isInteger(reviewId)) {
       return res.status(400).json({ error: "Invalid review id" });
     }
 
-    const isApproved =
-      req.body?.is_approved === true ||
-      req.body?.is_approved === 1 ||
-      req.body?.is_approved === "1";
-
     const [result] = await db.promise().query(
-      "UPDATE reviews SET is_approved = ? WHERE id = ?",
-      [isApproved ? 1 : 0, reviewId],
+      "DELETE FROM reviews WHERE id = ?",
+      [reviewId],
     );
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "Review not found" });
     }
 
-    const [rows] = await db.promise().query(
-      `SELECT
-          r.id,
-          r.product_id,
-          r.user_id,
-          r.rating,
-          r.comment,
-          r.is_approved,
-          r.created_at,
-          p.name AS product_name,
-          u.name AS customer_name,
-          u.email AS customer_email
-       FROM reviews r
-       JOIN products p ON p.id = r.product_id
-       JOIN users u ON u.id = r.user_id
-       WHERE r.id = ?
-       LIMIT 1`,
-      [reviewId],
-    );
-
     res.json({
-      message: `Review ${isApproved ? "approved" : "unapproved"} successfully`,
-      review: rows[0]
-        ? {
-            ...rows[0],
-            is_approved: Boolean(rows[0].is_approved),
-          }
-        : null,
+      message: "Review deleted successfully",
     });
   } catch (error) {
-    res.status(500).json({ error: "Database error" });
+    console.error("Delete review error:", error);
+    res.status(500).json({ error: "Failed to delete review" });
   }
 });
 
@@ -788,7 +1247,7 @@ router.post("/users", async (req, res) => {
     const passwordToHash =
       toNullableString(password) ||
       `Temp@${Math.random().toString(36).slice(2, 10)}`;
-    const hashedPassword = await bcrypt.hash(passwordToHash, 10);
+    const hashedPassword = await bcrypt.hash(passwordToHash, 12);
 
     const [result] = await db.promise().query(
       `INSERT INTO users (name, email, password, phone, address, role, is_active)
@@ -933,43 +1392,40 @@ router.put("/users/:id/role", async (req, res) => {
 });
 
 // Delete user
-router.delete("/users/:id", (req, res) => {
-  // Prevent self-deletion
-  if (parseInt(req.params.id) === req.user.id) {
-    return res.status(400).json({ error: "Cannot delete your own account" });
-  }
-
-  db.query("DELETE FROM users WHERE id = ?", [req.params.id], (err, result) => {
-    if (err) {
-      return res.status(500).json({ error: "Error deleting user" });
+router.delete("/users/:id", async (req, res) => {
+  try {
+    // Prevent self-deletion
+    if (parseInt(req.params.id) === req.user.id) {
+      return res.status(400).json({ error: "Cannot delete your own account" });
     }
+
+    const [result] = await db.promise().query("DELETE FROM users WHERE id = ?", [req.params.id]);
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "User not found" });
     }
 
     res.json({ message: "User deleted successfully" });
-  });
+  } catch (error) {
+    res.status(500).json({ error: "Error deleting user" });
+  }
 });
 
 // Low stock alert
-router.get("/inventory/low-stock", (req, res) => {
-  const threshold = req.query.threshold || 10;
-
-  const query = `
-        SELECT p.*, c.name as category_name
-        FROM products p
-        LEFT JOIN categories c ON p.category_id = c.id
-        WHERE p.stock_quantity < ?
-        ORDER BY p.stock_quantity ASC
-    `;
-
-  db.query(query, [threshold], (err, results) => {
-    if (err) {
-      return res.status(500).json({ error: "Database error" });
-    }
+router.get("/inventory/low-stock", async (req, res) => {
+  try {
+    const threshold = req.query.threshold || 10;
+    const [results] = await db.promise().query(`
+      SELECT p.*, c.name as category_name
+      FROM products p
+      LEFT JOIN categories c ON p.category_id = c.id
+      WHERE p.stock_quantity < ?
+      ORDER BY p.stock_quantity ASC
+    `, [threshold]);
     res.json(results);
-  });
+  } catch (error) {
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
 // Inventory movement history

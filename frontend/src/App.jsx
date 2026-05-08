@@ -4,6 +4,7 @@ import {
   Route,
   useLocation,
   Navigate,
+  Outlet,
 } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -23,6 +24,9 @@ import { Footer } from "@/components/Footer";
 import { CartDrawer } from "@/components/CartDrawer";
 import { Loader } from "@/components/Loader";
 import { WishlistToast } from "@/components/WishlistToast";
+import { AdminLayout } from "@/components/AdminLayout";
+import { CursorPollenTrail } from "@/components/CursorPollenTrail";
+import ChatWidget from "./components/ChatWidget";
 import ProfileLayout from "@/components/ProfileLayout";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminProtectedRoute from "@/components/AdminProtectedRoute";
@@ -42,6 +46,8 @@ import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
+import AdminForgotPassword from "@/pages/AdminForgotPassword";
+import AdminResetPassword from "@/pages/AdminResetPassword";
 import { AdminLogin } from "@/pages/AdminLogin";
 import { AdminDashboard } from "@/pages/AdminDashboard";
 import { AdminAnalytics } from "@/pages/AdminAnalytics";
@@ -71,19 +77,29 @@ import OAuthCallback from "@/pages/OAuthCallback";
 function ScrollToTop() {
   const { pathname } = useLocation();
   const prevPathnameRef = useRef(pathname);
+  const isAdminPath = pathname.startsWith("/admin");
 
   useEffect(() => {
-    // Only scroll to top if the pathname actually changed (not on initial load/reload)
+    // Skip forced window scroll for admin route switches; admin pages manage their own layout scroll.
     if (
+      !isAdminPath &&
       prevPathnameRef.current !== pathname &&
       prevPathnameRef.current !== undefined
     ) {
       window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
     }
     prevPathnameRef.current = pathname;
-  }, [pathname]);
+  }, [isAdminPath, pathname]);
 
   return null;
+}
+
+function AdminRouteShell() {
+  return (
+    <AdminLayout>
+      <Outlet />
+    </AdminLayout>
+  );
 }
 
 function AppContent() {
@@ -118,12 +134,13 @@ function AppContent() {
   return (
     <div className="min-h-screen flex flex-col site-glass-shell">
       <ScrollToTop />
+      <CursorPollenTrail />
       {showPublicChrome && <Navigation />}
       {showPublicChrome && <CartDrawer />}
       <WishlistToast />
       <main className={mainWrapperClass}>
-        <AnimatePresence mode="wait">
-          <Routes location={location} key={location.pathname}>
+        <AnimatePresence mode={isAdminRoute ? "sync" : "wait"} initial={false}>
+          <Routes location={location} key={isAdminRoute ? "/admin" : location.pathname}>
             {/* Public Routes */}
             <Route
               path="/"
@@ -199,154 +216,50 @@ function AppContent() {
 
             {/* Admin Routes */}
             <Route
-              path="/admin"
-              element={<Navigate to="/admin/login" replace />}
-            />
-            <Route
               path="/admin/login"
               element={<AdminLogin />}
             />
             <Route
-              path="/admin/dashboard"
-              element={
-                <AdminProtectedRoute>
-                  <AdminDashboard />
-                </AdminProtectedRoute>
-              }
+              path="/admin/forgot-password"
+              element={<AdminForgotPassword />}
             />
             <Route
-              path="/admin/analytics"
-              element={
-                <AdminProtectedRoute>
-                  <AdminAnalytics />
-                </AdminProtectedRoute>
-              }
+              path="/admin/reset-password"
+              element={<AdminResetPassword />}
             />
             <Route
-              path="/admin/products"
+              path="/admin"
               element={
                 <AdminProtectedRoute>
-                  <AdminProducts />
+                  <AdminRouteShell />
                 </AdminProtectedRoute>
               }
-            />
-            <Route
-              path="/admin/orders"
-              element={
-                <AdminProtectedRoute>
-                  <AdminOrders />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/customers"
-              element={
-                <AdminProtectedRoute>
-                  <AdminCustomers />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/payments"
-              element={
-                <AdminProtectedRoute>
-                  <AdminPayments />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/shipping"
-              element={
-                <AdminProtectedRoute>
-                  <AdminShipping />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/reviews"
-              element={
-                <AdminProtectedRoute>
-                  <AdminReviews />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/messages"
-              element={
-                <AdminProtectedRoute>
-                  <AdminMessages />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/notifications"
-              element={
-                <AdminProtectedRoute>
-                  <AdminNotifications />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/reports"
-              element={
-                <AdminProtectedRoute>
-                  <AdminReports />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/admins"
-              element={
-                <AdminProtectedRoute>
-                  <AdminAdmins />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/returns"
-              element={
-                <AdminProtectedRoute>
-                  <AdminReturns />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/operations"
-              element={
-                <AdminProtectedRoute>
-                  <AdminOperations />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/coupons"
-              element={
-                <AdminProtectedRoute>
-                  <AdminCoupons />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/categories"
-              element={
-                <AdminProtectedRoute>
-                  <AdminCategories />
-                </AdminProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/settings"
-              element={
-                <AdminProtectedRoute>
-                  <AdminSettings />
-                </AdminProtectedRoute>
-              }
-            />
+            >
+              <Route index element={<Navigate to="/admin/dashboard" replace />} />
+              <Route path="dashboard" element={<AdminDashboard />} />
+              <Route path="analytics" element={<AdminAnalytics />} />
+              <Route path="products" element={<AdminProducts />} />
+              <Route path="orders" element={<AdminOrders />} />
+              <Route path="customers" element={<AdminCustomers />} />
+              <Route path="payments" element={<AdminPayments />} />
+              <Route path="shipping" element={<AdminShipping />} />
+              <Route path="reviews" element={<AdminReviews />} />
+              <Route path="messages" element={<AdminMessages />} />
+              <Route path="notifications" element={<AdminNotifications />} />
+              <Route path="reports" element={<AdminReports />} />
+              <Route path="admins" element={<AdminAdmins />} />
+              <Route path="returns" element={<AdminReturns />} />
+              <Route path="operations" element={<AdminOperations />} />
+              <Route path="coupons" element={<AdminCoupons />} />
+              <Route path="categories" element={<AdminCategories />} />
+              <Route path="settings" element={<AdminSettings />} />
+            </Route>
           </Routes>
         </AnimatePresence>
       </main>
 
       {showFooter && <Footer variant={footerVariant} />}
+      {!isAdminRoute && <ChatWidget />}
     </div>
   );
 }

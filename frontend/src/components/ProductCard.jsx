@@ -9,6 +9,7 @@ import { formatPrice } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import { buttonTap } from '@/lib/animations';
 import { OptimizedImage } from '@/components/OptimizedImage';
+import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 
 const LOCAL_CARD_IMAGES = {
  honey: '/images/products/honey.webp',
@@ -23,9 +24,58 @@ const LOCAL_CARD_IMAGES = {
  default: '/images/products/powder.webp',
 };
 
+function normalizeImageSrc(value) {
+ const candidate = String(value || '').trim();
+ if (!candidate) {
+ return null;
+ }
+
+ // Use getAbsoluteImageUrl to convert relative URLs to absolute backend URLs
+ return getAbsoluteImageUrl(candidate);
+}
+
+function getProductImageFromPayload(product) {
+ const candidates = [];
+
+ if (typeof product?.image_url === 'string') {
+ candidates.push(product.image_url);
+ }
+
+ if (typeof product?.image === 'string') {
+ candidates.push(product.image);
+ }
+
+ if (Array.isArray(product?.images)) {
+ product.images.forEach((entry) => {
+ if (typeof entry === 'string') {
+ candidates.push(entry);
+ return;
+ }
+
+ if (entry && typeof entry === 'object') {
+ if (typeof entry.image_url === 'string') {
+ candidates.push(entry.image_url);
+ }
+ if (typeof entry.url === 'string') {
+ candidates.push(entry.url);
+ }
+ }
+ });
+ }
+
+ for (const candidate of candidates) {
+ const normalized = normalizeImageSrc(candidate);
+ if (normalized) {
+ return normalized;
+ }
+ }
+
+ return null;
+}
+
 function resolveCardImage(product) {
- const directImage = product?.image;
- if (typeof directImage === 'string' && directImage.startsWith('/images/products/')) {
+ const directImage = getProductImageFromPayload(product);
+ if (directImage) {
  return directImage;
  }
 
@@ -33,12 +83,12 @@ function resolveCardImage(product) {
 
  if (text.includes('honey')) return LOCAL_CARD_IMAGES.honey;
  if (text.includes('tea') || text.includes('chai')) return LOCAL_CARD_IMAGES.tea;
+ if (text.includes('coconut')) return LOCAL_CARD_IMAGES.coconut;
  if (text.includes('oil')) return LOCAL_CARD_IMAGES.oil;
  if (text.includes('powder') || text.includes('superfood') || text.includes('greens')) return LOCAL_CARD_IMAGES.powder;
  if (text.includes('seed')) return LOCAL_CARD_IMAGES.seeds;
  if (text.includes('supplement') || text.includes('capsule') || text.includes('curcumin') || text.includes('probiotic')) return LOCAL_CARD_IMAGES.supplements;
  if (text.includes('aloe')) return LOCAL_CARD_IMAGES.aloe;
- if (text.includes('coconut')) return LOCAL_CARD_IMAGES.coconut;
  if (text.includes('herb')) return LOCAL_CARD_IMAGES.herbs;
 
  return LOCAL_CARD_IMAGES.default;
@@ -161,7 +211,7 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  <motion.button
  onClick={handleAddToCart}
  {...buttonTap}
- className="shop-hit-target w-8 h-8 rounded-full bg-green-700 text-white flex items-center justify-center flex-shrink-0"
+ className="shop-hit-target w-7 h-7 rounded-full bg-green-700 text-white flex items-center justify-center flex-shrink-0"
  aria-label="Add to Cart"
  >
  <ShoppingCart className="w-3.5 h-3.5" />
@@ -253,7 +303,7 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  <motion.button
  onClick={handleAddToCart}
  {...buttonTap}
- className={`shop-hit-target w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-green-600 text-white flex items-center justify-center shadow-sm ${compact ? 'text-xs' : 'text-sm'}`}
+ className={`shop-hit-target w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-green-600 text-white flex items-center justify-center shadow-sm ${compact ? 'text-xs' : 'text-sm'}`}
  aria-label="Add to Cart"
  >
  <ShoppingCart className={`${compact ? 'w-3.5 h-3.5' : 'w-4 h-4'}`} />

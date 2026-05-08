@@ -3,12 +3,14 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import http from "node:http";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const isCheckOnly = process.argv.includes("--check-only");
 const npmCommand = "npm";
 const children = [];
 let shuttingDown = false;
+const BACKEND_PORT = 5000;
 
 const requiredPaths = [
   { path: "backend/package.json", label: "backend package" },
@@ -101,14 +103,47 @@ function startService(name, cwd) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
+const pollHealth = (retries = 30, interval = 500) =>
+  new Promise((resolve, reject) => {
+    let attempts = 0;
+
+    const check = () => {
+      if (shuttingDown) return reject(new Error("Shutting down"));
+
+      const req = http.get(`http://localhost:${BACKEND_PORT}/api/health`, (res) => {
+        if (res.statusCode === 200) {
+          resolve();
+        } else {
+          retry();
+        }
+      });
+
+      req.on("error", () => retry());
+      req.setTimeout(2000, () => { req.destroy(); retry(); });
+
+      function retry() {
+        attempts++;
+        if (attempts >= retries) {
+          reject(new Error(`Backend did not become healthy after ${retries} attempts`));
+        } else {
+          setTimeout(check, interval);
+        }
+      }
+    };
+
+    check();
+  });
+
 console.log("Starting backend and frontend dev servers...");
 startService("Backend", join(rootDir, "backend"));
 
-setTimeout(() => {
-  if (shuttingDown) {
-    return;
-  }
-
-  startService("Frontend", join(rootDir, "frontend"));
-  console.log("Both dev commands started.");
-}, 2000);
+pollHealth()
+  .then(() => {
+    if (shuttingDown) return;
+    startService("Frontend", join(rootDir, "frontend"));
+    console.log("Backend is healthy. Frontend started.");
+  })
+  .catch((err) => {
+    console.error(`Frontend not started: ${err.message}`);
+    shutdown(1);
+  });

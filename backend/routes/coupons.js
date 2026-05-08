@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { db } = require('../config/db');
+
+const VALID_DISCOUNT_TYPES = new Set(['percentage', 'fixed']);
 
 // Get all coupons (Admin only)
 router.get('/', authenticateToken, isAdmin, (req, res) => {
@@ -101,6 +104,11 @@ router.post('/', authenticateToken, isAdmin, (req, res) => {
     
     if (!code || !discount_value) {
         return res.status(400).json({ error: 'Code and discount value are required' });
+    }
+
+    const normalizedDiscountType = String(discount_type || 'percentage').trim().toLowerCase();
+    if (!VALID_DISCOUNT_TYPES.has(normalizedDiscountType)) {
+        return res.status(400).json({ error: 'discount_type must be "percentage" or "fixed"' });
     }
     
     const query = `
@@ -220,8 +228,10 @@ router.patch('/:id/toggle', authenticateToken, isAdmin, (req, res) => {
     );
 });
 
-// Increment usage count (called when order is placed)
-router.post('/:id/use', authenticateToken, (req, res) => {
+// Increment usage count — Admin only.
+// NOTE: In normal flow, coupon usage is incremented inside the order creation transaction.
+// This endpoint exists only for manual admin correction.
+router.post('/:id/use', authenticateToken, isAdmin, (req, res) => {
     db.query('UPDATE coupons SET used_count = used_count + 1 WHERE id = ?', 
         [req.params.id], 
         (err, result) => {

@@ -153,6 +153,39 @@ const ensureTableStatements = [
     INDEX idx_user_sessions_user_active (user_id, is_active),
     INDEX idx_user_sessions_last_seen (last_seen_at)
   )`,
+  `CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    session_id INT NOT NULL,
+    jti CHAR(36) NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    revoked_at DATETIME,
+    revoked_reason VARCHAR(120),
+    replaced_by_jti CHAR(36),
+    created_by_ip VARCHAR(64),
+    user_agent VARCHAR(255),
+    last_used_at DATETIME,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_refresh_token_jti (jti),
+    UNIQUE KEY unique_refresh_token_hash (token_hash),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id) REFERENCES user_sessions(id) ON DELETE CASCADE,
+    INDEX idx_refresh_tokens_user_active (user_id, revoked_at, expires_at),
+    INDEX idx_refresh_tokens_session (session_id, revoked_at)
+  )`,
+  `CREATE TABLE IF NOT EXISTS token_blacklist (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    jti CHAR(36) NOT NULL,
+    token_hash CHAR(64),
+    user_id INT,
+    expires_at DATETIME NOT NULL,
+    reason VARCHAR(120) DEFAULT 'revoked',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_blacklisted_jti (jti),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_token_blacklist_expires (expires_at)
+  )`,
   `CREATE TABLE IF NOT EXISTS user_login_history (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT,
@@ -189,6 +222,21 @@ const ensureTableStatements = [
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_notification_settings_muted (is_muted, muted_until)
+  )`,
+  `CREATE TABLE IF NOT EXISTS admin_settings (
+    id INT PRIMARY KEY DEFAULT 1,
+    store_name VARCHAR(120) NOT NULL,
+    store_email VARCHAR(120) NOT NULL,
+    store_phone VARCHAR(30) DEFAULT '',
+    currency VARCHAR(10) DEFAULT 'PKR',
+    tax_rate DECIMAL(5, 2) DEFAULT 18.00,
+    shipping_flat DECIMAL(10, 2) DEFAULT 250.00,
+    shipping_free DECIMAL(10, 2) DEFAULT 5000.00,
+    email_notifications BOOLEAN DEFAULT TRUE,
+    order_notifications BOOLEAN DEFAULT TRUE,
+    low_stock_alerts BOOLEAN DEFAULT TRUE,
+    low_stock_threshold INT DEFAULT 10,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS user_wishlist (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -314,7 +362,7 @@ const ensureTable = async (db, statement) => {
 };
 
 const ensureColumns = async (db, tableName, columnDefinitions) => {
-  const [columns] = await db.query(`SHOW COLUMNS FROM ${tableName}`);
+  const [columns] = await db.query(`SHOW COLUMNS FROM \`${tableName}\``);
   const existingColumnNames = new Set(columns.map((column) => column.Field));
 
   for (const [columnName, definition] of Object.entries(columnDefinitions)) {
@@ -322,9 +370,7 @@ const ensureColumns = async (db, tableName, columnDefinitions) => {
       continue;
     }
 
-    await db.query(
-      `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`,
-    );
+    await db.query(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${columnName}\` ${definition}`);
   }
 };
 
@@ -385,6 +431,8 @@ const ensureProductionSchema = async (db) => {
     is_active: "BOOLEAN DEFAULT TRUE",
     signup_provider: "ENUM('password', 'google') DEFAULT 'password'",
     password_set_by_user: "BOOLEAN DEFAULT TRUE",
+    failed_login_attempts: "INT DEFAULT 0",
+    locked_until: "DATETIME NULL",
   });
 
   await db.query(
@@ -402,11 +450,21 @@ const ensureProductionSchema = async (db) => {
 
   await ensureColumns(db, "categories", {
     slug: "VARCHAR(160) NULL",
+    category_type: "ENUM('shop', 'shop_by_category', 'both') DEFAULT 'both'",
   });
+
+  await db.query(
+    `UPDATE categories
+     SET category_type = 'both'
+     WHERE category_type IS NULL OR category_type = ''`,
+  );
 
   await ensureColumns(db, "products", {
     slug: "VARCHAR(200) NULL",
     images: "JSON NULL",
+    ingredients: "TEXT NULL",
+    benefits: "TEXT NULL",
+    usage: "TEXT NULL",
   });
 
   await db.query(

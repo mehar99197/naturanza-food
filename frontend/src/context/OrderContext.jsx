@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { orderAPI } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
 
 const OrderContext = createContext(null);
 
@@ -12,15 +13,12 @@ export const useOrders = () => {
 };
 
 export const OrderProvider = ({ children }) => {
+  const { user, loading: authLoading } = useAuth();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchOrders();
-  }, []);
-
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       const response = await orderAPI.getAll();
@@ -40,7 +38,21 @@ export const OrderProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!user?.id) {
+      setOrders([]);
+      setLoading(false);
+      return;
+    }
+
+    void fetchOrders();
+  }, [authLoading, fetchOrders, user?.id]);
 
   const addOrder = async (orderData) => {
     try {

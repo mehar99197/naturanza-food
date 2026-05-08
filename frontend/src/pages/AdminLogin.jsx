@@ -202,8 +202,7 @@ export function AdminLogin() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center text-slate-500 transition-colors duration-150 hover:text-slate-600"
-                    style={{ transform: "none", boxShadow: "none" }}
+                    className="password-toggle-btn absolute right-3 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center text-slate-500 transition-colors duration-150 hover:text-slate-600"
                     aria-label={showPassword ? "Hide password" : "Show password"}
                     tabIndex={-1}
                   >
@@ -241,15 +240,12 @@ export function AdminLogin() {
                   <span>Remember me</span>
                 </label>
 
-                <button
-                  type="button"
+                <Link
+                  to="/admin/forgot-password"
                   className="text-sm font-semibold text-green-700 underline decoration-green-300 underline-offset-4 transition hover:text-green-800 hover:decoration-green-500"
-                  onClick={() =>
-                    alert("Please contact the system administrator to reset your password.")
-                  }
                 >
                   Forgot Password?
-                </button>
+                </Link>
               </div>
 
               <button

@@ -22,7 +22,7 @@ const leftPoints = [
 
 const getPasswordStrength = (password) => {
   let score = 0;
-  if (password.length >= 8) {
+  if (password.length >= 12) {
     score += 1;
   }
   if (/[A-Z]/.test(password) && /[a-z]/.test(password)) {
@@ -225,16 +225,16 @@ const Register = () => {
                   <input
                     type={showPassword ? "text" : "password"}
                     autoComplete="new-password"
-                    placeholder="At least 8 characters"
+                    placeholder="At least 12 characters"
                     {...register("password", {
                       required: "Password is required",
                       minLength: {
-                        value: 8,
-                        message: "Password must be at least 8 characters",
+                        value: 12,
+                        message: "Password must be at least 12 characters",
                       },
                       validate: (value) =>
-                        /(?=.*[A-Za-z])(?=.*\d)/.test(value) ||
-                        "Include both letters and numbers",
+                        /(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d])/.test(value) ||
+                        "Use uppercase, lowercase, number, and special character",
                     })}
                     className={`${inputClassName} pr-11 ${
                       errors.password
@@ -245,7 +245,7 @@ const Register = () => {
                   <button
                     type="button"
                     onClick={() => setShowPassword((prev) => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 transition hover:text-slate-700"
+                    className="password-toggle-btn absolute right-3 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center text-slate-500 transition hover:text-slate-700"
                     aria-label={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -294,7 +294,7 @@ const Register = () => {
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword((prev) => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 transition hover:text-slate-700"
+                    className="password-toggle-btn absolute right-3 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center text-slate-500 transition hover:text-slate-700"
                     aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                   >
                     {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

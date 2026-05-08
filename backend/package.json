@@ -1,7 +1,7 @@
 {
   "dependencies": {
-    "autoprefixer": "^10.4.27",
     "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
@@ -12,13 +12,12 @@
     "hpp": "^0.2.3",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
-    "mysql": "^2.18.1",
+    "nodemailer": "^8.0.7",
     "mysql2": "^3.22.0",
+    "openai": "^6.36.0",
     "pdfkit": "^0.18.0",
-    "postcss": "^8.5.8",
     "sharp": "^0.34.5",
-    "tailwindcss": "^4.2.1",
-    "tailwindcss-animate": "^1.0.7"
+    "zod": "^4.3.6"
   },
   "name": "backend",
   "version": "1.0.0",

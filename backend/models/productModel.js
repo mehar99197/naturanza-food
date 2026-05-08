@@ -1,14 +1,40 @@
 const { dbPool, withTransaction } = require("../config/db");
 const { createSlug } = require("../utils/slugify");
+const { getAdminSettings } = require("../utils/adminSettings");
+const { insertAdminNotifications } = require("../utils/adminNotifications");
 
 const safeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const buildLowStockEvent = ({
+  previousStock,
+  newStock,
+  threshold,
+  productId,
+  productName,
+}) => {
+  if (previousStock >= threshold && newStock < threshold) {
+    return {
+      product_id: productId,
+      product_name: productName,
+      stock_quantity: newStock,
+      threshold,
+    };
+  }
+
+  return null;
+};
+
 const toNullableInt = (value) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toNullableText = (value) => {
+  const text = String(value ?? "").trim();
+  return text ? text : null;
 };
 
 const parseJson = (value, fallback = null) => {
@@ -181,32 +207,50 @@ const listProducts = async (filters = {}) => {
     limit = 50,
     offset = 0,
     featuredAlias,
+    includeInactive = false,
   } = filters;
 
   let query = `
     SELECT p.*, c.name AS category_name
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
-    WHERE p.is_active = TRUE
   `;
+  
+  const conditions = [];
   const params = [];
 
+  // Only filter by is_active if includeInactive is false
+  if (!includeInactive) {
+    conditions.push("p.is_active = TRUE");
+  }
+
   if (category) {
-    query += " AND p.category_id = ?";
+    conditions.push("p.category_id = ?");
     params.push(category);
   }
 
   if (search) {
-    query += " AND (p.name LIKE ? OR p.slug LIKE ? OR p.description LIKE ?)";
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    conditions.push("(p.name LIKE ? OR p.slug LIKE ? OR p.description LIKE ? OR p.ingredients LIKE ? OR p.benefits LIKE ? OR p.`usage` LIKE ?)");
+    params.push(
+      `%${search}%`,
+      `%${search}%`,
+      `%${search}%`,
+      `%${search}%`,
+      `%${search}%`,
+      `%${search}%`,
+    );
   }
 
   if (String(is_organic) === "true") {
-    query += " AND p.is_organic = TRUE";
+    conditions.push("p.is_organic = TRUE");
   }
 
   if (String(is_featured) === "true" || String(featuredAlias) === "true") {
-    query += " AND p.is_featured = TRUE";
+    conditions.push("p.is_featured = TRUE");
+  }
+
+  if (conditions.length > 0) {
+    query += " WHERE " + conditions.join(" AND ");
   }
 
   query += " ORDER BY p.created_at DESC LIMIT ? OFFSET ?";
@@ -262,12 +306,15 @@ const createProduct = async (payload = {}) => {
 
     const [result] = await connection.query(
       `INSERT INTO products
-      (name, slug, description, price, category_id, image_url, images, stock_quantity, is_organic, is_featured, is_active, discount_percentage)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (name, slug, description, ingredients, benefits, \`usage\`, price, category_id, image_url, images, stock_quantity, is_organic, is_featured, is_active, discount_percentage)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         slug,
-        payload.description || null,
+        toNullableText(payload.description),
+        toNullableText(payload.ingredients),
+        toNullableText(payload.benefits),
+        toNullableText(payload.usage),
         safeNumber(payload.price, 0),
         toNullableInt(payload.category_id),
         imageUrl,
@@ -300,7 +347,7 @@ const createProduct = async (payload = {}) => {
 const updateProduct = async (productId, payload = {}) => {
   return withTransaction(async (connection) => {
     const [existingRows] = await connection.query(
-      "SELECT id, name, slug FROM products WHERE id = ? LIMIT 1 FOR UPDATE",
+      "SELECT id, name, slug, stock_quantity FROM products WHERE id = ? LIMIT 1 FOR UPDATE",
       [productId],
     );
 
@@ -309,6 +356,9 @@ const updateProduct = async (productId, payload = {}) => {
     }
 
     const existingProduct = existingRows[0];
+    const previousStock = safeNumber(existingProduct.stock_quantity, 0);
+    let lowStockEvent = null;
+    let shouldSendLowStockEmail = false;
     const fields = [];
     const params = [];
 
@@ -337,7 +387,10 @@ const updateProduct = async (productId, payload = {}) => {
     }
 
     const scalarFields = [
-      ["description", "description = ?", (value) => value || null],
+      ["description", "description = ?", toNullableText],
+      ["ingredients", "ingredients = ?", toNullableText],
+      ["benefits", "benefits = ?", toNullableText],
+      ["usage", "`usage` = ?", toNullableText],
       ["price", "price = ?", (value) => safeNumber(value, 0)],
       ["category_id", "category_id = ?", toNullableInt],
       ["image_url", "image_url = ?", (value) => (value ? String(value).trim() : null)],
@@ -385,7 +438,43 @@ const updateProduct = async (productId, payload = {}) => {
       await replaceProductGallery(connection, productId, gallery);
     }
 
-    return true;
+    if (hasOwn("stock_quantity")) {
+      const adminSettings = await getAdminSettings(connection);
+      const lowStockThreshold = Number(adminSettings.lowStockThreshold) || 10;
+      const nextStock = safeNumber(payload.stock_quantity, previousStock);
+
+      if (adminSettings.lowStockAlerts) {
+        lowStockEvent = buildLowStockEvent({
+          previousStock,
+          newStock: nextStock,
+          threshold: lowStockThreshold,
+          productId,
+          productName: String(payload.name || existingProduct.name || "").trim(),
+        });
+
+        if (lowStockEvent) {
+          await insertAdminNotifications(connection, {
+            type: "admin_low_stock",
+            title: "Low Stock Alert",
+            message: `${lowStockEvent.product_name} is low on stock (${lowStockEvent.stock_quantity} left).`,
+            payload: {
+              product_id: lowStockEvent.product_id,
+              stock_quantity: lowStockEvent.stock_quantity,
+              threshold: lowStockEvent.threshold,
+            },
+          });
+        }
+      }
+
+      shouldSendLowStockEmail =
+        Boolean(adminSettings.emailNotifications) && Boolean(lowStockEvent);
+    }
+
+    return {
+      updated: true,
+      lowStockEvent,
+      shouldSendLowStockEmail,
+    };
   });
 };
 
@@ -397,12 +486,12 @@ const deleteById = async (productId) => {
 const updateStock = async (productId, stockQuantity, userId) => {
   return withTransaction(async (connection) => {
     const [rows] = await connection.query(
-      "SELECT stock_quantity FROM products WHERE id = ? FOR UPDATE",
+      "SELECT name, stock_quantity FROM products WHERE id = ? FOR UPDATE",
       [productId],
     );
 
     if (!rows.length) {
-      return false;
+      return { updated: false };
     }
 
     const previousStock = safeNumber(rows[0].stock_quantity, 0);
@@ -426,7 +515,41 @@ const updateStock = async (productId, stockQuantity, userId) => {
       ],
     );
 
-    return true;
+    const adminSettings = await getAdminSettings(connection);
+    const lowStockThreshold = Number(adminSettings.lowStockThreshold) || 10;
+    let lowStockEvent = null;
+
+    if (adminSettings.lowStockAlerts) {
+      const productName = String(rows[0]?.name || "Product").trim();
+      lowStockEvent = buildLowStockEvent({
+        previousStock,
+        newStock: stockQuantity,
+        threshold: lowStockThreshold,
+        productId,
+        productName,
+      });
+
+      if (lowStockEvent) {
+        await insertAdminNotifications(connection, {
+          type: "admin_low_stock",
+          title: "Low Stock Alert",
+          message: `${productName} is low on stock (${lowStockEvent.stock_quantity} left).`,
+          payload: {
+            product_id: lowStockEvent.product_id,
+            stock_quantity: lowStockEvent.stock_quantity,
+            threshold: lowStockEvent.threshold,
+          },
+          excludeUserId: userId || null,
+        });
+      }
+    }
+
+    return {
+      updated: true,
+      lowStockEvent,
+      shouldSendLowStockEmail:
+        Boolean(adminSettings.emailNotifications) && Boolean(lowStockEvent),
+    };
   });
 };
 

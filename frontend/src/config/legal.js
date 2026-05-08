@@ -1,18 +1,18 @@
 export const BUSINESS_INFO = {
- legalName: 'Naturanza Wellness Pvt. Ltd.',
- brandName: 'Naturanza Food',
- websiteDomain: 'www.naturanzafoods.com',
- officeAddress: 'Office 204, Cedar Tower, MM Alam Road, Gulberg III, Lahore 54660, Pakistan',
- governingLaw: 'Laws of Pakistan',
- supportHours: 'Monday to Saturday, 10:00 AM to 7:00 PM (PKT)',
- contacts: {
- supportEmail: 'support@naturanzafoods.com',
- legalEmail: 'legal@naturanzafoods.com',
- privacyEmail: 'privacy@naturanzafoods.com',
- shippingEmail: 'shipping@naturanzafoods.com',
- returnsEmail: 'returns@naturanzafoods.com',
- phone: '+92 42 3890 1144',
- },
+	legalName: 'Naturanza Food',
+	brandName: 'Naturanza Food',
+	websiteDomain: 'www.naturanzafoods.com',
+	officeAddress: 'Pakistan',
+	governingLaw: 'Laws of Pakistan',
+	supportHours: 'Available 24/7',
+	contacts: {
+		supportEmail: 'support@naturanzafoods.com',
+		legalEmail: 'support@naturanzafoods.com',
+		privacyEmail: 'support@naturanzafoods.com',
+		shippingEmail: 'support@naturanzafoods.com',
+		returnsEmail: 'support@naturanzafoods.com',
+		phone: '+92 347 4147400',
+	},
 };
 
 export const SHIPPING_POLICY = {

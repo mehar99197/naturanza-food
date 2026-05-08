@@ -62,25 +62,25 @@ export function Contact() {
     {
       icon: Mail,
       title: "Email",
-      content: "hello@naturanza.com",
-      link: "mailto:hello@naturanza.com",
+      content: "support@naturanzafoods.com",
+      link: "mailto:support@naturanzafoods.com",
     },
     {
       icon: Phone,
       title: "Phone",
-      content: "+1 (234) 567-890",
-      link: "tel:+1234567890",
+      content: "+92 347 4147400",
+      link: "tel:+923474147400",
     },
     {
       icon: MapPin,
       title: "Address",
-      content: "123 Wellness Street, Green Valley, CA 90210",
+      content: "Pakistan",
       link: null,
     },
     {
       icon: Clock,
       title: "Hours",
-      content: "Mon - Fri: 9AM - 6PM",
+      content: "Available 24/7",
       link: null,
     },
   ];

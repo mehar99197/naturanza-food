@@ -1,5 +1,6 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   BarChart3,
   Bell,
@@ -14,6 +15,7 @@ import {
   PanelLeftOpen,
   RotateCcw,
   Settings,
+  Tag,
   ShieldUser,
   ShoppingCart,
   Star,
@@ -29,10 +31,14 @@ import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 const MOBILE_MEDIA_QUERY = "(max-width: 1023px)";
 const COLLAPSED_MENU_ICON_CLASS = "h-4 w-4";
 const EXPANDED_MENU_ICON_CLASS = "h-[18px] w-[18px]";
+const SIDEBAR_SCROLL_STORAGE_KEY = "admin-sidebar-scroll-top";
+const AdminLayoutContext = createContext(false);
+const ADMIN_SECTION_TRANSITION = { duration: 0.2, ease: [0.22, 1, 0.36, 1] };
 
 const navItems = [
   { path: "/admin/dashboard", label: "Dashboard", icon: LayoutGrid },
   { path: "/admin/products", label: "Products", icon: Box },
+  { path: "/admin/categories", label: "Categories", icon: Tag },
   { path: "/admin/orders", label: "Orders", icon: ShoppingCart },
   { path: "/admin/customers", label: "Customers", icon: Users },
   { path: "/admin/analytics", label: "Analytics", icon: BarChart3 },
@@ -71,12 +77,23 @@ const isMobileViewport = () => {
 };
 
 export function AdminLayout({ children }) {
+  const hasParentLayout = useContext(AdminLayoutContext);
+
+  if (hasParentLayout) {
+    return children;
+  }
+
+  return <AdminLayoutShell>{children}</AdminLayoutShell>;
+}
+
+function AdminLayoutShell({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { admin, adminLogout } = useAdminAuth();
   const { unreadCount, isMuted } = useAdminNotifications();
   const [isMobile, setIsMobile] = useState(isMobileViewport);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const navScrollRef = useRef(null);
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") {
       return false;
@@ -84,6 +101,15 @@ export function AdminLayout({ children }) {
 
     return window.localStorage.getItem("admin-sidebar-collapsed") === "true";
   });
+
+  const persistSidebarScrollTop = (nextScrollTop) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const normalized = Number.isFinite(nextScrollTop) ? Math.max(0, Math.floor(nextScrollTop)) : 0;
+    window.sessionStorage.setItem(SIDEBAR_SCROLL_STORAGE_KEY, String(normalized));
+  };
 
   const activeNavItem = useMemo(() => {
     const sortedItems = [...navItems].sort((a, b) => b.path.length - a.path.length);
@@ -152,6 +178,36 @@ export function AdminLayout({ children }) {
 
     window.localStorage.setItem("admin-sidebar-collapsed", String(desktopSidebarCollapsed));
   }, [desktopSidebarCollapsed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const navElement = navScrollRef.current;
+    if (!navElement) {
+      return;
+    }
+
+    const savedScrollTop = Number(window.sessionStorage.getItem(SIDEBAR_SCROLL_STORAGE_KEY));
+    const restoredScrollTop = Number.isFinite(savedScrollTop) ? Math.max(0, savedScrollTop) : 0;
+
+    const frameId = window.requestAnimationFrame(() => {
+      navElement.scrollTop = restoredScrollTop;
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [location.pathname]);
+
+  useEffect(() => {
+    return () => {
+      if (navScrollRef.current) {
+        persistSidebarScrollTop(navScrollRef.current.scrollTop);
+      }
+    };
+  }, []);
 
   const handleLogout = async () => {
     await adminLogout();
@@ -222,6 +278,8 @@ export function AdminLayout({ children }) {
           </div>
 
           <nav
+            ref={navScrollRef}
+            onScroll={(event) => persistSidebarScrollTop(event.currentTarget.scrollTop)}
             className={`relative z-10 flex-1 overflow-y-auto ${
               isSidebarCollapsed ? "scrollbar-hide overflow-x-visible pr-0" : "scrollbar-hide pr-2"
             }`}
@@ -256,6 +314,11 @@ export function AdminLayout({ children }) {
                   <Link
                     key={item.path}
                     to={item.path}
+                    onClick={() => {
+                      if (navScrollRef.current) {
+                        persistSidebarScrollTop(navScrollRef.current.scrollTop);
+                      }
+                    }}
                     className={linkClasses}
                     aria-label={item.label}
                     aria-current={isActive ? "page" : undefined}
@@ -397,7 +460,22 @@ export function AdminLayout({ children }) {
           </div>
         </header>
 
-        <main className="admin-main-theme min-h-[calc(100vh-74px)] p-4 sm:p-6 lg:p-8">{children}</main>
+        <main className="admin-main-theme min-h-[calc(100vh-74px)] p-4 sm:p-6 lg:p-8">
+          <AdminLayoutContext.Provider value={true}>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={location.pathname}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={ADMIN_SECTION_TRANSITION}
+                className="will-change-transform"
+              >
+                {children}
+              </motion.div>
+            </AnimatePresence>
+          </AdminLayoutContext.Provider>
+        </main>
       </div>
 
       {mobileSidebarOpen ? (

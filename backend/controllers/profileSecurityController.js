@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const { db } = require("../config/db");
 const { hashToken } = require("../utils/sessionManager");
+const { revokeRefreshTokensBySessionId } = require("../utils/tokenStore");
 
 const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
   process.env.IP_LOOKUP_TIMEOUT_MS || "2000",
@@ -216,8 +217,8 @@ const getPasswordPolicyErrors = (password) => {
   const value = String(password || "");
   const errors = [];
 
-  if (value.length < 8) {
-    errors.push("Password must be at least 8 characters long.");
+  if (value.length < 12) {
+    errors.push("Password must be at least 12 characters long.");
   }
   if (!/[A-Z]/.test(value)) {
     errors.push("Password must include at least one uppercase letter.");
@@ -335,7 +336,7 @@ const changePassword = async (req, res) => {
     }
   }
 
-  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  const hashedPassword = await bcrypt.hash(newPassword, 12);
 
   await db
     .promise()
@@ -465,6 +466,12 @@ const logoutDevice = async (req, res) => {
     return res.status(404).json({ error: "Session not found." });
   }
 
+  await revokeRefreshTokensBySessionId(
+    db.promise(),
+    sessionId,
+    "logout_device",
+  );
+
   return res.json({ message: "Device logged out successfully." });
 };
 
@@ -476,10 +483,8 @@ const logoutAllOtherDevices = async (req, res) => {
 
   const params = [req.user.id];
   let sql =
-    `UPDATE user_sessions
-     SET is_active = FALSE,
-         revoked_at = NOW(),
-         last_seen_at = NOW()
+    `SELECT id
+     FROM user_sessions
      WHERE user_id = ? AND is_active = TRUE`;
 
   if (currentSessionId) {
@@ -487,7 +492,31 @@ const logoutAllOtherDevices = async (req, res) => {
     params.push(currentSessionId);
   }
 
-  const [result] = await db.promise().query(sql, params);
+  const [sessionRows] = await db.promise().query(sql, params);
+  const revokeSessionIds = sessionRows.map((row) => row.id).filter(Boolean);
+
+  const updateParams = [req.user.id];
+  let updateSql =
+    `UPDATE user_sessions
+     SET is_active = FALSE,
+         revoked_at = NOW(),
+         last_seen_at = NOW()
+     WHERE user_id = ? AND is_active = TRUE`;
+
+  if (currentSessionId) {
+    updateSql += " AND id <> ?";
+    updateParams.push(currentSessionId);
+  }
+
+  const [result] = await db.promise().query(updateSql, updateParams);
+
+  for (const sessionId of revokeSessionIds) {
+    await revokeRefreshTokensBySessionId(
+      db.promise(),
+      sessionId,
+      "logout_all_other_devices",
+    );
+  }
 
   return res.json({
     message: "Logged out from all other devices.",

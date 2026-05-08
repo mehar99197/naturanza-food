@@ -48,10 +48,16 @@ export function Shop() {
  ]);
 
  useEffect(() => {
- const fetchCategories = async () => {
+ let isMounted = true;
+ let loadingTimerId;
+
+ const fetchCategories = async ({ showLoader = false } = {}) => {
  try {
+ if (showLoader) {
  setIsLoading(true);
- const data = await categoryAPI.getAll();
+ }
+
+ const data = await categoryAPI.getAll({ category_type: "shop" });
  const list = Array.isArray(data) ? data : data.data || [];
  const icons = [Droplet, Flower2, Coffee, Pill, ShoppingBag];
  const dynamic = list.map((cat, idx) => ({
@@ -59,15 +65,39 @@ export function Shop() {
  name: cat.name,
  icon: icons[idx % icons.length],
  }));
+
+ if (!isMounted) {
+ return;
+ }
+
  setCategories([{ id:"all", name:"All Products", icon: ShoppingBag }, ...dynamic]);
  } catch (err) {
  } finally {
- // Simulate minimum loading time for better UX
- setTimeout(() => setIsLoading(false), 800);
+ if (showLoader) {
+ // Simulate minimum loading time for better UX.
+ loadingTimerId = setTimeout(() => {
+ if (isMounted) {
+ setIsLoading(false);
+ }
+ }, 800);
+ }
  }
  };
 
- fetchCategories();
+  fetchCategories({ showLoader: true });
+  const intervalId = setInterval(() => {
+  if (isMounted) {
+  fetchCategories({ showLoader: false });
+  }
+  }, 30000);
+
+ return () => {
+ isMounted = false;
+ clearInterval(intervalId);
+ if (loadingTimerId) {
+ clearTimeout(loadingTimerId);
+ }
+ };
  }, []);
 
  const products = useMemo(() => getActiveProducts(), [getActiveProducts]);
@@ -134,36 +164,53 @@ export function Shop() {
 
  // Filter by category
  if (selectedCategory !=="all") {
- result = result.filter((p) => {
- return (
- String(p.category_id) === selectedCategory ||
- p.category === selectedCategory ||
- p.category_name === selectedCategory ||
- p.category_name === categories.find(c => String(c.id) === selectedCategory)?.name
+ const selectedCategoryEntry = categories.find(
+ (c) => String(c.id) === String(selectedCategory),
  );
- });
+ const selectedCategoryDisplayName = String(selectedCategoryEntry?.name || "");
+ const normalizedSelectedCategory = String(selectedCategory).toLowerCase();
+
+ const startupCategoryKeywordMap = {
+ honey:["honey"],
+ "herbal-oils":["coconut"],
+ "organic-powders":["ispaghol", "psyllium"],
+ };
+
+ const startupCategoryKeywords = startupCategoryKeywordMap[normalizedSelectedCategory] || [];
+
+ result = result.filter((p) => {
+ const directCategoryMatch =
+ String(p.category_id) === String(selectedCategory) ||
+ String(p.category) === String(selectedCategory) ||
+ String(p.category_name) === String(selectedCategory) ||
+ String(p.category_name) === selectedCategoryDisplayName;
+
+ if (directCategoryMatch) {
+ return true;
  }
 
- // Convert price from DB format (dollars) to display format
- const convertedPriceRange = [
- priceRange[0] /
- (settings.currency ==="PKR"
- ? 100
- : settings.currency ==="INR"
- ? 100
- : 1),
- priceRange[1] /
- (settings.currency ==="PKR"
- ? 100
- : settings.currency ==="INR"
- ? 100
- : 1),
- ];
+ if (startupCategoryKeywords.length === 0) {
+ return false;
+ }
+
+ const searchableText = [
+ p?.slug,
+ p?.name,
+ p?.category,
+ p?.category_name,
+ p?.description,
+ ]
+ .map((value) => String(value || "").toLowerCase())
+ .join(" ");
+
+ return startupCategoryKeywords.some((keyword) => searchableText.includes(keyword));
+ });
+ }
 
  // Filter by price
  result = result.filter(
  (p) =>
- Number(p.price) >= convertedPriceRange[0] && Number(p.price) <= convertedPriceRange[1],
+ Number(p.price) >= priceRange[0] && Number(p.price) <= priceRange[1],
  );
 
  // Sort

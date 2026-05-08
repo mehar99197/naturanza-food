@@ -5,6 +5,7 @@ import { wishlistAPI } from "@/services/api";
 import { useCart } from "@/context/CartContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
+import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 import { products as localProducts } from "@/data/products";
 
 const normalizeProductId = (value) => String(value || "").trim();
@@ -14,19 +15,13 @@ const emitWishlistUpdated = () => {
 };
 
 const resolveImage = (item) => {
-  if (!item?.image_url) {
+  const imageValue = item?.image_url || item?.image || "";
+  if (!imageValue) {
     return "/images/products/powder.webp";
   }
 
-  if (item.image_url.startsWith("http")) {
-    return item.image_url;
-  }
-
-  if (item.image_url.startsWith("/")) {
-    return item.image_url;
-  }
-
-  return `/images/products/${item.image_url}`;
+  // Use getAbsoluteImageUrl to convert relative URLs to absolute backend URLs
+  return getAbsoluteImageUrl(imageValue);
 };
 
 export function ProfileWishlist() {

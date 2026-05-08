@@ -5,12 +5,14 @@ import {
   AlertTriangle,
   Box,
   CheckCircle2,
+  Image,
   Package,
   Pencil,
   Plus,
   RefreshCw,
   Search,
   Trash2,
+  Upload,
   X,
   XCircle,
 } from "lucide-react";
@@ -20,10 +22,14 @@ import { useProducts } from "@/context/ProductContext";
 import { useAdminData } from "@/context/AdminDataContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
+import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 
 const initialFormState = {
   name: "",
   description: "",
+  ingredients: "",
+  benefits: "",
+  usage: "",
   price: "",
   category_id: "",
   image_url: "",
@@ -36,7 +42,28 @@ const initialFormState = {
 const normalizeStatus = (product) =>
   product.is_active === false || product.is_active === 0 ? "inactive" : "active";
 
+const normalizeCategoryType = (value) => {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (normalized === "shop" || normalized === "shop_by_category" || normalized === "both") {
+    return normalized;
+  }
+
+  return "both";
+};
+
 const MOBILE_INITIAL_PRODUCTS = 6;
+
+const getDisplayDescription = (product, fallback = "No description provided") => {
+  const existing = String(product?.description || "").trim();
+  if (existing) {
+    return existing;
+  }
+
+  return fallback;
+};
 
 export function AdminProducts() {
   const {
@@ -58,6 +85,7 @@ export function AdminProducts() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const productRows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -78,6 +106,9 @@ export function AdminProducts() {
         const searchable = [
           product.name,
           product.description,
+          product.ingredients,
+          product.benefits,
+          product.usage,
           product.category_name,
           product.slug,
         ]
@@ -102,6 +133,15 @@ export function AdminProducts() {
     };
   }, [products]);
 
+  const assignableCategories = useMemo(
+    () =>
+      (categories || []).filter((category) => {
+        const categoryType = normalizeCategoryType(category?.category_type);
+        return categoryType === "shop" || categoryType === "both";
+      }),
+    [categories],
+  );
+
   useEffect(() => {
     setShowAllMobileRows(false);
   }, [searchQuery, statusFilter]);
@@ -117,7 +157,10 @@ export function AdminProducts() {
     setEditingProduct(product);
     setFormData({
       name: String(product.name || ""),
-      description: String(product.description || ""),
+      description: getDisplayDescription(product, ""),
+      ingredients: String(product.ingredients || ""),
+      benefits: String(product.benefits || ""),
+      usage: String(product.usage || ""),
       price: String(product.price || ""),
       category_id: product.category_id ? String(product.category_id) : "",
       image_url: String(product.image_url || ""),
@@ -147,6 +190,10 @@ export function AdminProducts() {
 
   const saveProduct = async () => {
     const name = String(formData.name || "").trim();
+    const description = String(formData.description || "").trim();
+    const ingredients = String(formData.ingredients || "").trim();
+    const benefits = String(formData.benefits || "").trim();
+    const usage = String(formData.usage || "").trim();
     const price = Number(formData.price);
 
     if (!name || !Number.isFinite(price) || price < 0) {
@@ -160,7 +207,10 @@ export function AdminProducts() {
 
       const payload = {
         name,
-        description: String(formData.description || "").trim(),
+        description: description || null,
+        ingredients: ingredients || null,
+        benefits: benefits || null,
+        usage: usage || null,
         price,
         category_id: formData.category_id ? Number(formData.category_id) : null,
         image_url: String(formData.image_url || "").trim() || null,
@@ -194,6 +244,67 @@ export function AdminProducts() {
       await deleteProduct(productId);
     } catch (requestError) {
       setError(requestError?.response?.data?.error || "Failed to delete product");
+    }
+  };
+
+  const handleImageUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      setError('Please select a valid image file (JPEG, PNG, GIF, or WebP)');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image size must be less than 5MB');
+      return;
+    }
+
+    setUploadingImage(true);
+    setError("");
+
+    try {
+      const uploadFormData = new FormData();
+      uploadFormData.append('product_image', file);
+
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/products/upload-image`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminAccessToken') || localStorage.getItem('token')}`
+        },
+        body: uploadFormData,
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = 'Failed to upload image';
+        
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.error || errorMessage;
+        } catch (e) {
+          console.error('Response was not JSON:', errorText);
+          errorMessage = errorText || errorMessage;
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+
+      if (data.imageUrl) {
+        setFormData(prev => ({ ...prev, image_url: data.imageUrl }));
+      }
+    } catch (uploadError) {
+      console.error('Upload failed:', uploadError);
+      setError(uploadError.message || 'Failed to upload image');
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -347,7 +458,7 @@ export function AdminProducts() {
               </div>
 
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between lg:justify-end">
-                <div className="inline-flex w-full rounded-2xl border border-emerald-100 bg-white p-1 shadow-sm sm:w-auto">
+                <div className="inline-flex w-auto max-w-full flex-wrap items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50/65 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
                   {statusFilterOptions.map((item) => {
                     const isActive = statusFilter === item.value;
 
@@ -356,15 +467,20 @@ export function AdminProducts() {
                         key={item.value}
                         type="button"
                         onClick={() => setStatusFilter(item.value)}
-                        className={`inline-flex min-h-[36px] items-center justify-center gap-1 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all duration-200 sm:px-4 ${
+                        aria-pressed={isActive}
+                        className={`group inline-flex min-h-[34px] items-center justify-center gap-1 rounded-lg px-2.5 py-1 text-[13px] font-semibold leading-none transition-all duration-200 sm:px-3.5 ${
                           isActive
-                            ? "bg-[#166534] text-white shadow-[0_8px_18px_rgba(22,101,52,0.35)]"
-                            : "text-slate-600 hover:bg-emerald-50 hover:text-emerald-800"
+                            ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
+                            : "text-slate-600 hover:bg-emerald-100 hover:text-emerald-800"
                         }`}
                       >
                         <span>{item.label}</span>
-                        <span className={`${isActive ? "text-emerald-100" : "text-slate-400"}`}>
-                          {item.count}
+                        <span
+                          className={`text-[12px] font-semibold tabular-nums ${
+                            isActive ? "text-emerald-100" : "text-slate-500 group-hover:text-emerald-700"
+                          }`}
+                        >
+                          ({item.count})
                         </span>
                       </button>
                     );
@@ -394,7 +510,7 @@ export function AdminProducts() {
                       <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-emerald-100 bg-[#f4f8f3]">
                         {product.image_url ? (
                           <img
-                            src={product.image_url}
+                            src={getAbsoluteImageUrl(product.image_url)}
                             alt={product.name}
                             className="h-full w-full object-cover"
                           />
@@ -408,7 +524,7 @@ export function AdminProducts() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-slate-900">{product.name}</p>
                         <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">
-                          {product.description || "No description provided"}
+                          {getDisplayDescription(product)}
                         </p>
                         <p className="mt-1 text-sm font-bold text-slate-900">
                           {formatPrice(Number(product.price || 0), settings.currency)}
@@ -509,7 +625,7 @@ export function AdminProducts() {
                             <div className="h-16 w-16 overflow-hidden rounded-2xl border border-emerald-100 bg-[#f4f8f3] shadow-sm">
                               {product.image_url ? (
                                 <img
-                                  src={product.image_url}
+                                  src={getAbsoluteImageUrl(product.image_url)}
                                   alt={product.name}
                                   className="h-full w-full object-cover"
                                 />
@@ -524,7 +640,7 @@ export function AdminProducts() {
                                 {product.name}
                               </p>
                               <p className="mt-1 max-w-[360px] line-clamp-2 text-xs leading-relaxed text-slate-500">
-                                {product.description || "No description provided"}
+                                {getDisplayDescription(product)}
                               </p>
                             </div>
                           </div>
@@ -665,7 +781,7 @@ export function AdminProducts() {
                           className="h-11 w-full rounded-xl border border-emerald-100 bg-white px-4 text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:h-12 sm:rounded-2xl"
                         >
                           <option value="">Uncategorized</option>
-                          {(categories || []).map((category) => (
+                          {assignableCategories.map((category) => (
                             <option key={category.id} value={category.id}>
                               {category.name}
                             </option>
@@ -685,6 +801,51 @@ export function AdminProducts() {
                           }
                           className="w-full rounded-xl border border-emerald-100 bg-white px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:rounded-2xl"
                           placeholder="Product description"
+                        />
+                      </label>
+
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          Ingredients
+                        </span>
+                        <textarea
+                          rows={3}
+                          value={formData.ingredients}
+                          onChange={(event) =>
+                            setFormData((prev) => ({ ...prev, ingredients: event.target.value }))
+                          }
+                          className="w-full rounded-xl border border-emerald-100 bg-white px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:rounded-2xl"
+                          placeholder="List ingredients (comma or line separated)"
+                        />
+                      </label>
+
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          Benefits
+                        </span>
+                        <textarea
+                          rows={3}
+                          value={formData.benefits}
+                          onChange={(event) =>
+                            setFormData((prev) => ({ ...prev, benefits: event.target.value }))
+                          }
+                          className="w-full rounded-xl border border-emerald-100 bg-white px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:rounded-2xl"
+                          placeholder="List benefits (comma or line separated)"
+                        />
+                      </label>
+
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          Usage
+                        </span>
+                        <textarea
+                          rows={3}
+                          value={formData.usage}
+                          onChange={(event) =>
+                            setFormData((prev) => ({ ...prev, usage: event.target.value }))
+                          }
+                          className="w-full rounded-xl border border-emerald-100 bg-white px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:rounded-2xl"
+                          placeholder="How to use this product"
                         />
                       </label>
                     </div>
@@ -752,26 +913,57 @@ export function AdminProducts() {
 
                   <section className="space-y-3 sm:space-y-4">
                     <div className="flex items-center gap-2 text-emerald-700">
-                      <AlertCircle className="h-4 w-4" />
+                      <Image className="h-4 w-4" />
                       <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-700">
-                        Media
+                        Product Image
                       </h3>
                     </div>
 
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        Image URL
-                      </span>
-                      <input
-                        type="text"
-                        value={formData.image_url}
-                        onChange={(event) =>
-                          setFormData((prev) => ({ ...prev, image_url: event.target.value }))
-                        }
-                        className="h-11 w-full rounded-xl border border-emerald-100 bg-white px-4 text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:h-12 sm:rounded-2xl"
-                        placeholder="Image URL"
-                      />
-                    </label>
+                    <div className="space-y-3">
+                      <label className="block cursor-pointer">
+                        <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          Upload Image
+                        </span>
+                        <div className="mt-1.5 flex items-center gap-3">
+                          <label className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-700 shadow-sm transition-all duration-200 hover:bg-emerald-50 cursor-pointer">
+                            <Upload className="h-4 w-4" />
+                            {uploadingImage ? 'Uploading...' : 'Choose Image'}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleImageUpload}
+                              disabled={uploadingImage}
+                              className="hidden"
+                            />
+                          </label>
+                          <span className="text-xs text-slate-500">
+                            Max 5MB • JPG, PNG, GIF, or WebP
+                          </span>
+                        </div>
+                      </label>
+
+                      {formData.image_url && (
+                        <div className="space-y-2">
+                          <div className="relative inline-block">
+                            <img
+                              src={getAbsoluteImageUrl(formData.image_url)}
+                              alt="Product preview"
+                              className="h-32 w-32 rounded-xl border border-emerald-100 object-cover shadow-sm"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setFormData(prev => ({ ...prev, image_url: '' }))}
+                              className="absolute -right-2 -top-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white shadow-lg hover:bg-red-600"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                          <p className="text-xs text-slate-500">
+                            Current image • Click X to remove
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </section>
 
                   <div className="h-px bg-emerald-100" />

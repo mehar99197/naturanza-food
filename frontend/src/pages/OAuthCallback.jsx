@@ -1,6 +1,11 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
+import {
+ AUTH_SESSION_SYNC_EVENT,
+ setUserAccessToken,
+ userAPI,
+} from '@/services/api';
 
 /**
  * OAuth Callback Handler
@@ -56,12 +61,30 @@ const OAuthCallback = () => {
  // Parse user data
  const userData = JSON.parse(decodeURIComponent(userDataString));
 
- // Store token and user data in localStorage (matching AuthContext keys)
- localStorage.setItem('authToken', token);
+ // Store access token in memory only.
+ setUserAccessToken(token);
  localStorage.setItem('userData', JSON.stringify(userData));
 
- // Force a full reload so AuthContext can re-initialize with the new token.
- window.location.replace(safeNextPath);
+ // Validate token and sync auth context.
+ userAPI
+ .getProfile()
+ .then(() => {
+ window.dispatchEvent(
+ new CustomEvent(AUTH_SESSION_SYNC_EVENT, {
+ detail: {
+ source: 'user-login',
+ timestamp: Date.now(),
+ },
+ }),
+ );
+ navigate(safeNextPath, { replace: true });
+ })
+ .catch(() => {
+ navigate('/login', {
+ state: { error: 'Session could not be restored. Please sign in again.' },
+ replace: true,
+ });
+ });
  } catch (error) {
  navigate('/login', { 
  state: { error: 'Failed to process authentication data' },

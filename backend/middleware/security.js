@@ -18,16 +18,29 @@ const PASSWORD_FIELDS = new Set([
     'password',
     'currentpassword',
     'newpassword',
+    'confirmpassword',
     'confirmnewpassword',
     'current_password',
     'new_password',
     'confirm_password',
 ]);
 
+const CONFIRMATION_FIELDS = new Set([
+    'confirmationtext',
+    'confirmation_text',
+    'confirmtext',
+]);
+
 const isOpaqueTokenField = (key) =>
     typeof key === 'string' &&
     (OPAQUE_TOKEN_FIELDS.has(key.toLowerCase()) ||
         PASSWORD_FIELDS.has(key.toLowerCase()));
+
+const isExcludedFromSQLCheck = (key) =>
+    typeof key === 'string' &&
+    (OPAQUE_TOKEN_FIELDS.has(key.toLowerCase()) ||
+        PASSWORD_FIELDS.has(key.toLowerCase()) ||
+        CONFIRMATION_FIELDS.has(key.toLowerCase()));
 
 /**
  * Sanitize user input to prevent XSS and injection attacks
@@ -140,15 +153,20 @@ function validatePassword(password) {
  */
 function isSafeSQLInput(input) {
     if (typeof input !== 'string') return true;
-    
-    // Check for common SQL injection patterns
-    const sqlPatterns = [
-        /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE)\b)/gi,
-        /(union|;|--|\/\*|\*\/|xp_)/gi,
-        /('|(\\')|(--)|(%27)|(%23)|(#))/gi
+
+    // Check for SQL injection patterns — only flag dangerous sequences
+    // that indicate an active injection attempt, not normal words.
+    const sqlInjectionPatterns = [
+        /(\b(?:DROP\s+(?:TABLE|DATABASE|INDEX|VIEW|PROCEDURE|FUNCTION)|TRUNCATE\s+TABLE|ALTER\s+(?:TABLE|DATABASE|COLUMN))\b)/gi,
+        /(?:;\s*(?:DROP|TRUNCATE|ALTER|DELETE|EXEC)\b)/gi,
+        /(\bEXEC(?:UTE)?\s*\()/gi,
+        /(?:\bUNION\b\s+\bSELECT\b)/gi,
+        /(?:\bSELECT\b.*\bINTO\s+(?:OUT|DUMP)FILE\b)/gi,
+        /(?:\bLOAD\s+(?:DATA|FILE)\b)/gi,
+        /(?:--\s|\/\*!|\/\*)/gi,
     ];
 
-    return !sqlPatterns.some(pattern => pattern.test(input));
+    return !sqlInjectionPatterns.some(pattern => pattern.test(input));
 }
 
 /**
@@ -158,7 +176,8 @@ function preventSQLInjection(req, res, next) {
     const checkObject = (obj) => {
         for (const key in obj) {
             if (Object.prototype.hasOwnProperty.call(obj, key)) {
-                if (isOpaqueTokenField(key)) {
+                // Skip SQL injection check for excluded fields (passwords, tokens, confirmation text)
+                if (isExcludedFromSQLCheck(key)) {
                     continue;
                 }
 

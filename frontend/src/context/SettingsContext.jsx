@@ -1,6 +1,9 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { adminAPI, settingsAPI } from '@/services/api';
+import { useAdminAuth } from '@/context/AdminAuthContext';
 
 const SettingsContext = createContext();
+const SETTINGS_POLL_INTERVAL_MS = 30000;
 
 const DEFAULT_SETTINGS = {
  storeName: 'Naturanza',
@@ -15,11 +18,80 @@ const DEFAULT_SETTINGS = {
  lowStockAlerts: true
 };
 
+const normalizeSettings = (payload = {}) => {
+	const next = { ...DEFAULT_SETTINGS, ...(payload || {}) };
+
+	return {
+		...next,
+		taxRate: String(next.taxRate ?? DEFAULT_SETTINGS.taxRate),
+		shippingFlat: String(next.shippingFlat ?? DEFAULT_SETTINGS.shippingFlat),
+		shippingFree: String(next.shippingFree ?? DEFAULT_SETTINGS.shippingFree),
+		emailNotifications: Boolean(next.emailNotifications),
+		orderNotifications: Boolean(next.orderNotifications),
+		lowStockAlerts: Boolean(next.lowStockAlerts),
+	};
+};
+
 export function SettingsProvider({ children }) {
+ const { isAdminAuthenticated } = useAdminAuth();
  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+ const [loading, setLoading] = useState(false);
+ const [error, setError] = useState('');
+
+ const applySettings = useCallback((payload) => {
+ setSettings(normalizeSettings(payload));
+ }, []);
+
+ const refreshSettings = useCallback(async ({ silent = false } = {}) => {
+ try {
+ if (!silent) {
+ setLoading(true);
+ }
+
+ const response = isAdminAuthenticated
+ ? await adminAPI.getSettings()
+ : await settingsAPI.getPublicSettings();
+
+ applySettings(response);
+ setError('');
+ } catch (requestError) {
+ if (!silent) {
+ setError(requestError?.message || 'Failed to load settings');
+ }
+ } finally {
+ if (!silent) {
+ setLoading(false);
+ }
+ }
+ }, [applySettings, isAdminAuthenticated]);
+
+ useEffect(() => {
+ void refreshSettings();
+ }, [refreshSettings]);
+
+ useEffect(() => {
+ if (typeof window === 'undefined') {
+ return undefined;
+ }
+
+ const timerId = window.setInterval(() => {
+ void refreshSettings({ silent: true });
+ }, SETTINGS_POLL_INTERVAL_MS);
+
+ const handleFocus = () => {
+ void refreshSettings({ silent: true });
+ };
+
+ window.addEventListener('focus', handleFocus);
+
+ return () => {
+ window.clearInterval(timerId);
+ window.removeEventListener('focus', handleFocus);
+ };
+ }, [refreshSettings]);
 
  const updateSettings = (newSettings) => {
- setSettings(newSettings);
+ setSettings((prev) => normalizeSettings({ ...prev, ...newSettings }));
  };
 
  const resetSettings = () => {
@@ -29,8 +101,11 @@ export function SettingsProvider({ children }) {
  return (
  <SettingsContext.Provider value={{ 
  settings, 
+ loading,
+ error,
  updateSettings, 
- resetSettings
+ resetSettings,
+ refreshSettings,
  }}>
  {children}
  </SettingsContext.Provider>

@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
-import { useOrders } from "../context/OrderContext";
 import {
   User,
   Mail,
@@ -25,23 +24,12 @@ const Profile = () => {
     updateProfile,
     loading: authLoading,
   } = useAuth();
-  const { getUserOrders } = useOrders();
 
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
-  const [stats, setStats] = useState({
-    orders: 0,
-    reviews: 0,
-  });
-  const [statsLoading, setStatsLoading] = useState(true);
-
   const [formData, setFormData] = useState(buildInitialFormData(user));
-
-  useEffect(() => {
-    fetchUserStats();
-  }, [user?.id]);
 
   useEffect(() => {
     if (isEditing) {
@@ -50,29 +38,6 @@ const Profile = () => {
 
     setFormData(buildInitialFormData(user));
   }, [user, isEditing]);
-
-  const fetchUserStats = async () => {
-    if (!user?.id) {
-      setStatsLoading(false);
-      return;
-    }
-
-    try {
-      setStatsLoading(true);
-      const userOrders = await getUserOrders(user.id);
-      setStats({
-        orders: Array.isArray(userOrders) ? userOrders.length : 0,
-        reviews: 0,
-      });
-    } catch (err) {
-      setStats({
-        orders: 0,
-        reviews: 0,
-      });
-    } finally {
-      setStatsLoading(false);
-    }
-  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -194,6 +159,7 @@ const Profile = () => {
         <div>
           <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
             Email Address
+            <span className="ml-2 text-xs text-gray-500">(Cannot be changed)</span>
           </label>
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-2.5 sm:pl-3 flex items-center pointer-events-none">
@@ -204,12 +170,8 @@ const Profile = () => {
               name="email"
               value={formData.email}
               onChange={handleChange}
-              disabled={!isEditing}
-              className={`block w-full pl-8 sm:pl-10 pr-3 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 rounded-lg ${
-                isEditing
-                  ? "focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  : "bg-gray-50 cursor-not-allowed"
-              }`}
+              disabled={true}
+              className="block w-full pl-8 sm:pl-10 pr-3 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 rounded-lg bg-gray-50 cursor-not-allowed"
             />
           </div>
         </div>
@@ -289,33 +251,6 @@ const Profile = () => {
         </div>
       </div>
 
-      <div className="mt-4 sm:mt-8 pt-4 sm:pt-8 border-t border-gray-200">
-        <h4 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">
-          Account Activity
-        </h4>
-        <div className="grid grid-cols-2 gap-2 sm:gap-4">
-          <div className="text-center p-2 sm:p-4 bg-green-50 rounded-lg">
-            {statsLoading ? (
-              <Loader2 className="h-5 w-5 sm:h-6 sm:w-6 mx-auto text-green-600 animate-spin" />
-            ) : (
-              <p className="text-lg sm:text-2xl font-bold text-green-600">
-                {stats.orders}
-              </p>
-            )}
-            <p className="text-[11px] sm:text-sm text-gray-600">Orders</p>
-          </div>
-          <div className="text-center p-2 sm:p-4 bg-amber-50 rounded-lg">
-            {statsLoading ? (
-              <Loader2 className="h-5 w-5 sm:h-6 sm:w-6 mx-auto text-amber-600 animate-spin" />
-            ) : (
-              <p className="text-lg sm:text-2xl font-bold text-amber-600">
-                {stats.reviews}
-              </p>
-            )}
-            <p className="text-[11px] sm:text-sm text-gray-600">Reviews</p>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

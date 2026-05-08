@@ -9,3 +9,6 @@ coverage
 .vite/
 test-results/
 *.backup
+.env
+.env.local
+.env.*

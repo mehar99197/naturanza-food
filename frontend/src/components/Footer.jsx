@@ -1,14 +1,44 @@
 import { Link } from 'react-router-dom';
 import { Mail, Phone, MapPin, Facebook, Instagram, Twitter, Youtube, ArrowRight, ChevronDown } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { categoryAPI } from '@/services/api';
 
 export function Footer({ variant = 'full' }) {
  const [email, setEmail] = useState('');
  const [isSubscribed, setIsSubscribed] = useState(false);
  const [openSection, setOpenSection] = useState(null);
+ const [categories, setCategories] = useState([]);
  
  // Slim version - compact footer for non-home pages
  const isSlim = variant === 'slim';
+
+ // Fetch active categories from the database
+ useEffect(() => {
+  const fetchCategories = async () => {
+   try {
+    const response = await categoryAPI.getAll();
+    // Filter only active categories
+    const activeCategories = (response?.categories || response || [])
+     .filter(cat => cat.is_active === 1 || cat.is_active === true)
+     .map(cat => ({
+      label: cat.name,
+      path: `/shop?category=${cat.slug || cat.name.toLowerCase().replace(/\s+/g, '-')}`
+     }));
+    setCategories(activeCategories);
+   } catch (error) {
+    console.error('Failed to fetch categories:', error);
+    // Fallback to empty array if fetch fails
+    setCategories([]);
+   }
+  };
+
+  fetchCategories();
+  
+  // Refresh categories every 30 seconds to sync with admin changes
+  const intervalId = setInterval(fetchCategories, 30000);
+  
+  return () => clearInterval(intervalId);
+ }, []);
 
  const handleSubscribe = (e) => {
  e.preventDefault();
@@ -24,12 +54,7 @@ export function Footer({ variant = 'full' }) {
  };
 
  const footerLinks = {
- shop: [
- { label: 'Herbal Oils', path: '/shop?category=herbal-oils' },
- { label: 'Organic Powders', path: '/shop?category=organic-powders' },
- { label: 'Herbal Teas', path: '/shop?category=herbal-teas' },
- { label: 'Supplements', path: '/shop?category=supplements' }
- ],
+ shop: categories, // Dynamic categories from database
  company: [
  { label: 'About Us', path: '/about' },
  { label: 'Our Story', path: '/about' },
@@ -324,23 +349,23 @@ export function Footer({ variant = 'full' }) {
  </span>
  </div>
  </li>
+                <li>
+                  <a href="tel:+923474147400" className="flex items-start gap-3 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center flex-shrink-0">
+                      <Phone className="w-4 h-4 text-white" />
+                    </div>
+                    <span className="text-white/90 active:text-white text-sm font-medium break-words min-w-0">
+                      +92 347 4147400
+                    </span>
+                  </a>
+                </li>
  <li>
- <a href="tel:+1234567890" className="flex items-start gap-3 min-w-0">
- <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center flex-shrink-0">
- <Phone className="w-4 h-4 text-white" />
- </div>
- <span className="text-white/90 active:text-white text-sm font-medium break-words min-w-0">
- +1 (234) 567-890
- </span>
- </a>
- </li>
- <li>
- <a href="mailto:hello@naturanza.com" className="flex items-start gap-3 min-w-0">
+ <a href="mailto:support@naturanzafoods.com" className="flex items-start gap-3 min-w-0">
  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center flex-shrink-0">
  <Mail className="w-4 h-4 text-white" />
  </div>
  <span className="text-white/90 active:text-white text-sm font-medium break-all min-w-0">
- hello@naturanza.com
+ support@naturanzafoods.com
  </span>
  </a>
  </li>
@@ -451,22 +476,22 @@ export function Footer({ variant = 'full' }) {
  </div>
  </li>
  <li className="group">
- <a href="tel:+1234567890" className="flex items-center gap-3 p-3 rounded-2xl border border-white/10 bg-white/[0.03] md:hover:bg-white/[0.08] transition-colors duration-300 min-w-0 min-h-[74px]">
+ <a href="tel:+923474147400" className="flex items-center gap-3 p-3 rounded-2xl border border-white/10 bg-white/[0.03] md:hover:bg-white/[0.08] transition-colors duration-300 min-w-0 min-h-[74px]">
  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center flex-shrink-0 shadow-lg">
  <Phone className="w-4 h-4 text-white" />
  </div>
  <span className="text-white/90 md:hover:text-white text-sm font-medium leading-snug break-words min-w-0">
- +1 (234) 567-890
+ +92 347 4147400
  </span>
  </a>
  </li>
  <li className="group">
- <a href="mailto:hello@naturanza.com" className="flex items-center gap-3 p-3 rounded-2xl border border-white/10 bg-white/[0.03] md:hover:bg-white/[0.08] transition-colors duration-300 min-w-0 min-h-[74px]">
+ <a href="mailto:support@naturanzafoods.com" className="flex items-center gap-3 p-3 rounded-2xl border border-white/10 bg-white/[0.03] md:hover:bg-white/[0.08] transition-colors duration-300 min-w-0 min-h-[74px]">
  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center flex-shrink-0 shadow-lg">
  <Mail className="w-4 h-4 text-white" />
  </div>
  <span className="text-white/90 md:hover:text-white text-sm font-medium leading-snug break-all min-w-0">
- hello@naturanza.com
+ support@naturanzafoods.com
  </span>
  </a>
  </li>

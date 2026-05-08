@@ -1,9 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { MessageSquare, Star } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { useReviews } from "@/context/ReviewContext";
-import { products as localProducts } from "@/data/products";
+import reviewEvents from "@/utils/reviewEvents";
 
 const renderStars = (rating) => {
   const normalized = Math.max(0, Math.min(5, Number(rating) || 0));
@@ -31,24 +30,73 @@ const formatDate = (value) => {
 
 export function ProfileReviews() {
   const { user } = useAuth();
-  const { reviews } = useReviews();
+  const [myReviews, setMyReviews] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const productLookup = useMemo(() => {
-    return localProducts.reduce((acc, product) => {
-      acc[String(product.id)] = product;
-      return acc;
-    }, {});
+  // Fetch user's reviews from API in real-time
+  const fetchMyReviews = async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        setMyReviews([]);
+        setLoading(false);
+        return;
+      }
+
+      const response = await fetch('http://localhost:5000/api/reviews/my-reviews', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setMyReviews(data);
+      } else {
+        setMyReviews([]);
+      }
+    } catch (error) {
+      console.error('Error fetching my reviews:', error);
+      setMyReviews([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial fetch on mount
+  useEffect(() => {
+    fetchMyReviews();
   }, []);
 
-  const myReviews = useMemo(() => {
-    if (!user?.name) {
-      return [];
-    }
+  // Listen for review submission events
+  useEffect(() => {
+    const handleReviewSubmitted = (data) => {
+      console.log('Review submitted event received:', data);
+      // Refresh reviews when a new review is submitted
+      fetchMyReviews();
+    };
 
-    return reviews
-      .filter((review) => String(review.userName || "") === String(user.name))
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [reviews, user?.name]);
+    // Subscribe to review submitted events
+    const unsubscribe = reviewEvents.onReviewSubmitted(handleReviewSubmitted);
+
+    // Cleanup on unmount
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg p-3 sm:p-8 border border-gray-100">
+        <div className="py-8 sm:py-10 text-center">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-2.5 sm:mb-3 border-4 border-green-200 border-t-green-600 rounded-full animate-spin"></div>
+          <p className="text-sm text-gray-600">Loading your reviews...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg p-3 sm:p-8 border border-gray-100">
@@ -68,38 +116,52 @@ export function ProfileReviews() {
         </div>
       ) : (
         <div className="space-y-2.5 sm:space-y-4">
-          {myReviews.map((review, index) => {
-            const product = productLookup[String(review.productId)] || null;
-
-            return (
-              <article
-                key={review.id || `${review.productId}-${index}`}
-                className="rounded-xl border border-gray-100 p-3 sm:p-4 hover:border-green-200 transition-colors"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs sm:text-sm text-gray-500">{formatDate(review.date)}</p>
-                  <div className="flex items-center gap-1">{renderStars(review.rating)}</div>
-                </div>
-
-                {product ? (
-                  <Link
-                    to={`/product/${review.productId}`}
-                    className="mt-1 block text-[15px] sm:text-base font-semibold text-gray-900 hover:text-green-700 line-clamp-1"
-                  >
-                    {product.name}
-                  </Link>
-                ) : (
-                  <h4 className="mt-1 text-[15px] sm:text-base font-semibold text-gray-900 line-clamp-1">
-                    Product #{review.productId}
-                  </h4>
+          {myReviews.map((review, index) => (
+            <article
+              key={review.id || `${review.product_id}-${index}`}
+              className="rounded-xl border border-gray-100 p-3 sm:p-4 hover:border-green-200 transition-colors"
+            >
+              <div className="flex items-start gap-3">
+                {/* Product Image */}
+                {review.product_image && (
+                  <img
+                    src={review.product_image}
+                    alt={review.product_name || 'Product'}
+                    className="h-16 w-16 sm:h-20 sm:w-20 rounded-lg object-cover border border-gray-200"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                    }}
+                  />
                 )}
 
-                <p className="mt-2 text-sm text-gray-700 leading-relaxed break-words">
-                  {review.comment || "No comment added."}
-                </p>
-              </article>
-            );
-          })}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="text-xs sm:text-sm text-gray-500">{formatDate(review.created_at)}</p>
+                    <div className="flex items-center gap-1">{renderStars(review.rating)}</div>
+                  </div>
+
+                  <Link
+                    to={`/product/${review.product_id}`}
+                    className="block text-[15px] sm:text-base font-semibold text-gray-900 hover:text-green-700 line-clamp-1 mb-2"
+                  >
+                    {review.product_name || `Product #${review.product_id}`}
+                  </Link>
+
+                  <p className="text-sm text-gray-700 leading-relaxed break-words">
+                    {review.comment || "No comment added."}
+                  </p>
+
+                  {/* Approval Status */}
+                  {review.is_approved === 0 && (
+                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-yellow-50 px-2.5 py-1 text-xs font-medium text-yellow-700">
+                      <span className="h-1.5 w-1.5 rounded-full bg-yellow-400"></span>
+                      Pending Approval
+                    </div>
+                  )}
+                </div>
+              </div>
+            </article>
+          ))}
         </div>
       )}
     </div>

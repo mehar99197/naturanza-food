@@ -1,32 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Star } from 'lucide-react';
 
-const DEFAULT_REVIEWS = [
- {
- id: 1,
- name: 'Ayesha Khan',
- date: '2026-02-18',
- rating: 5,
- comment:
- 'Excellent quality. Product bilkul fresh tha aur packaging bhi bohat premium thi.',
- },
- {
- id: 2,
- name: 'Hassan Ali',
- date: '2026-01-27',
- rating: 4,
- comment:
- 'Taste aur quality dono achi thi. Delivery time bhi expected se better raha.',
- },
- {
- id: 3,
- name: 'Sara Ahmed',
- date: '2025-12-30',
- rating: 5,
- comment:
- 'I love this product. Definitely ordering again for my family.',
- },
-];
+// Mock reviews removed - now using real reviews from database
+const DEFAULT_REVIEWS = [];
 
 function formatDate(dateValue) {
  const parsed = new Date(dateValue);
@@ -66,19 +42,23 @@ function renderStars(rating, interactive = false, onSelect = () => {}, hoverValu
 }
 
 export function ProductReviews({
- isLoggedIn = false,
- user = null,
- mockReviews = DEFAULT_REVIEWS,
- onLoginClick,
- onSubmitReview,
+  isLoggedIn = false,
+  user = null,
+  mockReviews = DEFAULT_REVIEWS,
+  onLoginClick,
+  onSubmitReview,
 }) {
- const [rating, setRating] = useState(0);
- const [hoverRating, setHoverRating] = useState(0);
- const [comment, setComment] = useState('');
- const [isSubmitting, setIsSubmitting] = useState(false);
- const [localReviews, setLocalReviews] = useState(mockReviews);
- const [showReviewForm, setShowReviewForm] = useState(false);
- const [showAllReviews, setShowAllReviews] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [comment, setComment] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [localReviews, setLocalReviews] = useState(mockReviews);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [showAllReviews, setShowAllReviews] = useState(false);
+
+  // Check if user is actually logged in - if isLoggedIn is true, user is logged in
+  // The token check is redundant because AuthContext already verifies this
+  const isActuallyLoggedIn = isLoggedIn;
 
  const displayedReviews = useMemo(() => {
  return Array.isArray(mockReviews) && mockReviews.length > 0 ? mockReviews : localReviews;
@@ -123,7 +103,7 @@ export function ProductReviews({
  Customer Reviews
  </h2>
 
- {!isLoggedIn ? (
+ {!isActuallyLoggedIn ? (
  <div className="mb-8 rounded-xl border border-green-100 bg-green-50/60 p-6 text-center">
  <p className="mb-4 text-base font-medium text-gray-700">
  Please log in to leave a review

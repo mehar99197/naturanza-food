@@ -4,7 +4,6 @@ import {
   User,
   Heart,
   Package,
-  Star,
   Shield,
   AlertCircle,
   LogOut,
@@ -37,12 +36,6 @@ const menuItems = [
     icon: Package,
   },
   {
-    to: "/profile/reviews",
-    label: "My Reviews",
-    mobileLabel: "Reviews",
-    icon: Star,
-  },
-  {
     to: "/profile/security",
     label: "Security Settings",
     mobileLabel: "Security",
@@ -62,10 +55,6 @@ const pageMeta = {
   "/profile/orders": {
     title: "My Orders",
     subtitle: "Track and manage your purchases",
-  },
-  "/profile/reviews": {
-    title: "My Reviews",
-    subtitle: "Your product feedback and ratings",
   },
   "/profile/security": {
     title: "Security Settings",

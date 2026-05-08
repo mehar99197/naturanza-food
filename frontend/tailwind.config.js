@@ -117,6 +117,10 @@ module.exports = {
           '0%': { opacity: '0', transform: 'translateX(20px)' },
           '100%': { opacity: '1', transform: 'translateX(0)' },
         },
+        slideInRight: {
+          '0%': { transform: 'translateX(100%)' },
+          '100%': { transform: 'translateX(0)' },
+        },
         popIn: {
           '0%': { opacity: '0', transform: 'scale(0.85)' },
           '70%': { transform: 'scale(1.05)' },
@@ -139,6 +143,7 @@ module.exports = {
         'fade-in-up': 'fadeInUp 0.6s ease-out forwards',
         'fade-in-left': 'fadeInLeft 0.6s ease-out forwards',
         'fade-in-right': 'fadeInRight 0.6s ease-out forwards',
+        'slide-in-right': 'slideInRight 0.3s ease-out',
         'pop-in': 'popIn 0.5s ease-out forwards',
         'shimmer': 'shimmer 2s linear infinite',
       },
@@ -159,5 +164,17 @@ module.exports = {
   },
   plugins: [
     require("tailwindcss-animate"),
+    // Custom plugin for hiding scrollbars
+    function({ addUtilities }) {
+      addUtilities({
+        '.scrollbar-hide': {
+          '-ms-overflow-style': 'none',
+          'scrollbar-width': 'none',
+          '&::-webkit-scrollbar': {
+            display: 'none',
+          },
+        },
+      });
+    },
   ],
 }

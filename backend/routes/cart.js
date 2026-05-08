@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth');
+const { db } = require('../config/db');
 
 // Get user's cart
 router.get('/', authenticateToken, (req, res) => {

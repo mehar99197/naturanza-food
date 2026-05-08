@@ -52,7 +52,6 @@ const Login = () => {
     defaultValues: {
       email: "",
       password: "",
-      rememberMe: false,
     },
   });
 
@@ -117,7 +116,6 @@ const Login = () => {
     const result = await login(
       sanitizeEmail(values.email),
       sanitizeInput(values.password),
-      values.rememberMe,
     );
 
     if (result.success) {
@@ -128,7 +126,9 @@ const Login = () => {
     if (result.isAdmin) {
       setGeneralError(result.message || "Admin accounts must use the admin login page.");
       setTimeout(() => {
-        navigate("/admin/login", { state: { email: values.email } });
+        navigate(result.redirect || "/admin/login", {
+          state: { email: values.email },
+        });
       }, 1800);
       return;
     }
@@ -214,8 +214,8 @@ const Login = () => {
                     {...register("password", {
                       required: "Password is required",
                       minLength: {
-                        value: 6,
-                        message: "Password must be at least 6 characters",
+                        value: 12,
+                        message: "Password must be at least 12 characters",
                       },
                     })}
                     className={`${inputClassName} pr-11 ${
@@ -227,7 +227,7 @@ const Login = () => {
                   <button
                     type="button"
                     onClick={() => setShowPassword((prev) => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 transition hover:text-slate-700"
+                    className="password-toggle-btn absolute right-3 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center text-slate-500 transition hover:text-slate-700"
                     aria-label={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -238,16 +238,7 @@ const Login = () => {
                 ) : null}
               </label>
 
-              <div className="flex items-center justify-between gap-3 pt-0.5">
-                <label className="inline-flex items-center gap-2.5 text-sm text-slate-600">
-                  <input
-                    type="checkbox"
-                    {...register("rememberMe")}
-                    className="h-4 w-4 rounded border-green-200 text-green-700 focus:ring-green-400"
-                  />
-                  <span>Remember me</span>
-                </label>
-
+              <div className="flex items-center justify-end gap-3 pt-0.5">
                 <Link
                   to="/forgot-password"
                   className="text-sm font-semibold text-green-700 transition hover:text-green-800"

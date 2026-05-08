@@ -1,14 +1,52 @@
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
+const { db } = require("../config/db");
 const { authenticateToken } = require("../middleware/auth");
 const { uploadProfileImage } = require("../middleware/upload");
 const {
+  issueAccessToken,
+  issueRefreshToken,
+  verifyAccessToken,
+  verifyRefreshToken,
+  toExpiryDate,
+  getRefreshCookieOptions,
+  clearRefreshCookie,
+  getJwtRuntimeInfo,
+} = require("../utils/jwtTokens");
+const {
   createUserSession,
+  updateSessionToken,
   revokeSessionByToken,
+  revokeSessionById,
+  revokeSessionsByUserId,
 } = require("../utils/sessionManager");
+const {
+  createRefreshTokenRecord,
+  findActiveRefreshTokenRecord,
+  rotateRefreshTokenRecord,
+  revokeRefreshTokenByJti,
+  revokeRefreshTokensBySessionId,
+  revokeRefreshTokensByUserId,
+  touchRefreshTokenByJti,
+  blacklistAccessToken,
+} = require("../utils/tokenStore");
+const {
+  registerSchema,
+  loginSchema,
+  googleLoginSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  strongPassword,
+} = require("../validation/authSchemas");
+const { sendPasswordResetEmail } = require("../utils/emailService");
+const {
+  createPasswordResetToken,
+  validatePasswordResetToken,
+  markTokenAsUsed,
+  invalidateAllUserTokens,
+} = require("../utils/passwordResetTokens");
 
 const googleClient = new OAuth2Client();
 const DEV_DEFAULT_GOOGLE_CLIENT_ID =
@@ -19,6 +57,11 @@ const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
 );
 const LOCATION_CACHE_TTL_MS = 1000 * 60 * 60 * 6;
 const ipLocationCache = new Map();
+const LOGIN_MAX_ATTEMPTS =
+  Number.parseInt(process.env.LOGIN_MAX_ATTEMPTS || "5", 10) || 5;
+const LOGIN_LOCK_MINUTES =
+  Number.parseInt(process.env.LOGIN_LOCK_MINUTES || "15", 10) || 15;
+const JWT_RUNTIME = getJwtRuntimeInfo();
 
 const getAllowedGoogleClientIds = () => {
   const configuredIds = [
@@ -33,54 +76,6 @@ const getAllowedGoogleClientIds = () => {
   }
 
   return [...new Set(configuredIds)];
-};
-
-const getFrontendBaseUrl = () => {
-  const configuredUrl = process.env.FRONTEND_URL || process.env.CLIENT_URL;
-  return (configuredUrl || "http://localhost:5173").replace(/\/$/, "");
-};
-
-const sanitizeRedirectPath = (redirectPath) => {
-  if (typeof redirectPath !== "string") {
-    return "/";
-  }
-
-  if (!redirectPath.startsWith("/") || redirectPath.startsWith("//")) {
-    return "/";
-  }
-
-  return redirectPath;
-};
-
-const createUserAuthToken = (user) =>
-  jwt.sign(
-    { id: user.id, email: user.email, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: "24h" },
-  );
-
-const buildAuthCallbackRedirectUrl = ({
-  token,
-  user,
-  error,
-  provider = "google",
-  next = "/",
-}) => {
-  const callbackUrl = new URL("/auth/callback", `${getFrontendBaseUrl()}/`);
-  callbackUrl.searchParams.set("provider", provider);
-  callbackUrl.searchParams.set("next", sanitizeRedirectPath(next));
-
-  if (error) {
-    callbackUrl.searchParams.set("error", error);
-  } else {
-    callbackUrl.searchParams.set("token", token);
-    callbackUrl.searchParams.set(
-      "user",
-      encodeURIComponent(JSON.stringify(user)),
-    );
-  }
-
-  return callbackUrl.toString();
 };
 
 const normalizeIpAddress = (rawIp) => {
@@ -341,7 +336,7 @@ const createSessionSafely = async (
   provider = "password",
 ) => {
   try {
-    await createUserSession(db.promise(), {
+    return await createUserSession(db.promise(), {
       userId,
       token,
       provider,
@@ -350,7 +345,108 @@ const createSessionSafely = async (
     });
   } catch (error) {
     console.warn("Could not persist user session:", error.message);
+    return null;
   }
+};
+
+const parsePayload = (schema, payload) => {
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message || "Invalid request payload",
+    };
+  }
+
+  return {
+    ok: true,
+    data: parsed.data,
+  };
+};
+
+const isAccountLocked = (userRecord) => {
+  const lockUntil = userRecord?.locked_until
+    ? new Date(userRecord.locked_until)
+    : null;
+
+  if (!lockUntil || Number.isNaN(lockUntil.getTime())) {
+    return false;
+  }
+
+  return lockUntil > new Date();
+};
+
+const markFailedLoginAttempt = async (userRecord) => {
+  const currentAttempts = Number(userRecord?.failed_login_attempts || 0);
+  const nextAttempt = currentAttempts + 1;
+  const shouldLock = nextAttempt >= LOGIN_MAX_ATTEMPTS;
+
+  await db
+    .promise()
+    .query(
+      "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
+      [
+        shouldLock ? 0 : nextAttempt,
+        shouldLock ? new Date(Date.now() + LOGIN_LOCK_MINUTES * 60 * 1000) : null,
+        userRecord.id,
+      ],
+    );
+};
+
+const resetLoginFailures = async (userId) => {
+  await db
+    .promise()
+    .query(
+      "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?",
+      [userId],
+    );
+};
+
+const buildUserResponse = (userRecord, overrides = {}) => ({
+  id: userRecord.id,
+  name: userRecord.name,
+  email: userRecord.email,
+  phone: userRecord.phone || null,
+  address: userRecord.address || null,
+  profile_image: userRecord.profile_image || null,
+  signup_provider: userRecord.signup_provider || "password",
+  password_set_by_user: toBooleanFlag(userRecord.password_set_by_user, true),
+  role: userRecord.role,
+  ...overrides,
+});
+
+const issueAuthSession = async (req, res, userRecord, provider = "password") => {
+  const access = issueAccessToken(userRecord);
+  const refresh = issueRefreshToken(userRecord);
+  const sessionId = await createSessionSafely(req, userRecord.id, access.token, provider);
+
+  if (!sessionId) {
+    throw new Error("Could not persist session");
+  }
+
+  const refreshPayload = verifyRefreshToken(refresh.token);
+  const refreshExpiry = toExpiryDate(refreshPayload);
+
+  await createRefreshTokenRecord(db.promise(), {
+    userId: userRecord.id,
+    sessionId,
+    refreshToken: refresh.token,
+    refreshTokenJti: refresh.jti,
+    expiresAt: refreshExpiry,
+    ipAddress: getRequestIp(req),
+    userAgent: req.headers["user-agent"] || null,
+  });
+
+  res.cookie(
+    JWT_RUNTIME.refreshCookieName,
+    refresh.token,
+    getRefreshCookieOptions(),
+  );
+
+  return {
+    accessToken: access.token,
+    accessTokenExpiresIn: access.expiresInSeconds,
+  };
 };
 
 const getBearerToken = (req) => {
@@ -365,200 +461,178 @@ const getBearerToken = (req) => {
 // Register new user
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password, phone, address, role } = req.body;
-
-    // Validation
-    if (!name || !email || !password) {
-      return res
-        .status(400)
-        .json({ error: "Name, email, and password are required" });
+    const parsedBody = parsePayload(registerSchema, req.body || {});
+    if (!parsedBody.ok) {
+      return res.status(400).json({ error: parsedBody.error });
     }
 
-    // Check if user already exists
-    db.query(
-      "SELECT * FROM users WHERE email = ?",
-      [email],
-      async (err, results) => {
-        if (err) {
-          return res.status(500).json({ error: "Database error" });
-        }
+    const { name, email, password, phone, address } = parsedBody.data;
+    const normalizedEmail = String(email).trim().toLowerCase();
 
-        if (results.length > 0) {
-          return res.status(400).json({ error: "Email already registered" });
-        }
+    const [existingUsers] = await db
+      .promise()
+      .query("SELECT id FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
 
-        // Determine user role (default to customer)
-        const userRole = role === "admin" ? "admin" : "customer";
+    if (existingUsers.length > 0) {
+      return res.status(400).json({ error: "Email already registered" });
+    }
 
-        // Use different salt rounds based on role
-        // Normal users: 4 salt rounds (faster, sufficient for regular users)
-        // Admin users: 10 salt rounds (more secure for privileged accounts)
-        const saltRounds = userRole === "admin" ? 10 : 4;
-
-        // Hash password with appropriate salt rounds
-        const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-        // Insert new user
-        const query =
-          "INSERT INTO users (name, email, password, phone, address, role, signup_provider, password_set_by_user) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-        db.query(
-          query,
-          [
-            name,
-            email,
-            hashedPassword,
-            phone,
-            address,
-            userRole,
-            "password",
-            true,
-          ],
-          async (err, result) => {
-            if (err) {
-              return res.status(500).json({ error: "Error creating user" });
-            }
-
-            // Generate JWT token for auto-login after registration
-            const token = jwt.sign(
-              { id: result.insertId, email, role: userRole },
-              process.env.JWT_SECRET,
-              { expiresIn: "24h" },
-            );
-
-            await createSessionSafely(req, result.insertId, token, "password");
-
-            res.status(201).json({
-              message: "User registered successfully",
-              token,
-              user: {
-                id: result.insertId,
-                name,
-                email,
-                phone: phone || null,
-                address: address || null,
-                profile_image: null,
-                signup_provider: "password",
-                password_set_by_user: true,
-                role: userRole,
-              },
-            });
-          },
-        );
-      },
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const [insertResult] = await db.promise().query(
+      `INSERT INTO users
+        (name, email, password, phone, address, role, signup_provider, password_set_by_user, failed_login_attempts, locked_until)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+      [
+        name,
+        normalizedEmail,
+        hashedPassword,
+        phone || null,
+        address || null,
+        "customer",
+        "password",
+        true,
+      ],
     );
+
+    const userRecord = {
+      id: insertResult.insertId,
+      name,
+      email: normalizedEmail,
+      phone: phone || null,
+      address: address || null,
+      profile_image: null,
+      signup_provider: "password",
+      password_set_by_user: true,
+      role: "customer",
+    };
+
+    const authSession = await issueAuthSession(req, res, userRecord, "password");
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(201).json({
+      message: "User registered successfully",
+      accessToken: authSession.accessToken,
+      accessTokenExpiresIn: authSession.accessTokenExpiresIn,
+      user: buildUserResponse(userRecord),
+    });
   } catch (error) {
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
 // Login user
-router.post("/login", (req, res) => {
+router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const normalizedEmail = String(email || "").trim().toLowerCase();
-
-    // Validation
-    if (!email || !password) {
+    const parsedBody = parsePayload(loginSchema, req.body || {});
+    if (!parsedBody.ok) {
       void recordLoginHistorySafely({
         req,
-        attemptedEmail: normalizedEmail || null,
+        attemptedEmail: String(req.body?.email || "")
+          .trim()
+          .toLowerCase() || null,
         status: "failed",
         provider: "password",
-        failureReason: "Missing credentials",
+        failureReason: "Invalid login payload",
       });
 
-      return res.status(400).json({ error: "Email and password are required" });
+      return res.status(400).json({ error: parsedBody.error });
     }
 
-    // Find user
-    db.query(
-      "SELECT * FROM users WHERE email = ?",
-      [normalizedEmail],
-      async (err, results) => {
-        if (err) {
-          return res.status(500).json({ error: "Database error" });
-        }
+    const { email, password } = parsedBody.data;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
 
-        if (results.length === 0) {
-          void recordLoginHistorySafely({
-            req,
-            attemptedEmail: normalizedEmail,
-            status: "failed",
-            provider: "password",
-            failureReason: "Email not found",
-          });
+    const [users] = await db
+      .promise()
+      .query("SELECT * FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
 
-          return res.status(401).json({ error: "Invalid email or password" });
-        }
+    if (!users.length) {
+      void recordLoginHistorySafely({
+        req,
+        attemptedEmail: normalizedEmail,
+        status: "failed",
+        provider: "password",
+        failureReason: "Invalid credentials",
+      });
 
-        const user = results[0];
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
 
-        if (!user.is_active) {
-          void recordLoginHistorySafely({
-            req,
-            userId: user.id,
-            attemptedEmail: user.email,
-            status: "failed",
-            provider: "password",
-            failureReason: "Account disabled",
-          });
+    const user = users[0];
 
-          return res
-            .status(403)
-            .json({ error: "Account is disabled. Please contact support." });
-        }
+    if (!user.is_active) {
+      void recordLoginHistorySafely({
+        req,
+        userId: user.id,
+        attemptedEmail: user.email,
+        status: "failed",
+        provider: "password",
+        failureReason: "Account disabled",
+      });
 
-        // Compare password
-        const isValidPassword = await bcrypt.compare(password, user.password);
-        if (!isValidPassword) {
-          void recordLoginHistorySafely({
-            req,
-            userId: user.id,
-            attemptedEmail: user.email,
-            status: "failed",
-            provider: "password",
-            failureReason: "Invalid password",
-          });
+      return res
+        .status(403)
+        .json({ error: "Account is disabled. Please contact support." });
+    }
 
-          return res.status(401).json({ error: "Invalid email or password" });
-        }
+    if (isAccountLocked(user)) {
+      return res.status(423).json({
+        error: "Account temporarily locked due to multiple failed attempts.",
+      });
+    }
 
-        // Generate JWT token
-        const token = jwt.sign(
-          { id: user.id, email: user.email, role: user.role },
-          process.env.JWT_SECRET,
-          { expiresIn: "24h" },
-        );
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    if (!isValidPassword) {
+      await markFailedLoginAttempt(user);
+      void recordLoginHistorySafely({
+        req,
+        userId: user.id,
+        attemptedEmail: user.email,
+        status: "failed",
+        provider: "password",
+        failureReason: "Invalid credentials",
+      });
 
-        await createSessionSafely(req, user.id, token, "password");
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
 
-        void recordLoginHistorySafely({
-          req,
-          userId: user.id,
-          attemptedEmail: user.email,
-          status: "success",
-          provider: "password",
-        });
+    await resetLoginFailures(user.id);
 
-        res.json({
-          message: "Login successful",
-          token,
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            phone: user.phone || null,
-            address: user.address || null,
-            profile_image: user.profile_image || null,
-            signup_provider: user.signup_provider || "password",
-            password_set_by_user: toBooleanFlag(user.password_set_by_user, true),
-            role: user.role,
-          },
-        });
-      },
-    );
+    if (String(user.role || "").trim().toLowerCase() === "admin") {
+      void recordLoginHistorySafely({
+        req,
+        userId: user.id,
+        attemptedEmail: user.email,
+        status: "failed",
+        provider: "password",
+        failureReason: "Admin account attempted customer login",
+      });
+
+      return res.status(403).json({
+        error: "Admin accounts must use the admin login page.",
+        isAdmin: true,
+        redirect: "/admin/login",
+      });
+    }
+
+    const authSession = await issueAuthSession(req, res, user, "password");
+
+    void recordLoginHistorySafely({
+      req,
+      userId: user.id,
+      attemptedEmail: user.email,
+      status: "success",
+      provider: "password",
+    });
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({
+      message: "Login successful",
+      accessToken: authSession.accessToken,
+      accessTokenExpiresIn: authSession.accessTokenExpiresIn,
+      user: buildUserResponse(user),
+    });
   } catch (error) {
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
@@ -567,22 +641,15 @@ router.post("/google", async (req, res) => {
   let attemptedEmail = null;
 
   try {
-    const { idToken } = req.body;
-
-    if (!idToken) {
-      console.error("Google auth error: No idToken provided");
-      void recordLoginHistorySafely({
-        req,
-        status: "failed",
-        provider: "google",
-        failureReason: "Missing Google token",
-      });
-      return res.status(400).json({ error: "Google ID token is required" });
+    const parsedBody = parsePayload(googleLoginSchema, req.body || {});
+    if (!parsedBody.ok) {
+      return res.status(400).json({ error: parsedBody.error });
     }
+
+    const { idToken } = parsedBody.data;
 
     const allowedClientIds = getAllowedGoogleClientIds();
     if (!allowedClientIds.length) {
-      console.error("Google auth error: GOOGLE_CLIENT_ID not configured");
       void recordLoginHistorySafely({
         req,
         status: "failed",
@@ -591,13 +658,6 @@ router.post("/google", async (req, res) => {
       });
       return res.status(500).json({ error: "Google OAuth is not configured" });
     }
-
-    console.log(
-      "Verifying Google token with allowed Client IDs:",
-      allowedClientIds
-        .map((clientId) => `${clientId.substring(0, 20)}...`)
-        .join(", "),
-    );
 
     const ticket = await googleClient.verifyIdToken({
       idToken,
@@ -609,13 +669,7 @@ router.post("/google", async (req, res) => {
       .trim()
       .toLowerCase() || null;
 
-    console.log(
-      "Google token verified successfully for email:",
-      payload?.email,
-    );
-
     if (!payload || !payload.email || !payload.email_verified) {
-      console.error("Google auth error: Invalid payload or unverified email");
       void recordLoginHistorySafely({
         req,
         attemptedEmail,
@@ -628,172 +682,126 @@ router.post("/google", async (req, res) => {
       });
     }
 
-    const email = payload.email;
+    const email = String(payload.email || "").trim().toLowerCase();
     attemptedEmail = String(email || "")
       .trim()
       .toLowerCase();
     const displayName = payload.name || email.split("@")[0] || "Google User";
 
-    db.query(
-      "SELECT id, name, email, phone, address, profile_image, role, is_active, signup_provider, password_set_by_user FROM users WHERE email = ?",
+    const [results] = await db.promise().query(
+      "SELECT id, name, email, phone, address, profile_image, role, is_active, signup_provider, password_set_by_user FROM users WHERE email = ? LIMIT 1",
       [email],
-      async (err, results) => {
-        if (err) {
-          console.error("Google auth DB error:", err.message);
-          void recordLoginHistorySafely({
-            req,
-            attemptedEmail,
-            status: "failed",
-            provider: "google",
-            failureReason: "Database error",
-          });
-          return res.status(500).json({ error: "Database error" });
-        }
-
-        if (results.length > 0) {
-          const existingUser = results[0];
-
-          if (!existingUser.is_active) {
-            void recordLoginHistorySafely({
-              req,
-              userId: existingUser.id,
-              attemptedEmail: existingUser.email,
-              status: "failed",
-              provider: "google",
-              failureReason: "Account disabled",
-            });
-            return res.status(403).json({
-              error: "Account is disabled. Please contact support.",
-            });
-          }
-
-          console.log("Existing user found, logging in:", email);
-
-          const token = jwt.sign(
-            {
-              id: existingUser.id,
-              email: existingUser.email,
-              role: existingUser.role,
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: "24h" },
-          );
-
-          await createSessionSafely(req, existingUser.id, token, "google");
-
-          void recordLoginHistorySafely({
-            req,
-            userId: existingUser.id,
-            attemptedEmail: existingUser.email,
-            status: "success",
-            provider: "google",
-          });
-
-          return res.json({
-            message: "Google login successful",
-            token,
-            user: {
-              id: existingUser.id,
-              name: existingUser.name || displayName,
-              email: existingUser.email,
-              phone: existingUser.phone || null,
-              address: existingUser.address || null,
-              profile_image: existingUser.profile_image || null,
-              signup_provider: existingUser.signup_provider || "password",
-              password_set_by_user: toBooleanFlag(
-                existingUser.password_set_by_user,
-                true,
-              ),
-              role: existingUser.role,
-            },
-          });
-        }
-
-        // The users table requires password, so store a random hash for Google-created accounts.
-        console.log("New user, creating account for:", email);
-        const randomPassword = await bcrypt.hash(
-          `google_${payload.sub}_${Date.now()}`,
-          10,
-        );
-
-        const query =
-          "INSERT INTO users (name, email, password, role, signup_provider, password_set_by_user) VALUES (?, ?, ?, ?, ?, ?)";
-        db.query(
-          query,
-          [displayName, email, randomPassword, "customer", "google", false],
-          async (insertErr, result) => {
-            if (insertErr) {
-              console.error(
-                "Google auth user creation error:",
-                insertErr.message,
-              );
-              void recordLoginHistorySafely({
-                req,
-                attemptedEmail,
-                status: "failed",
-                provider: "google",
-                failureReason: "User creation failed",
-              });
-              return res
-                .status(500)
-                .json({ error: "Error creating user account" });
-            }
-
-            console.log("New user created successfully:", email);
-
-            const token = jwt.sign(
-              { id: result.insertId, email, role: "customer" },
-              process.env.JWT_SECRET,
-              { expiresIn: "24h" },
-            );
-
-            await createSessionSafely(req, result.insertId, token, "google");
-
-            void recordLoginHistorySafely({
-              req,
-              userId: result.insertId,
-              attemptedEmail: email,
-              status: "success",
-              provider: "google",
-            });
-
-            return res.status(201).json({
-              message: "Google signup successful",
-              token,
-              user: {
-                id: result.insertId,
-                name: displayName,
-                email,
-                phone: null,
-                address: null,
-                profile_image: null,
-                signup_provider: "google",
-                password_set_by_user: false,
-                role: "customer",
-              },
-            });
-          },
-        );
-      },
     );
-  } catch (error) {
-    console.error("Google auth error:", error.message);
-    console.error("Error details:", error);
 
-    // Provide more specific error messages
+    if (results.length > 0) {
+      const existingUser = results[0];
+
+      if (!existingUser.is_active) {
+        void recordLoginHistorySafely({
+          req,
+          userId: existingUser.id,
+          attemptedEmail: existingUser.email,
+          status: "failed",
+          provider: "google",
+          failureReason: "Account disabled",
+        });
+        return res.status(403).json({
+          error: "Account is disabled. Please contact support.",
+        });
+      }
+
+      if (isAccountLocked(existingUser)) {
+        return res.status(423).json({
+          error: "Account temporarily locked due to multiple failed attempts.",
+        });
+      }
+
+      if (String(existingUser.role || "").trim().toLowerCase() === "admin") {
+        return res.status(403).json({
+          error: "Admin accounts must use the admin login page.",
+          isAdmin: true,
+          redirect: "/admin/login",
+        });
+      }
+
+      await resetLoginFailures(existingUser.id);
+
+      const authSession = await issueAuthSession(req, res, existingUser, "google");
+
+      void recordLoginHistorySafely({
+        req,
+        userId: existingUser.id,
+        attemptedEmail: existingUser.email,
+        status: "success",
+        provider: "google",
+      });
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({
+        message: "Google login successful",
+        accessToken: authSession.accessToken,
+        accessTokenExpiresIn: authSession.accessTokenExpiresIn,
+        user: buildUserResponse(existingUser, {
+          name: existingUser.name || displayName,
+        }),
+      });
+    }
+
+    const randomPassword = await bcrypt.hash(
+      `google_${payload.sub}_${Date.now()}`,
+      12,
+    );
+
+    const [insertResult] = await db.promise().query(
+      `INSERT INTO users
+        (name, email, password, role, signup_provider, password_set_by_user, failed_login_attempts, locked_until)
+       VALUES (?, ?, ?, ?, ?, ?, 0, NULL)`,
+      [displayName, email, randomPassword, "customer", "google", false],
+    );
+
+    const createdUser = {
+      id: insertResult.insertId,
+      name: displayName,
+      email,
+      phone: null,
+      address: null,
+      profile_image: null,
+      signup_provider: "google",
+      password_set_by_user: false,
+      role: "customer",
+    };
+
+    const authSession = await issueAuthSession(req, res, createdUser, "google");
+
+    void recordLoginHistorySafely({
+      req,
+      userId: insertResult.insertId,
+      attemptedEmail: email,
+      status: "success",
+      provider: "google",
+    });
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(201).json({
+      message: "Google signup successful",
+      accessToken: authSession.accessToken,
+      accessTokenExpiresIn: authSession.accessTokenExpiresIn,
+      user: buildUserResponse(createdUser),
+    });
+  } catch (error) {
     let errorMessage = "Google authentication failed";
-    if (error.message.includes("Token used too early")) {
+    if (String(error.message || "").includes("Token used too early")) {
       errorMessage = "Google token timing error. Please try again.";
-    } else if (error.message.includes("Wrong number of segments")) {
+    } else if (String(error.message || "").includes("Wrong number of segments")) {
       errorMessage = "Invalid Google token format";
     } else if (
-      error.message.includes("Wrong recipient") ||
-      error.message.includes("audience")
+      String(error.message || "").includes("Wrong recipient") ||
+      String(error.message || "").includes("audience")
     ) {
       errorMessage = "Google Client ID mismatch. Please contact support.";
-    } else if (error.message.includes("Invalid token signature")) {
+    } else if (String(error.message || "").includes("Invalid token signature")) {
       errorMessage = "Invalid Google token signature";
-    } else if (error.message.includes("Token used too late")) {
+    } else if (String(error.message || "").includes("Token used too late")) {
       errorMessage = "Google token expired. Please try again.";
     }
 
@@ -895,6 +903,15 @@ router.put("/change-password", authenticateToken, async (req, res) => {
         .json({ error: "New password is required" });
     }
 
+    const passwordValidation = strongPassword.safeParse(newPassword);
+    if (!passwordValidation.success) {
+      return res.status(400).json({
+        error:
+          passwordValidation.error.issues[0]?.message ||
+          "Password does not meet security requirements",
+      });
+    }
+
     // Get user's current password and password policy mode
     db.query(
       "SELECT password, password_set_by_user FROM users WHERE id = ?",
@@ -932,7 +949,7 @@ router.put("/change-password", authenticateToken, async (req, res) => {
         }
 
         // Hash new password
-        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        const hashedPassword = await bcrypt.hash(newPassword, 12);
 
         // Update password
         db.query(
@@ -1471,85 +1488,321 @@ router.put("/notifications/settings", authenticateToken, (req, res) => {
 });
 
 // Forgot Password - Send reset link
-router.post("/forgot-password", (req, res) => {
+router.post("/forgot-password", async (req, res) => {
   try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({ error: "Email is required" });
+    const parsedBody = parsePayload(forgotPasswordSchema, req.body || {});
+    if (!parsedBody.ok) {
+      return res.status(400).json({ error: parsedBody.error });
     }
 
-    // Check if user exists
-    db.query(
-      "SELECT id FROM users WHERE email = ?",
-      [email],
-      (err, results) => {
-        if (err) {
-          return res.status(500).json({ error: "Database error" });
-        }
+    const normalizedEmail = String(parsedBody.data.email || "")
+      .trim()
+      .toLowerCase();
 
-        // Always return success for security reasons (don't reveal if email exists)
-        if (results.length === 0) {
-          return res.json({
-            message: "If email exists, a reset link will be sent shortly",
-            success: true,
-          });
-        }
+    // Always return success message for security (don't reveal if email exists)
+    const successResponse = {
+      message: "If an account exists with this email, a password reset link will be sent shortly.",
+      success: true,
+    };
 
-        // In a production app, you would:
-        // 1. Generate a reset token
-        // 2. Store it in database with expiration
-        // 3. Send email with reset link
-        // For now, just acknowledge the request
-        res.json({
-          message: "Reset link sent to your email",
-          success: true,
-        });
-      },
-    );
+    // Find user by email
+    const [users] = await db
+      .promise()
+      .query("SELECT id, name, email, is_active FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
+
+    // If no user found, return success (security: don't reveal email existence)
+    if (!users.length) {
+      console.log(`Password reset requested for non-existent email: ${normalizedEmail}`);
+      return res.json(successResponse);
+    }
+
+    const user = users[0];
+
+    // Check if user account is active
+    if (!user.is_active) {
+      console.log(`Password reset requested for inactive account: ${normalizedEmail}`);
+      return res.json(successResponse);
+    }
+
+    // Create password reset token
+    const tokenData = await createPasswordResetToken(db.promise(), user.id, user.email);
+
+    // Send password reset email
+    const emailResult = await sendPasswordResetEmail(user.email, user.name, tokenData.token);
+
+    if (!emailResult.success) {
+      console.error(`Failed to send password reset email to ${user.email}:`, emailResult.error);
+      // Still return success to user (don't reveal email sending issues)
+      // But log the error for debugging
+    } else {
+      console.log(`Password reset email sent to ${user.email}, expires in ${tokenData.expiresInMinutes} minutes`);
+    }
+
+    return res.json(successResponse);
   } catch (error) {
-    res.status(500).json({ error: "Server error" });
+    console.error("Forgot password error:", error);
+    return res.status(500).json({ error: "Server error. Please try again later." });
   }
 });
 
-// Reset Password
+// Reset Password - Verify token and update password
 router.post("/reset-password", async (req, res) => {
   try {
-    const { token, newPassword } = req.body;
-
-    if (!token || !newPassword) {
-      return res
-        .status(400)
-        .json({ error: "Token and new password are required" });
+    const parsedBody = parsePayload(resetPasswordSchema, req.body || {});
+    if (!parsedBody.ok) {
+      return res.status(400).json({ error: parsedBody.error });
     }
 
-    // In a production app, you would:
-    // 1. Verify the reset token
-    // 2. Extract user ID from token
-    // 3. Update the password
-    // For now, return success
-    res.json({
-      message: "Password reset successfully",
+    const { token, newPassword } = parsedBody.data;
+
+    if (!token) {
+      return res.status(400).json({ error: "Reset token is required" });
+    }
+
+    // Validate the reset token
+    const tokenValidation = await validatePasswordResetToken(db.promise(), token);
+
+    if (!tokenValidation) {
+      return res.status(400).json({ 
+        error: "Invalid or expired reset link. Please request a new password reset.",
+        success: false,
+      });
+    }
+
+    if (!tokenValidation.valid) {
+      return res.status(400).json({ 
+        error: tokenValidation.reason || "Invalid or expired reset link. Please request a new password reset.",
+        success: false,
+      });
+    }
+
+    // Validate password strength (already validated by schema, but double-check)
+    const passwordValidation = strongPassword.safeParse(newPassword);
+    if (!passwordValidation.success) {
+      return res.status(400).json({
+        error: passwordValidation.error.issues[0]?.message || "Password does not meet security requirements",
+        success: false,
+      });
+    }
+
+    const [userRows] = await db
+      .promise()
+      .query("SELECT password FROM users WHERE id = ?", [tokenValidation.userId]);
+
+    if (userRows.length && userRows[0].password) {
+      const isSamePassword = await bcrypt.compare(newPassword, userRows[0].password);
+      if (isSamePassword) {
+        return res.status(400).json({
+          error: "New password must be different from your current password.",
+          success: false,
+        });
+      }
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    // Update user's password
+    await db.promise().query(
+      "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
+      [hashedPassword, tokenValidation.userId]
+    );
+
+    // Mark token as used
+    await markTokenAsUsed(db.promise(), tokenValidation.tokenId);
+
+    // Invalidate all other reset tokens for this user
+    await invalidateAllUserTokens(db.promise(), tokenValidation.userId);
+
+    await revokeSessionsByUserId(db.promise(), tokenValidation.userId);
+    await revokeRefreshTokensByUserId(
+      db.promise(),
+      tokenValidation.userId,
+      "password_reset",
+    );
+
+    console.log(`Password successfully reset for user ${tokenValidation.email}`);
+
+    return res.json({
+      message: "Password reset successfully. You can now log in with your new password.",
       success: true,
     });
   } catch (error) {
-    res.status(500).json({ error: "Server error" });
+    console.error("Reset password error:", error);
+    return res.status(500).json({ error: "Server error. Please try again later." });
+  }
+});
+
+// Refresh Access Token
+router.post("/refresh", async (req, res) => {
+  const refreshToken = req.cookies?.[JWT_RUNTIME.refreshCookieName];
+
+  if (!refreshToken) {
+    clearRefreshCookie(res);
+    return res.status(401).json({ error: "Refresh token is required" });
+  }
+
+  let refreshPayload;
+  try {
+    refreshPayload = verifyRefreshToken(refreshToken);
+  } catch (error) {
+    clearRefreshCookie(res);
+    return res.status(401).json({ error: "Invalid or expired refresh token" });
+  }
+
+  try {
+    const refreshRecord = await findActiveRefreshTokenRecord(db.promise(), {
+      refreshTokenJti: refreshPayload.jti,
+      refreshToken,
+    });
+
+    const refreshUserId = Number(refreshPayload.sub || 0);
+    if (
+      !refreshRecord ||
+      !Number.isInteger(refreshUserId) ||
+      refreshUserId <= 0 ||
+      Number(refreshRecord.user_id) !== refreshUserId ||
+      refreshRecord.isRevoked ||
+      refreshRecord.isExpired
+    ) {
+      if (Number.isInteger(refreshUserId) && refreshUserId > 0) {
+        await revokeRefreshTokensByUserId(
+          db.promise(),
+          refreshUserId,
+          "invalid_or_reused_refresh_token",
+        );
+      }
+
+      clearRefreshCookie(res);
+      return res.status(401).json({ error: "Invalid or expired refresh token" });
+    }
+
+    const [sessionRows] = await db.promise().query(
+      "SELECT id, is_active FROM user_sessions WHERE id = ? AND user_id = ? LIMIT 1",
+      [refreshRecord.session_id, refreshRecord.user_id],
+    );
+
+    if (!sessionRows.length || !sessionRows[0].is_active) {
+      await revokeRefreshTokensBySessionId(
+        db.promise(),
+        refreshRecord.session_id,
+        "session_inactive",
+      );
+      clearRefreshCookie(res);
+      return res.status(401).json({ error: "Session revoked. Please log in again." });
+    }
+
+    const [userRows] = await db.promise().query(
+      `SELECT
+          id, name, email, phone, address, profile_image,
+          signup_provider, password_set_by_user, role, is_active
+       FROM users
+       WHERE id = ?
+       LIMIT 1`,
+      [refreshRecord.user_id],
+    );
+
+    if (!userRows.length || !userRows[0].is_active) {
+      await revokeRefreshTokensByUserId(
+        db.promise(),
+        refreshRecord.user_id,
+        "account_inactive",
+      );
+      clearRefreshCookie(res);
+      return res.status(401).json({ error: "Session invalid. Please log in again." });
+    }
+
+    const user = userRows[0];
+    const nextAccess = issueAccessToken(user);
+    const nextRefresh = issueRefreshToken(user);
+    const nextRefreshPayload = verifyRefreshToken(nextRefresh.token);
+    const nextRefreshExpiry = toExpiryDate(nextRefreshPayload);
+
+    await rotateRefreshTokenRecord(db.promise(), {
+      oldRefreshTokenJti: refreshPayload.jti,
+      newRefreshToken: nextRefresh.token,
+      newRefreshTokenJti: nextRefresh.jti,
+      expiresAt: nextRefreshExpiry,
+      userId: user.id,
+      sessionId: refreshRecord.session_id,
+      ipAddress: getRequestIp(req),
+      userAgent: req.headers["user-agent"] || null,
+    });
+
+    await touchRefreshTokenByJti(db.promise(), nextRefresh.jti);
+    await updateSessionToken(db.promise(), refreshRecord.session_id, nextAccess.token);
+
+    res.cookie(
+      JWT_RUNTIME.refreshCookieName,
+      nextRefresh.token,
+      getRefreshCookieOptions(),
+    );
+
+    return res.json({
+      message: "Token refreshed successfully",
+      accessToken: nextAccess.token,
+      accessTokenExpiresIn: nextAccess.expiresInSeconds,
+      user: buildUserResponse(user),
+    });
+  } catch (error) {
+    clearRefreshCookie(res);
+    return res.status(401).json({ error: "Invalid or expired refresh token" });
   }
 });
 
 // Logout
 router.post("/logout", async (req, res) => {
-  try {
-    const token = getBearerToken(req);
+  const token = getBearerToken(req);
+  const refreshToken = req.cookies?.[JWT_RUNTIME.refreshCookieName];
 
+  try {
     if (token) {
+      try {
+        const payload = verifyAccessToken(token);
+        const expiryDate = toExpiryDate(payload);
+        await blacklistAccessToken(db.promise(), {
+          jti: payload.jti,
+          userId: Number(payload.sub || 0) || null,
+          token,
+          expiresAt: expiryDate,
+          reason: "logout",
+        });
+      } catch (error) {
+        // Access token may already be expired; session revocation below still applies.
+      }
+
       await revokeSessionByToken(db.promise(), token);
+    }
+
+    if (refreshToken) {
+      try {
+        const refreshPayload = verifyRefreshToken(refreshToken);
+        const refreshRecord = await findActiveRefreshTokenRecord(db.promise(), {
+          refreshTokenJti: refreshPayload.jti,
+          refreshToken,
+        });
+
+        if (refreshRecord?.session_id) {
+          await revokeSessionById(db.promise(), refreshRecord.session_id);
+          await revokeRefreshTokensBySessionId(
+            db.promise(),
+            refreshRecord.session_id,
+            "logout",
+          );
+        }
+
+        await revokeRefreshTokenByJti(db.promise(), refreshPayload.jti, "logout");
+      } catch (error) {
+        // Refresh cookie may already be invalid or expired.
+      }
     }
   } catch (error) {
     // Keep logout success response deterministic for clients.
+  } finally {
+    clearRefreshCookie(res);
   }
 
-  res.json({
+  return res.json({
     message: "Logged out successfully",
     success: true,
   });

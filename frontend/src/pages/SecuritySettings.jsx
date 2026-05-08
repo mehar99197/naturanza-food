@@ -18,7 +18,7 @@ const buildPasswordChecks = (password) => {
   const value = String(password || "");
 
   return {
-    length: value.length >= 8,
+    length: value.length >= 12,
     uppercase: /[A-Z]/.test(value),
     lowercase: /[a-z]/.test(value),
     number: /[0-9]/.test(value),
@@ -380,7 +380,7 @@ export default function SecuritySettings() {
           <button
             type="button"
             onClick={() => togglePasswordVisibility(fieldName)}
-            className="absolute inset-y-0 right-0 pr-2.5 sm:pr-3 flex items-center text-gray-400 hover:text-green-600"
+            className="password-toggle-btn absolute right-2.5 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center text-gray-400 transition hover:text-green-600 sm:right-3 sm:h-9 sm:w-9"
             aria-label={isVisible ? "Hide password" : "Show password"}
           >
             {isVisible ? (
@@ -482,7 +482,7 @@ export default function SecuritySettings() {
             <p className="font-medium">
               {passwordIsStrong
                 ? "Strong password. Your new password meets all security requirements."
-                : "Strong password required: use at least 8 characters with uppercase, lowercase, number, and special character."}
+                : "Strong password required: use at least 12 characters with uppercase, lowercase, number, and special character."}
             </p>
           </div>
 

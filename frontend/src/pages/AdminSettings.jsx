@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AdminLayout } from '@/components/AdminLayout';
 import { useSettings } from '@/context/SettingsContext';
+import { adminAPI } from '@/services/api';
 import { 
  Store,
  Bell,
@@ -27,7 +28,11 @@ const DEFAULT_SETTINGS = {
 };
 
 export function AdminSettings() {
- const { settings: globalSettings, updateSettings } = useSettings();
+ const {
+ settings: globalSettings,
+ updateSettings,
+ error: settingsError,
+ } = useSettings();
  const [settings, setSettings] = useState(globalSettings);
  const [originalSettings, setOriginalSettings] = useState(globalSettings);
  const [errors, setErrors] = useState({});
@@ -36,6 +41,13 @@ export function AdminSettings() {
  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
  const [testEmailSending, setTestEmailSending] = useState(false);
  const [mobileSection, setMobileSection] = useState('store');
+
+ useEffect(() => {
+ if (!hasUnsavedChanges) {
+ setSettings(globalSettings);
+ setOriginalSettings(globalSettings);
+ }
+ }, [globalSettings, hasUnsavedChanges]);
 
  useEffect(() => {
  const isDifferent = JSON.stringify(settings) !== JSON.stringify(originalSettings);
@@ -91,41 +103,64 @@ export function AdminSettings() {
  }
 
  setIsSaving(true);
- // Simulate API call
- await new Promise(resolve => setTimeout(resolve, 1000));
- 
- // Update global settings context
- updateSettings(settings);
- 
- setOriginalSettings(settings);
- setIsSaving(false);
+ try {
+ const payload = {
+ ...settings,
+ taxRate: Number(settings.taxRate) || 0,
+ shippingFlat: Number(settings.shippingFlat) || 0,
+ shippingFree: Number(settings.shippingFree) || 0,
+ };
+
+ const savedSettings = await adminAPI.updateSettings(payload);
+ updateSettings(savedSettings);
+ setSettings(savedSettings);
+ setOriginalSettings(savedSettings);
  setShowSuccessToast(true);
  setTimeout(() => setShowSuccessToast(false), 3000);
+ } catch (error) {
+ alert(error?.response?.data?.error || 'Failed to save settings');
+ } finally {
+ setIsSaving(false);
+ }
  };
 
  const handleReset = () => {
  if (confirm('Are you sure you want to reset all settings to defaults?')) {
- setSettings(DEFAULT_SETTINGS);
- setOriginalSettings(DEFAULT_SETTINGS);
- updateSettings(DEFAULT_SETTINGS);
+ (async () => {
+ try {
+ setIsSaving(true);
+ const savedSettings = await adminAPI.updateSettings(DEFAULT_SETTINGS);
+ updateSettings(savedSettings);
+ setSettings(savedSettings);
+ setOriginalSettings(savedSettings);
  setErrors({});
+ } catch (error) {
+ alert(error?.response?.data?.error || 'Failed to reset settings');
+ } finally {
+ setIsSaving(false);
+ }
+ })();
  }
  };
 
  const handleTestEmail = async () => {
  setTestEmailSending(true);
- // Simulate sending test email
- await new Promise(resolve => setTimeout(resolve, 1500));
+ try {
+ const response = await adminAPI.sendTestEmail(settings.storeEmail);
+ alert(response?.message || `Test email sent to ${settings.storeEmail}`);
+ } catch (error) {
+ alert(error?.response?.data?.error || 'Failed to send test email');
+ } finally {
  setTestEmailSending(false);
- alert('Test email sent to ' + settings.storeEmail);
+ }
  };
 
  return (
  <AdminLayout>
- <div className="max-w-4xl mx-auto">
+ <div className="mx-auto w-full max-w-[1240px] space-y-4 sm:space-y-6">
  {/* Success Toast */}
  {showSuccessToast && (
- <div className="fixed top-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0 z-50 w-[calc(100%-1.5rem)] sm:w-auto max-w-md bg-green-600 text-white px-4 sm:px-6 py-3 sm:py-4 rounded-xl shadow-2xl flex items-center gap-2.5 sm:gap-3 animate-slide-in">
+ <div className="fixed top-4 left-1/2 z-50 flex w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 items-center gap-2.5 rounded-2xl bg-emerald-700 px-4 py-3 text-white shadow-2xl sm:left-auto sm:right-4 sm:w-auto sm:translate-x-0 sm:gap-3 sm:px-6 sm:py-4 animate-slide-in">
  <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" />
  <div>
  <p className="font-bold text-sm sm:text-base">Settings Saved!</p>
@@ -135,28 +170,35 @@ export function AdminSettings() {
  )}
 
  {/* Header */}
- <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+ <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center sm:gap-4">
  <div>
- <h1 className="text-[2rem] sm:text-3xl font-bold text-gray-900 mb-1.5 sm:mb-2">Settings</h1>
- <p className="text-sm sm:text-base text-gray-600">Manage your store configuration and preferences</p>
+ <h1 className="mb-1.5 text-[2rem] font-bold text-slate-900 sm:mb-2 sm:text-3xl">Settings</h1>
+ <p className="text-sm text-slate-600 sm:text-base">Manage your store configuration and preferences</p>
  {hasUnsavedChanges && (
  <div className="flex items-center gap-2 mt-2 text-amber-600">
  <AlertCircle className="w-4 h-4" />
  <span className="text-sm font-semibold">You have unsaved changes</span>
  </div>
  )}
+
+ {settingsError ? (
+ <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
+ <AlertCircle className="w-5 h-5" />
+ {settingsError}
+ </div>
+ ) : null}
  </div>
  <button
  onClick={handleReset}
- className="inline-flex h-10 self-end items-center justify-center gap-1.5 rounded-lg border-2 border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 sm:h-auto sm:min-h-[42px] sm:w-auto sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2.5 sm:text-sm"
+ className="inline-flex h-10 self-end items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-white px-3 text-xs font-semibold text-emerald-800 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-emerald-50 sm:min-h-[42px] sm:w-auto sm:gap-2 sm:rounded-2xl sm:px-4 sm:py-2.5 sm:text-sm"
  >
  <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5" />
  Reset to Defaults
  </button>
  </div>
 
- <section className="md:hidden mb-4">
- <div className="inline-flex rounded-full border border-gray-200 bg-white p-1 shadow-sm">
+ <section className="mb-4 md:hidden">
+ <div className="inline-flex rounded-full border border-emerald-100 bg-white p-1 shadow-sm">
  {[
  { key: 'store', label: 'Store' },
  { key: 'currency', label: 'Currency' },
@@ -168,7 +210,7 @@ export function AdminSettings() {
  type="button"
  onClick={() => setMobileSection(item.key)}
  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
- mobileSection === item.key ? 'bg-[#2a5f1e] text-white' : 'text-gray-600'
+ mobileSection === item.key ? 'bg-emerald-700 text-white' : 'text-slate-600'
  }`}
  >
  {item.label}
@@ -179,30 +221,30 @@ export function AdminSettings() {
 
  <div className="space-y-4 sm:space-y-6">
  {/* Store Information */}
- <div className={`${mobileSection !== 'store' ? 'hidden md:block' : 'block'} bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6`}>
+ <div className={`${mobileSection !== 'store' ? 'hidden md:block' : 'block'} rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6`}>
  <div className="flex items-center gap-3 mb-3 sm:mb-6">
  <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
  <Store className="w-5 h-5 text-green-600" />
  </div>
- <h2 className="text-lg sm:text-xl font-bold text-gray-900">Store Information</h2>
+ <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Store Information</h2>
  </div>
 
  <div className="space-y-3 sm:space-y-4">
  <div>
- <label className="block text-sm font-semibold text-gray-700 mb-2">
+ <label className="mb-2 block text-sm font-semibold text-slate-700">
  Store Name
  </label>
  <input
  type="text"
  value={settings.storeName}
  onChange={(e) => handleChange('storeName', e.target.value)}
- className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 focus:ring-4 focus:ring-green-100"
+ className="w-full rounded-xl border border-emerald-100 bg-white px-4 py-2.5 text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
  />
  </div>
 
  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
  <div>
- <label className="block text-sm font-semibold text-gray-700 mb-2">
+ <label className="mb-2 block text-sm font-semibold text-slate-700">
  Store Email
  </label>
  <div className="relative">
@@ -213,7 +255,7 @@ export function AdminSettings() {
  className={`w-full px-4 py-2.5 border-2 rounded-xl focus:outline-none focus:ring-4 ${
  errors.storeEmail 
  ? 'border-red-500 focus:border-red-500 focus:ring-red-100' 
- : 'border-gray-200 focus:border-green-500 focus:ring-green-100'
+ : 'border-emerald-100 focus:border-emerald-400 focus:ring-emerald-100'
  }`}
  />
  {errors.storeEmail && (
@@ -226,7 +268,7 @@ export function AdminSettings() {
  <button
  onClick={handleTestEmail}
  disabled={testEmailSending || errors.storeEmail}
- className="mt-2 inline-flex items-center gap-2 px-3.5 py-2 text-sm text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+ className="mt-2 inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
  >
  <Send className="w-4 h-4" />
  {testEmailSending ? 'Sending...' : 'Send Test Email'}
@@ -234,7 +276,7 @@ export function AdminSettings() {
  </div>
 
  <div>
- <label className="block text-sm font-semibold text-gray-700 mb-2">
+ <label className="mb-2 block text-sm font-semibold text-slate-700">
  Store Phone
  </label>
  <input
@@ -244,7 +286,7 @@ export function AdminSettings() {
  className={`w-full px-4 py-2.5 border-2 rounded-xl focus:outline-none focus:ring-4 ${
  errors.storePhone 
  ? 'border-red-500 focus:border-red-500 focus:ring-red-100' 
- : 'border-gray-200 focus:border-green-500 focus:ring-green-100'
+ : 'border-emerald-100 focus:border-emerald-400 focus:ring-emerald-100'
  }`}
  />
  {errors.storePhone && (
@@ -259,23 +301,23 @@ export function AdminSettings() {
  </div>
 
  {/* Currency & Tax */}
- <div className={`${mobileSection !== 'currency' ? 'hidden md:block' : 'block'} bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6`}>
+ <div className={`${mobileSection !== 'currency' ? 'hidden md:block' : 'block'} rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6`}>
  <div className="flex items-center gap-3 mb-3 sm:mb-6">
  <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
  <CreditCard className="w-5 h-5 text-green-600" />
  </div>
- <h2 className="text-lg sm:text-xl font-bold text-gray-900">Currency & Tax</h2>
+ <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Currency & Tax</h2>
  </div>
 
  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
  <div>
- <label className="block text-sm font-semibold text-gray-700 mb-2">
+ <label className="mb-2 block text-sm font-semibold text-slate-700">
  Currency
  </label>
  <select
  value={settings.currency}
  onChange={(e) => handleChange('currency', e.target.value)}
- className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 focus:ring-4 focus:ring-green-100"
+ className="w-full rounded-xl border border-emerald-100 bg-white px-4 py-2.5 text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
  >
  <option value="PKR">PKR - Pakistani Rupee</option>
  <option value="USD">USD - US Dollar</option>
@@ -286,7 +328,7 @@ export function AdminSettings() {
  </div>
 
  <div>
- <label className="block text-sm font-semibold text-gray-700 mb-2">
+ <label className="mb-2 block text-sm font-semibold text-slate-700">
  Tax Rate (%)
  </label>
  <input
@@ -297,7 +339,7 @@ export function AdminSettings() {
  className={`w-full px-4 py-2.5 border-2 rounded-xl focus:outline-none focus:ring-4 ${
  errors.taxRate 
  ? 'border-red-500 focus:border-red-500 focus:ring-red-100' 
- : 'border-gray-200 focus:border-green-500 focus:ring-green-100'
+ : 'border-emerald-100 focus:border-emerald-400 focus:ring-emerald-100'
  }`}
  />
  {errors.taxRate && (
@@ -311,17 +353,17 @@ export function AdminSettings() {
  </div>
 
  {/* Shipping Settings */}
- <div className={`${mobileSection !== 'shipping' ? 'hidden md:block' : 'block'} bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6`}>
+ <div className={`${mobileSection !== 'shipping' ? 'hidden md:block' : 'block'} rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6`}>
  <div className="flex items-center gap-3 mb-3 sm:mb-6">
- <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
- <Truck className="w-5 h-5 text-blue-600" />
+ <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+ <Truck className="w-5 h-5 text-emerald-600" />
  </div>
- <h2 className="text-lg sm:text-xl font-bold text-gray-900">Shipping Settings</h2>
+ <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Shipping Settings</h2>
  </div>
 
  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
  <div>
- <label className="block text-sm font-semibold text-gray-700 mb-2">
+ <label className="mb-2 block text-sm font-semibold text-slate-700">
  Flat Rate Shipping ($)
  </label>
  <input
@@ -332,7 +374,7 @@ export function AdminSettings() {
  className={`w-full px-4 py-2.5 border-2 rounded-xl focus:outline-none focus:ring-4 ${
  errors.shippingFlat 
  ? 'border-red-500 focus:border-red-500 focus:ring-red-100' 
- : 'border-gray-200 focus:border-green-500 focus:ring-green-100'
+ : 'border-emerald-100 focus:border-emerald-400 focus:ring-emerald-100'
  }`}
  />
  {errors.shippingFlat && (
@@ -344,7 +386,7 @@ export function AdminSettings() {
  </div>
 
  <div>
- <label className="block text-sm font-semibold text-gray-700 mb-2">
+ <label className="mb-2 block text-sm font-semibold text-slate-700">
  Free Shipping Above ($)
  </label>
  <input
@@ -355,7 +397,7 @@ export function AdminSettings() {
  className={`w-full px-4 py-2.5 border-2 rounded-xl focus:outline-none focus:ring-4 ${
  errors.shippingFree 
  ? 'border-red-500 focus:border-red-500 focus:ring-red-100' 
- : 'border-gray-200 focus:border-green-500 focus:ring-green-100'
+ : 'border-emerald-100 focus:border-emerald-400 focus:ring-emerald-100'
  }`}
  />
  {errors.shippingFree && (
@@ -369,12 +411,12 @@ export function AdminSettings() {
  </div>
 
  {/* Notifications */}
- <div className={`${mobileSection !== 'notifications' ? 'hidden md:block' : 'block'} bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6`}>
+ <div className={`${mobileSection !== 'notifications' ? 'hidden md:block' : 'block'} rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6`}>
  <div className="flex items-center gap-3 mb-3 sm:mb-6">
- <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
- <Bell className="w-5 h-5 text-purple-600" />
+ <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+ <Bell className="w-5 h-5 text-emerald-600" />
  </div>
- <h2 className="text-lg sm:text-xl font-bold text-gray-900">Notifications</h2>
+ <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Notifications</h2>
  </div>
 
  <div className="space-y-3 sm:space-y-4">
@@ -383,10 +425,10 @@ export function AdminSettings() {
  { key: 'orderNotifications', label: 'New Order Alerts', description: 'Get notified when new orders are placed' },
  { key: 'lowStockAlerts', label: 'Low Stock Alerts', description: 'Receive alerts when products are running low' }
  ].map((item) => (
- <div key={item.key} className="flex items-start sm:items-center justify-between gap-3 p-3.5 sm:p-4 bg-gray-50 rounded-xl">
+ <div key={item.key} className="flex items-start justify-between gap-3 rounded-xl border border-emerald-100 bg-[#f4faf5] p-3.5 sm:items-center sm:p-4">
  <div className="min-w-0">
- <p className="font-semibold text-gray-900">{item.label}</p>
- <p className="text-sm text-gray-600 leading-snug">{item.description}</p>
+ <p className="font-semibold text-slate-900">{item.label}</p>
+ <p className="text-sm leading-snug text-slate-600">{item.description}</p>
  </div>
  <label className="relative inline-flex items-center cursor-pointer">
  <input
@@ -395,7 +437,7 @@ export function AdminSettings() {
  onChange={(e) => handleChange(item.key, e.target.checked)}
  className="sr-only peer"
  />
- <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after: peer-checked:bg-green-600"></div>
+ <div className="h-6 w-11 rounded-full bg-gray-200 peer peer-checked:bg-emerald-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-100 peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:content-['']"></div>
  </label>
  </div>
  ))}
@@ -403,15 +445,15 @@ export function AdminSettings() {
  </div>
 
  {/* Save Button */}
- <div className="sticky bottom-2 sm:bottom-0 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 border border-gray-200 sm:border-0 rounded-2xl sm:rounded-none p-3 sm:p-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
- <div className="text-sm text-gray-600">
+ <div className="mt-1 flex flex-col justify-between gap-3 rounded-2xl border border-emerald-100 bg-white p-3 sm:mt-2 sm:flex-row sm:items-center sm:border-0 sm:bg-transparent sm:p-0">
+ <div className="text-sm text-slate-600">
  {hasUnsavedChanges ? (
  <span className="flex items-center gap-2 text-amber-600 font-semibold">
  <AlertCircle className="w-4 h-4" />
  Unsaved changes
  </span>
  ) : (
- <span className="flex items-center gap-2 text-green-600 font-semibold">
+ <span className="flex items-center gap-2 font-semibold text-emerald-600">
  <CheckCircle className="w-4 h-4" />
  All changes saved
  </span>
@@ -420,7 +462,7 @@ export function AdminSettings() {
  <button
  onClick={handleSave}
  disabled={isSaving || Object.keys(errors).length > 0 || !hasUnsavedChanges}
- className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed min-h-[46px]"
+ className="flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-8 py-3 font-semibold text-white shadow-lg hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
  >
  {isSaving ? (
  <>

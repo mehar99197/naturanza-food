@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useCallback, useContext, useState, useEffect } from "react";
 import { productAPI, orderAPI, adminAPI, categoryAPI } from "@/services/api";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 
 const AdminDataContext = createContext(null);
 
@@ -12,6 +13,7 @@ export const useAdminData = () => {
 };
 
 export const AdminDataProvider = ({ children }) => {
+  const { isAdminAuthenticated, loading: adminLoading } = useAdminAuth();
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -37,12 +39,37 @@ export const AdminDataProvider = ({ children }) => {
     joinDate: customer?.created_at,
   });
 
-  // Fetch all data on mount
-  useEffect(() => {
-    fetchAllData();
+  const extractList = (payload) =>
+    Array.isArray(payload) ? payload : payload?.data || [];
+
+  const fetchCategoriesOnly = useCallback(async () => {
+    const categoriesData = await categoryAPI.getAll().catch(() => []);
+    setCategories(extractList(categoriesData));
   }, []);
 
-  const fetchAllData = async () => {
+  useEffect(() => {
+    const handleCategoriesUpdated = () => {
+      void fetchCategoriesOnly();
+    };
+
+    window.addEventListener("categories:updated", handleCategoriesUpdated);
+    return () => {
+      window.removeEventListener("categories:updated", handleCategoriesUpdated);
+    };
+  }, [fetchCategoriesOnly]);
+
+  const fetchAllData = useCallback(async () => {
+    if (!isAdminAuthenticated) {
+      setProducts([]);
+      setOrders([]);
+      setCustomers([]);
+      setCoupons([]);
+      setCategories([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       const [
@@ -60,10 +87,10 @@ export const AdminDataProvider = ({ children }) => {
       ]);
 
       setProducts(
-        Array.isArray(productsData) ? productsData : productsData?.data || [],
+        extractList(productsData),
       );
       setOrders(
-        Array.isArray(ordersData) ? ordersData : ordersData?.data || [],
+        extractList(ordersData),
       );
       setCustomers(
         Array.isArray(customersData)
@@ -72,9 +99,7 @@ export const AdminDataProvider = ({ children }) => {
       );
       setCoupons(Array.isArray(couponsData) ? couponsData : []);
       setCategories(
-        Array.isArray(categoriesData)
-          ? categoriesData
-          : categoriesData?.data || [],
+        extractList(categoriesData),
       );
       setError(null);
     } catch (err) {
@@ -82,7 +107,27 @@ export const AdminDataProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAdminAuthenticated]);
+
+  useEffect(() => {
+    if (adminLoading) {
+      setLoading(true);
+      return;
+    }
+
+    if (!isAdminAuthenticated) {
+      setProducts([]);
+      setOrders([]);
+      setCustomers([]);
+      setCoupons([]);
+      setCategories([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    void fetchAllData();
+  }, [adminLoading, fetchAllData, isAdminAuthenticated]);
 
   // ===== PRODUCTS CRUD =====
   const addProduct = async (productData) => {

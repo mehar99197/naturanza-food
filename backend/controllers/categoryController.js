@@ -1,7 +1,25 @@
 const categoryModel = require("../models/categoryModel");
 
+const ALLOWED_CATEGORY_TYPES = new Set(["shop", "shop_by_category", "both"]);
+
 const getCategories = async (req, res) => {
-  const categories = await categoryModel.listActiveCategories();
+  const includeInactive = String(req.query?.include_inactive || "false") === "true";
+  const requestedCategoryType = String(
+    req.query?.category_type || req.query?.type || "",
+  )
+    .trim()
+    .toLowerCase();
+
+  if (requestedCategoryType && !ALLOWED_CATEGORY_TYPES.has(requestedCategoryType)) {
+    return res.status(400).json({
+      error: "Invalid category_type. Allowed values: shop, shop_by_category, both",
+    });
+  }
+
+  const categories = await categoryModel.listCategories({
+    includeInactive,
+    categoryType: requestedCategoryType || null,
+  });
   res.json(categories);
 };
 

@@ -1,14 +1,17 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAdminAuth } from '../context/AdminAuthContext';
+import { Loader } from '../components/Loader';
 
 const AdminProtectedRoute = ({ children }) => {
  const { admin, loading } = useAdminAuth();
  const location = useLocation();
 
- // Removed loading check for instant navigation
- if (!admin && !loading) {
- // Redirect to admin login page if not authenticated
+ if (loading) {
+   return <Loader fullScreen size="md" />;
+ }
+
+ if (!admin) {
  return <Navigate to="/admin/login" state={{ from: location }} replace />;
  }
 

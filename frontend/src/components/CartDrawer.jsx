@@ -10,9 +10,11 @@ import {
  AlertCircle,
  LoaderCircle,
 } from 'lucide-react';
+import { useEffect } from 'react';
 import { useCart } from '@/context/CartContext';
 import { useSettings } from '@/context/SettingsContext';
 import { formatPrice } from '@/lib/utils';
+import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 import { Link, useNavigate } from 'react-router-dom';
 
 export function CartDrawer() {
@@ -32,9 +34,13 @@ export function CartDrawer() {
  const { settings } = useSettings();
 
  const getProductId = (item) => item.product_id ?? item.id;
- const getImageSrc = (item) => item.image_url || item.image || '/images/products/powder.webp';
+ const getImageSrc = (item) => {
+  const imageValue = item.image_url || item.image || '';
+  if (!imageValue) return '/images/products/powder.webp';
+  // Use getAbsoluteImageUrl to convert relative URLs to absolute backend URLs
+  return getAbsoluteImageUrl(imageValue);
+ };
  const getUnitPrice = (item) => item.final_price ?? item.price;
- const getLineTotal = (item) => (Number(getUnitPrice(item)) || 0) * (Number(item.quantity) || 0);
  const getItemName = (item) => item.name || item.product_name || 'Product';
  const getCategoryLabel = (item) => item.category_name || item.category || 'Naturanza Essentials';
  const getItemKey = (item, index) => {
@@ -54,6 +60,24 @@ export function CartDrawer() {
  setIsCartOpen(false);
  navigate('/shop');
  };
+
+ useEffect(() => {
+ if (!isCartOpen) return;
+
+ const previousOverflow = document.body.style.overflow;
+ const previousPaddingRight = document.body.style.paddingRight;
+ const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+
+ document.body.style.overflow = 'hidden';
+ if (scrollbarWidth > 0) {
+ document.body.style.paddingRight = `${scrollbarWidth}px`;
+ }
+
+ return () => {
+ document.body.style.overflow = previousOverflow;
+ document.body.style.paddingRight = previousPaddingRight;
+ };
+ }, [isCartOpen]);
 
  if (!isCartOpen) return null;
 
@@ -107,7 +131,7 @@ export function CartDrawer() {
  </div>
 
  {/* Cart Items */}
- <div className="flex-1 overflow-y-auto px-3 pb-36 pt-3.5 sm:px-6 sm:pb-44 sm:pt-4">
+ <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-4 pt-3.5 sm:px-6 sm:pb-6 sm:pt-4">
  {loading && items.length === 0 ? (
  <div className="flex h-full flex-col items-center justify-center text-center">
  <LoaderCircle className="mb-3 h-8 w-8 animate-spin text-emerald-600" />
@@ -215,7 +239,7 @@ export function CartDrawer() {
 
  {/* Footer */}
  {items.length > 0 && (
- <div className="absolute inset-x-0 bottom-0 border-t border-slate-200/80 bg-white/92 p-4 backdrop-blur-xl sm:p-6">
+ <div className="shrink-0 border-t border-slate-200/80 bg-white/92 p-4 backdrop-blur-xl sm:p-6">
  <div className="mb-3.5 rounded-xl sm:rounded-2xl border border-emerald-200/70 bg-gradient-to-r from-white via-emerald-50/50 to-green-50/70 px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
  <div className="flex items-center justify-between gap-3">
  <div>
@@ -236,10 +260,10 @@ export function CartDrawer() {
  <Truck className="h-4 w-4 text-emerald-600" />
  </div>
 
- <div className="mt-1 flex items-center justify-between gap-2">
+ <div className="mt-1 grid grid-cols-[2fr_3fr] items-center gap-2 sm:flex sm:items-center sm:justify-between">
  <button
  onClick={clearCart}
- className="inline-flex min-h-[42px] flex-1 sm:flex-none items-center justify-center rounded-xl border border-rose-200 bg-rose-50/70 px-4 py-2.5 text-sm font-semibold text-rose-600 transition-colors duration-200 hover:bg-rose-100/80"
+ className="inline-flex min-h-[40px] w-full sm:w-auto sm:flex-none items-center justify-center rounded-lg sm:rounded-xl border border-rose-200 bg-rose-50/70 px-3 sm:px-4 py-2 text-[13px] sm:text-sm font-semibold text-rose-600 transition-colors duration-200 hover:bg-rose-100/80"
  >
  Clear Cart
  </button>
@@ -247,10 +271,10 @@ export function CartDrawer() {
  <Link
  to="/checkout"
  onClick={() => setIsCartOpen(false)}
- className="inline-flex min-h-[42px] flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-green-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition-all duration-300 hover:from-emerald-600 hover:to-green-700"
+ className="inline-flex min-h-[40px] w-full sm:w-auto sm:flex-1 items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap rounded-lg sm:rounded-xl bg-gradient-to-r from-emerald-500 to-green-600 px-3 sm:px-4 py-2 text-[13px] sm:text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition-all duration-300 hover:from-emerald-600 hover:to-green-700"
  >
  Proceed to Checkout
- <ArrowRight className="h-4 w-4" />
+ <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
  </Link>
  </div>
  </div>

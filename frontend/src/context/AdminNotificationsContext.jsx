@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { userAPI } from "@/services/api";
+import { adminAPI } from "@/services/api";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 
 const AdminNotificationsContext = createContext(null);
@@ -49,8 +49,8 @@ export const AdminNotificationsProvider = ({ children }) => {
         }
 
         const [notificationsResponse, settingsResponse] = await Promise.all([
-          userAPI.getNotifications(NOTIFICATION_LIMIT),
-          userAPI.getNotificationSettings(),
+          adminAPI.getNotifications(NOTIFICATION_LIMIT),
+          adminAPI.getNotificationSettings(),
         ]);
 
         setNotifications(normalizeNotifications(notificationsResponse));
@@ -89,7 +89,7 @@ export const AdminNotificationsProvider = ({ children }) => {
       );
 
       try {
-        await userAPI.markNotificationRead(notificationId);
+        await adminAPI.markNotificationRead(notificationId);
       } catch (requestError) {
         await loadNotifications({ silent: true });
         throw requestError;
@@ -108,7 +108,7 @@ export const AdminNotificationsProvider = ({ children }) => {
     );
 
     try {
-      await userAPI.markAllNotificationsRead();
+      await adminAPI.markAllNotificationsRead();
     } catch (requestError) {
       await loadNotifications({ silent: true });
       throw requestError;
@@ -121,7 +121,7 @@ export const AdminNotificationsProvider = ({ children }) => {
       mutedForMinutes: Number(nextSettings?.mutedForMinutes) || null,
     };
 
-    const response = await userAPI.updateNotificationSettings(payload);
+    const response = await adminAPI.updateNotificationSettings(payload);
     setIsMuted(Boolean(response?.isMuted));
     setMutedUntil(response?.mutedUntil || null);
     return response;
@@ -170,7 +170,7 @@ export const AdminNotificationsProvider = ({ children }) => {
   }, [isAdminAuthenticated, loadNotifications]);
 
   const unreadCount = useMemo(
-    () => notifications.filter((item) => !Boolean(item.is_read)).length,
+    () => notifications.filter((item) => !item.is_read).length,
     [notifications],
   );
 

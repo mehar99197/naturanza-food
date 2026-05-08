@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, RefreshCw, Star, XCircle } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { AlertCircle, RefreshCw, Star, Trash2 } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
 import { AdminPageSkeleton } from "@/components/Skeletons/AdminPageSkeleton";
 import { adminAPI } from "@/services/api";
@@ -30,24 +30,14 @@ export function AdminReviews() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reviews, setReviews] = useState([]);
-  const [statusFilter, setStatusFilter] = useState("all");
   const [savingIds, setSavingIds] = useState(new Set());
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
-
   const loadReviews = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
 
-      const params = {};
-      if (statusFilter === "approved") {
-        params.status = "approved";
-      }
-      if (statusFilter === "pending") {
-        params.status = "pending";
-      }
-
-      const response = await adminAPI.getReviews(params);
+      const response = await adminAPI.getReviews({});
       setReviews(Array.isArray(response) ? response : []);
     } catch (requestError) {
       setError(
@@ -58,23 +48,17 @@ export function AdminReviews() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, []);
 
   useEffect(() => {
     void loadReviews();
   }, [loadReviews]);
 
-  const approveCounts = useMemo(() => {
-    const approved = reviews.filter((item) => Number(item.is_approved) === 1).length;
-    const pending = reviews.length - approved;
-    return { approved, pending };
-  }, [reviews]);
+  const deleteReview = async (reviewId) => {
+    if (!confirm("Are you sure you want to delete this review? This action cannot be undone.")) {
+      return;
+    }
 
-  useEffect(() => {
-    setShowAllMobileRows(false);
-  }, [statusFilter]);
-
-  const updateApproval = async (reviewId, isApproved) => {
     try {
       setSavingIds((prev) => {
         const next = new Set(prev);
@@ -82,10 +66,10 @@ export function AdminReviews() {
         return next;
       });
 
-      await adminAPI.updateReviewApproval(reviewId, isApproved);
+      await adminAPI.deleteReview(reviewId);
       await loadReviews();
     } catch (requestError) {
-      setError(requestError?.response?.data?.error || "Failed to update review");
+      setError(requestError?.response?.data?.error || "Failed to delete review");
     } finally {
       setSavingIds((prev) => {
         const next = new Set(prev);
@@ -105,18 +89,18 @@ export function AdminReviews() {
 
   return (
     <AdminLayout>
-      <div className="mx-auto w-full max-w-7xl space-y-4 sm:space-y-5">
+      <div className="mx-auto w-full max-w-[1240px] space-y-4 sm:space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-[2rem] font-bold text-gray-900 sm:text-3xl">Review Moderation</h1>
-            <p className="text-sm text-gray-600 sm:text-base">
-              Approve or hold customer reviews directly from your live database.
+            <h1 className="text-[2rem] font-bold text-slate-900 sm:text-3xl">Customer Reviews</h1>
+            <p className="text-sm text-slate-600 sm:text-base">
+              View and manage all customer product reviews.
             </p>
           </div>
           <button
             type="button"
             onClick={() => void loadReviews()}
-            className="inline-flex h-9 self-end items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 sm:h-auto sm:min-h-[42px] sm:self-auto sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2 sm:text-sm"
+            className="inline-flex h-10 self-end items-center gap-1.5 rounded-xl border border-emerald-200/90 bg-white px-3 text-[13px] font-semibold text-emerald-800 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 sm:h-11 sm:self-auto sm:gap-2 sm:rounded-2xl sm:px-4 sm:text-sm"
           >
             <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading ? "animate-spin" : ""}`} />
             Refresh
@@ -124,140 +108,73 @@ export function AdminReviews() {
         </div>
 
         {error ? (
-          <div className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
             <AlertCircle className="h-5 w-5" />
             {error}
           </div>
         ) : null}
 
-        <section className="md:hidden">
-          <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm">
-            <div className="grid grid-cols-3 gap-1.5">
-              <article className="rounded-xl border border-gray-200 bg-gray-50 px-1.5 py-2">
-                <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">Total</p>
-                <p className="mt-0.5 truncate text-sm font-extrabold text-gray-900">{reviews.length}</p>
-              </article>
-              <article className="rounded-xl border border-gray-200 bg-gray-50 px-1.5 py-2">
-                <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">Approved</p>
-                <p className="mt-0.5 truncate text-sm font-extrabold text-emerald-700">{approveCounts.approved}</p>
-              </article>
-              <article className="rounded-xl border border-gray-200 bg-gray-50 px-1.5 py-2">
-                <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">Pending</p>
-                <p className="mt-0.5 truncate text-sm font-extrabold text-amber-600">{approveCounts.pending}</p>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        <div className="hidden grid-cols-1 gap-4 md:grid md:grid-cols-3">
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Total Reviews</p>
-            <p className="mt-2 text-2xl font-bold text-gray-900">{reviews.length}</p>
-          </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Approved</p>
-            <p className="mt-2 text-2xl font-bold text-emerald-700">{approveCounts.approved}</p>
-          </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Pending</p>
-            <p className="mt-2 text-2xl font-bold text-amber-600">{approveCounts.pending}</p>
-          </div>
+        {/* Stats Card */}
+        <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Reviews</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{reviews.length}</p>
         </div>
 
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-lg font-bold text-gray-900">All Product Reviews</p>
-            <div className="flex items-center gap-2">
-              {[
-                { value: "all", label: "All" },
-                { value: "approved", label: "Approved" },
-                { value: "pending", label: "Pending" },
-              ].map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  onClick={() => setStatusFilter(item.value)}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                    statusFilter === item.value
-                      ? "bg-[#2a5f1e] text-white"
-                      : "bg-gray-100 text-gray-600"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
+        {/* Reviews List */}
+        <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6">
+          <div className="mb-4">
+            <p className="text-lg font-bold text-slate-900">All Product Reviews</p>
           </div>
 
           <div className="space-y-3">
             {reviews.length > 0 ? (
               <>
                 {reviews.map((item, index) => {
-                const isApproved = Number(item.is_approved) === 1;
-                const isSaving = savingIds.has(item.id);
+                  const isSaving = savingIds.has(item.id);
 
-                return (
-                  <article
-                    key={item.id}
-                    className={`${!showAllMobileRows && index >= 5 ? "hidden md:block" : "block"} rounded-xl border border-gray-100 bg-gray-50 p-4`}
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <p className="text-base font-semibold text-gray-900">
-                          {item.product_name || "Unknown Product"}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          by {item.customer_name || "Anonymous"} ({item.customer_email || "no-email"})
-                        </p>
-                        <div className="mt-2 flex items-center gap-1">{renderStars(item.rating)}</div>
+                  return (
+                    <article
+                      key={item.id}
+                      className={`${!showAllMobileRows && index >= 5 ? "hidden md:block" : "block"} rounded-xl border border-emerald-100 bg-[#f0f8f2] p-4`}
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex-1">
+                          <p className="text-base font-semibold text-slate-900">
+                            {item.product_name || "Unknown Product"}
+                          </p>
+                          <p className="text-sm text-slate-500">
+                            by {item.customer_name || "Anonymous"} ({item.customer_email || "no-email"})
+                          </p>
+                          <div className="mt-2 flex items-center gap-1">{renderStars(item.rating)}</div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <span className="text-xs text-slate-500">{formatDate(item.created_at)}</span>
+                          <button
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() => void deleteReview(item.id)}
+                            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            isApproved
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-amber-100 text-amber-700"
-                          }`}
-                        >
-                          {isApproved ? "Approved" : "Pending"}
-                        </span>
-                        <span className="text-xs text-gray-500">{formatDate(item.created_at)}</span>
-                      </div>
-                    </div>
 
-                    <p className="mt-3 text-sm leading-6 text-gray-700">
-                      {item.comment || "No review comment provided."}
-                    </p>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={isSaving || isApproved}
-                        onClick={() => void updateApproval(item.id, true)}
-                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <CheckCircle2 className="h-4 w-4" />
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isSaving || !isApproved}
-                        onClick={() => void updateApproval(item.id, false)}
-                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <XCircle className="h-4 w-4" />
-                        Mark Pending
-                      </button>
-                    </div>
-                  </article>
-                );
+                      {item.comment && (
+                        <p className="mt-3 text-sm leading-6 text-slate-700">
+                          {item.comment}
+                        </p>
+                      )}
+                    </article>
+                  );
                 })}
 
                 {reviews.length > 5 ? (
                   <button
                     type="button"
                     onClick={() => setShowAllMobileRows((prev) => !prev)}
-                    className="inline-flex min-h-[36px] items-center rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 md:hidden"
+                    className="inline-flex min-h-[36px] items-center rounded-lg border border-emerald-200 px-3 text-xs font-semibold text-slate-700 hover:bg-emerald-50 md:hidden"
                   >
                     {showAllMobileRows
                       ? "Show fewer reviews"
@@ -266,7 +183,7 @@ export function AdminReviews() {
                 ) : null}
               </>
             ) : (
-              <p className="py-8 text-center text-sm text-gray-500">No reviews found for this filter.</p>
+              <p className="py-8 text-center text-sm text-slate-500">No reviews found.</p>
             )}
           </div>
         </div>

@@ -1,8 +1,41 @@
 const productModel = require("../models/productModel");
+const { db } = require("../config/db");
+const { getAdminRecipients } = require("../utils/adminNotifications");
+const { sendEmail } = require("../utils/emailService");
 
 const toNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const queueLowStockEmail = (lowStockEvent, excludeUserId) => {
+  if (!lowStockEvent) {
+    return;
+  }
+
+  setImmediate(async () => {
+    try {
+      const recipients = await getAdminRecipients(db.promise(), excludeUserId);
+      const emailList = recipients.map((row) => row.email).filter(Boolean);
+
+      if (!emailList.length) {
+        return;
+      }
+
+      const subject = "Low stock alert";
+      const html = `
+        <div style="font-family: Arial, sans-serif; color: #1f2937;">
+          <h2 style="margin: 0 0 8px; color: #0f172a;">Low Stock Alert</h2>
+          <p style="margin: 0 0 10px;">${lowStockEvent.product_name} is low on stock.</p>
+          <p style="margin: 0;">Remaining: ${lowStockEvent.stock_quantity}</p>
+        </div>
+      `;
+
+      await sendEmail({ to: emailList.join(","), subject, html });
+    } catch {
+      // Ignore email failures to avoid blocking product updates.
+    }
+  });
 };
 
 const getFeaturedProducts = async (req, res) => {
@@ -19,6 +52,7 @@ const getProducts = async (req, res) => {
     featuredAlias: req.query.featured,
     limit: req.query.limit || 50,
     offset: req.query.offset || 0,
+    includeInactive: req.query.includeInactive === 'true',
   });
 
   res.json({ data: products });
@@ -50,10 +84,14 @@ const createProduct = async (req, res) => {
 };
 
 const updateProduct = async (req, res) => {
-  const updated = await productModel.updateProduct(req.params.id, req.body || {});
+  const result = await productModel.updateProduct(req.params.id, req.body || {});
 
-  if (!updated) {
+  if (!result || result.updated === false) {
     return res.status(404).json({ error: "Product not found" });
+  }
+
+  if (result.shouldSendLowStockEmail && result.lowStockEvent) {
+    queueLowStockEmail(result.lowStockEvent, req.user?.id);
   }
 
   return res.json({ message: "Product updated successfully" });
@@ -76,14 +114,18 @@ const updateStock = async (req, res) => {
     return res.status(400).json({ error: "Valid stock_quantity is required" });
   }
 
-  const updated = await productModel.updateStock(
+  const result = await productModel.updateStock(
     req.params.id,
     stockQuantity,
     req.user?.id,
   );
 
-  if (!updated) {
+  if (!result || result.updated === false) {
     return res.status(404).json({ error: "Product not found" });
+  }
+
+  if (result.shouldSendLowStockEmail && result.lowStockEvent) {
+    queueLowStockEmail(result.lowStockEvent, req.user?.id);
   }
 
   return res.json({ message: "Stock updated successfully" });

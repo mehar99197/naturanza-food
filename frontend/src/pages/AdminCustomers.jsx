@@ -239,11 +239,11 @@ export function AdminCustomers() {
 
   return (
     <AdminLayout>
-      <div className="mx-auto w-full max-w-7xl space-y-4 sm:space-y-5">
+      <div className="mx-auto w-full max-w-[1240px] space-y-4 sm:space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-[2rem] font-bold text-gray-900 sm:text-3xl">Customers</h1>
-            <p className="text-sm text-gray-600 sm:text-base">
+            <h1 className="text-[2rem] font-bold text-slate-900 sm:text-3xl">Customers</h1>
+            <p className="text-sm text-slate-600 sm:text-base">
               Manage customer accounts, activity, and lifetime value from live records.
             </p>
           </div>
@@ -251,7 +251,7 @@ export function AdminCustomers() {
             <button
               type="button"
               onClick={() => void refreshCustomers()}
-              className="inline-flex min-h-[40px] items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 sm:min-h-[42px] sm:px-4"
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-emerald-200/90 bg-white px-3 text-[13px] font-semibold text-emerald-800 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 sm:h-11 sm:w-auto sm:rounded-2xl sm:px-4 sm:text-sm"
             >
               <RefreshCw className="h-4 w-4" />
               Refresh
@@ -259,7 +259,7 @@ export function AdminCustomers() {
             <button
               type="button"
               onClick={openAddModal}
-              className="inline-flex min-h-[40px] items-center justify-center gap-2 rounded-xl bg-[#16a34a] px-3 py-2 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(22,163,74,0.32)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#15803d] sm:min-h-[42px] sm:px-4"
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#16a34a] px-3 text-[13px] font-semibold text-white shadow-[0_14px_30px_rgba(22,163,74,0.32)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#15803d] sm:h-11 sm:w-auto sm:rounded-2xl sm:px-4 sm:text-sm"
             >
               <UserPlus className="h-4 w-4" />
               Add Customer
@@ -268,21 +268,21 @@ export function AdminCustomers() {
         </div>
 
         {error ? (
-          <div className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
             <AlertCircle className="h-5 w-5" />
             {error}
           </div>
         ) : null}
 
         <section className="md:hidden">
-          <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm">
+          <div className="rounded-2xl border border-emerald-100 bg-white p-2.5 shadow-[0_10px_24px_rgba(15,64,28,0.08)]">
             <div className="grid grid-cols-4 gap-1.5">
               {quickSummaryItems.map((item) => (
-                <article key={item.key} className="rounded-xl border border-gray-200 bg-gray-50 px-1.5 py-2">
-                  <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
+                <article key={item.key} className="rounded-xl border border-emerald-100 bg-[#f7fbf7] px-1.5 py-2">
+                  <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
                     {item.label}
                   </p>
-                  <p className="mt-0.5 truncate text-xs font-extrabold text-gray-900">{item.value}</p>
+                  <p className="mt-0.5 truncate text-xs font-extrabold text-slate-900">{item.value}</p>
                 </article>
               ))}
             </div>
@@ -290,31 +290,33 @@ export function AdminCustomers() {
         </section>
 
         <div className="hidden grid-cols-2 gap-4 md:grid lg:grid-cols-4">
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Total</p>
-            <p className="mt-2 text-2xl font-bold text-gray-900">{stats.total}</p>
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total</p>
+            <p className="mt-2 text-2xl font-bold text-slate-900">{stats.total}</p>
           </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Active</p>
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Active</p>
             <p className="mt-2 text-2xl font-bold text-emerald-700">{stats.active}</p>
           </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Blocked</p>
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Blocked</p>
             <p className="mt-2 text-2xl font-bold text-amber-700">{stats.blocked}</p>
           </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">With Orders</p>
+          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">With Orders</p>
             <p className="mt-2 text-2xl font-bold text-indigo-700">{stats.withOrders}</p>
           </div>
         </div>
 
         <div className="md:hidden">
-          <div className="inline-flex w-full rounded-2xl border border-gray-200 bg-white p-1 shadow-sm">
+          <div className="inline-flex w-full rounded-2xl border border-emerald-200 bg-emerald-50/65 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
             <button
               type="button"
               onClick={() => setMobileView("queue")}
-              className={`inline-flex min-h-[34px] flex-1 items-center justify-center rounded-xl px-3 text-xs font-semibold transition-colors ${
-                mobileView === "queue" ? "bg-[#2a5f1e] text-white" : "text-gray-600"
+              className={`inline-flex min-h-[34px] flex-1 items-center justify-center rounded-xl px-3 text-xs font-semibold transition-all duration-200 ${
+                mobileView === "queue"
+                  ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
+                  : "text-slate-600 hover:bg-emerald-100 hover:text-emerald-800"
               }`}
             >
               List ({customerRows.length})
@@ -322,8 +324,10 @@ export function AdminCustomers() {
             <button
               type="button"
               onClick={() => setMobileView("detail")}
-              className={`inline-flex min-h-[34px] flex-1 items-center justify-center rounded-xl px-3 text-xs font-semibold transition-colors ${
-                mobileView === "detail" ? "bg-[#2a5f1e] text-white" : "text-gray-600"
+              className={`inline-flex min-h-[34px] flex-1 items-center justify-center rounded-xl px-3 text-xs font-semibold transition-all duration-200 ${
+                mobileView === "detail"
+                  ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
+                  : "text-slate-600 hover:bg-emerald-100 hover:text-emerald-800"
               }`}
             >
               Detail
@@ -333,19 +337,19 @@ export function AdminCustomers() {
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[62%_38%]">
           <div
-            className={`rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6 ${
+            className={`rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6 ${
               mobileView === "detail" ? "hidden xl:block" : "block"
             }`}
           >
             <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="relative w-full md:max-w-md">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-500" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder="Search customer by name/email/phone"
-                  className="w-full rounded-xl border border-gray-200 py-2.5 pl-10 pr-3 text-sm focus:border-green-500 focus:outline-none"
+                  className="w-full rounded-xl border border-emerald-100 py-2.5 pl-10 pr-3 text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -358,10 +362,10 @@ export function AdminCustomers() {
                     key={item.value}
                     type="button"
                     onClick={() => setStatusFilter(item.value)}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 ${
                       statusFilter === item.value
-                        ? "bg-[#2a5f1e] text-white"
-                        : "bg-gray-100 text-gray-600"
+                        ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
+                        : "bg-emerald-100 text-slate-600 hover:bg-emerald-200/70 hover:text-emerald-800"
                     }`}
                   >
                     {item.label}
@@ -375,12 +379,16 @@ export function AdminCustomers() {
                 customerRows.map((customer, index) => (
                   <article
                     key={customer.id}
-                    className={`${!showAllMobileRows && index >= MOBILE_INITIAL_CUSTOMERS ? "hidden md:block" : "block"} rounded-xl border border-gray-100 bg-gray-50 p-3`}
+                    className={`${!showAllMobileRows && index >= MOBILE_INITIAL_CUSTOMERS ? "hidden md:block" : "block"} rounded-2xl border p-3.5 transition-all duration-200 ${
+                      selectedCustomer?.id === customer.id
+                        ? "border-emerald-200 bg-emerald-50/80 shadow-[0_10px_24px_rgba(15,64,28,0.12)]"
+                        : "border-emerald-100 bg-[#f7fbf7] hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(15,64,28,0.1)]"
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-gray-900">{customer.name}</p>
-                        <p className="truncate text-xs text-gray-500">{customer.email}</p>
+                        <p className="truncate text-sm font-bold text-slate-900">{customer.name}</p>
+                        <p className="truncate text-xs text-slate-500">{customer.email}</p>
                       </div>
                       <span
                         className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
@@ -393,7 +401,7 @@ export function AdminCustomers() {
                       </span>
                     </div>
 
-                    <div className="mt-2 flex items-center justify-between text-xs text-gray-600">
+                    <div className="mt-2 flex items-center justify-between text-xs text-slate-600">
                       <span>{Number(customer.orders || 0)} orders</span>
                       <span>{formatPrice(Number(customer.totalSpent || 0), settings.currency)}</span>
                     </div>
@@ -447,7 +455,7 @@ export function AdminCustomers() {
                 <button
                   type="button"
                   onClick={() => setShowAllMobileRows((prev) => !prev)}
-                  className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-gray-200 bg-white text-xs font-semibold text-gray-700 md:hidden"
+                  className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-emerald-200 bg-white text-xs font-semibold text-emerald-800 shadow-sm md:hidden"
                 >
                   {showAllMobileRows
                     ? "Show fewer customers"
@@ -458,7 +466,7 @@ export function AdminCustomers() {
           </div>
 
           <div
-            className={`rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6 ${
+            className={`rounded-3xl border border-emerald-100 bg-white p-5 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6 ${
               mobileView === "queue" ? "hidden xl:block" : "block"
             } max-h-[72vh] overflow-y-auto xl:max-h-none xl:overflow-visible`}
           >
@@ -467,43 +475,43 @@ export function AdminCustomers() {
                 <button
                   type="button"
                   onClick={() => setMobileView("queue")}
-                  className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 xl:hidden"
+                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-800 xl:hidden"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" />
                   Back to list
                 </button>
 
-                <p className="text-xl font-bold text-gray-900">Customer Details</p>
+                <p className="text-xl font-bold text-slate-900">Customer Details</p>
 
-                <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                  <p className="text-sm font-semibold text-gray-900">{selectedCustomer.name}</p>
-                  <p className="mt-1 text-sm text-gray-600">{selectedCustomer.email}</p>
-                  <p className="mt-1 text-sm text-gray-600">{selectedCustomer.phone || "No phone"}</p>
-                  <p className="mt-1 text-sm text-gray-600">{selectedCustomer.address || selectedCustomer.location || "No address"}</p>
+                <div className="rounded-xl border border-emerald-100 bg-[#f0f8f2] p-4">
+                  <p className="text-sm font-semibold text-slate-900">{selectedCustomer.name}</p>
+                  <p className="mt-1 text-sm text-slate-600">{selectedCustomer.email}</p>
+                  <p className="mt-1 text-sm text-slate-600">{selectedCustomer.phone || "No phone"}</p>
+                  <p className="mt-1 text-sm text-slate-600">{selectedCustomer.address || selectedCustomer.location || "No address"}</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Orders</p>
-                    <p className="mt-1 text-lg font-bold text-gray-900">{Number(selectedCustomer.orders || 0)}</p>
+                  <div className="rounded-xl border border-emerald-100 bg-[#f0f8f2] p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Orders</p>
+                    <p className="mt-1 text-lg font-bold text-slate-900">{Number(selectedCustomer.orders || 0)}</p>
                   </div>
-                  <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Spent</p>
-                    <p className="mt-1 text-lg font-bold text-gray-900">
+                  <div className="rounded-xl border border-emerald-100 bg-[#f0f8f2] p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Spent</p>
+                    <p className="mt-1 text-lg font-bold text-slate-900">
                       {formatPrice(Number(selectedCustomer.totalSpent || 0), settings.currency)}
                     </p>
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Joined</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900">{formatDate(selectedCustomer.joinDate || selectedCustomer.created_at)}</p>
+                <div className="rounded-xl border border-emerald-100 bg-[#f0f8f2] p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Joined</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{formatDate(selectedCustomer.joinDate || selectedCustomer.created_at)}</p>
                 </div>
               </div>
             ) : (
               <div className="flex min-h-[320px] flex-col items-center justify-center text-center">
-                <p className="text-lg font-semibold text-gray-900">Select a Customer</p>
-                <p className="mt-1 max-w-sm text-sm text-gray-500">
+                <p className="text-lg font-semibold text-slate-900">Select a Customer</p>
+                <p className="mt-1 max-w-sm text-sm text-slate-500">
                   Choose a customer from the left list to view complete details.
                 </p>
               </div>
@@ -513,15 +521,15 @@ export function AdminCustomers() {
 
         {showFormModal ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
-            <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
+            <div className="w-full max-w-lg rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_20px_48px_rgba(15,64,28,0.22)] sm:p-6">
               <div className="mb-4 flex items-center justify-between">
-                <p className="text-xl font-bold text-gray-900">
+                <p className="text-xl font-bold text-slate-900">
                   {editingCustomer ? "Edit Customer" : "Add Customer"}
                 </p>
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -534,7 +542,7 @@ export function AdminCustomers() {
                   onChange={(event) =>
                     setFormData((prev) => ({ ...prev, name: event.target.value }))
                   }
-                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-green-500 focus:outline-none"
+                  className="w-full rounded-xl border border-emerald-100 px-3 py-2.5 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                   placeholder="Full name"
                 />
                 <input
@@ -543,7 +551,7 @@ export function AdminCustomers() {
                   onChange={(event) =>
                     setFormData((prev) => ({ ...prev, email: event.target.value }))
                   }
-                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-green-500 focus:outline-none"
+                  className="w-full rounded-xl border border-emerald-100 px-3 py-2.5 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                   placeholder="Email"
                 />
                 <input
@@ -552,7 +560,7 @@ export function AdminCustomers() {
                   onChange={(event) =>
                     setFormData((prev) => ({ ...prev, phone: event.target.value }))
                   }
-                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-green-500 focus:outline-none"
+                  className="w-full rounded-xl border border-emerald-100 px-3 py-2.5 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                   placeholder="Phone"
                 />
                 <textarea
@@ -561,7 +569,7 @@ export function AdminCustomers() {
                   onChange={(event) =>
                     setFormData((prev) => ({ ...prev, address: event.target.value }))
                   }
-                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-green-500 focus:outline-none"
+                  className="w-full rounded-xl border border-emerald-100 px-3 py-2.5 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                   placeholder="Address"
                 />
               </div>
@@ -570,7 +578,7 @@ export function AdminCustomers() {
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="inline-flex min-h-[40px] items-center gap-2 rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                  className="inline-flex min-h-[40px] items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
                   Cancel
                 </button>
@@ -578,7 +586,7 @@ export function AdminCustomers() {
                   type="button"
                   disabled={saving}
                   onClick={() => void saveCustomer()}
-                  className="inline-flex min-h-[40px] items-center gap-2 rounded-xl bg-[#2a5f1e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#224f18] disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex min-h-[40px] items-center gap-2 rounded-xl bg-[#16a34a] px-4 py-2 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(22,163,74,0.32)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#15803d] disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   <CheckCircle2 className="h-4 w-4" />
                   {editingCustomer ? "Update" : "Create"}

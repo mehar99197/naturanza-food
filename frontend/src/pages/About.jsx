@@ -200,7 +200,7 @@ export function About() {
  }, []);
 
  return (
- <main className="pt-14 sm:pt-20 pb-14 sm:pb-16 lg:pb-20 overflow-x-hidden">
+ <main className="pt-14 sm:pt-[68px] pb-0 overflow-x-hidden">
  {/* Hero */}
  <section className="section-padding pt-0 bg-gradient-to-br from-[#e8f0e8] to-[#faf8f3]" ref={heroRef}>
  <div className="container-custom text-center">
@@ -366,7 +366,7 @@ export function About() {
  </section>
 
  {/* Certifications */}
- <section className="section-padding bg-[#faf8f3]">
+ <section className="pt-10 sm:pt-12 lg:pt-12 xl:pt-14 pb-6 sm:pb-6 lg:pb-6 xl:pb-6 bg-[#faf8f3]">
  <div className="container-custom">
  <div className="text-center mb-7 sm:mb-10 md:mb-12">
  <h2 className="font-display text-xl md:text-2xl font-bold text-[#2d3a2d] mb-2">

@@ -178,18 +178,18 @@ export function AdminMessages() {
 
   return (
     <AdminLayout>
-      <div className="mx-auto w-full max-w-7xl space-y-4 sm:space-y-5">
+      <div className="mx-auto w-full max-w-[1240px] space-y-4 sm:space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-[2rem] font-bold text-gray-900 sm:text-3xl">Messages</h1>
-            <p className="text-sm text-gray-600 sm:text-base">
+            <h1 className="text-[2rem] font-bold text-slate-900 sm:text-3xl">Messages</h1>
+            <p className="text-sm text-slate-600 sm:text-base">
               Customer inquiries synced from your real contact database.
             </p>
           </div>
           <button
             type="button"
             onClick={() => void loadMessages()}
-            className="inline-flex h-9 self-end items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 sm:h-auto sm:min-h-[42px] sm:self-auto sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2 sm:text-sm"
+            className="inline-flex h-10 self-end items-center gap-1.5 rounded-xl border border-emerald-200/90 bg-white px-3 text-[13px] font-semibold text-emerald-800 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 sm:h-11 sm:self-auto sm:gap-2 sm:rounded-2xl sm:px-4 sm:text-sm"
           >
             <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading ? "animate-spin" : ""}`} />
             Refresh
@@ -197,21 +197,21 @@ export function AdminMessages() {
         </div>
 
         {error ? (
-          <div className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
             <AlertCircle className="h-5 w-5" />
             {error}
           </div>
         ) : null}
 
         <section className="md:hidden">
-          <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm">
+          <div className="rounded-2xl border border-emerald-100 bg-white p-2.5 shadow-[0_10px_24px_rgba(15,64,28,0.08)]">
             <div className="grid grid-cols-4 gap-1.5">
               {quickSummaryItems.map((item) => (
-                <article key={item.key} className="rounded-xl border border-gray-200 bg-gray-50 px-1.5 py-2">
-                  <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
+                <article key={item.key} className="rounded-xl border border-emerald-100 bg-[#f7fbf7] px-1.5 py-2">
+                  <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
                     {item.label}
                   </p>
-                  <p className="mt-0.5 truncate text-xs font-extrabold text-gray-900">{item.value}</p>
+                  <p className="mt-0.5 truncate text-xs font-extrabold text-slate-900">{item.value}</p>
                 </article>
               ))}
             </div>
@@ -219,23 +219,23 @@ export function AdminMessages() {
         </section>
 
         <section className="md:hidden">
-          <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+          <div className="rounded-2xl border border-emerald-100 bg-white p-3 shadow-[0_10px_24px_rgba(15,64,28,0.08)]">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <p className="text-base font-bold text-gray-900">Inbox</p>
-              <p className="text-xs text-gray-500">
+              <p className="text-base font-bold text-slate-900">Inbox</p>
+              <p className="text-xs text-slate-500">
                 {filteredMessages.length} messages · {unreadCount} unread
               </p>
             </div>
 
             <div className="space-y-2.5">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-500" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder="Search messages..."
-                  className="w-full rounded-xl border border-gray-200 py-2.5 pl-10 pr-3 text-sm focus:border-green-500 focus:outline-none"
+                  className="w-full rounded-xl border border-emerald-100 py-2.5 pl-10 pr-3 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                 />
               </div>
 
@@ -252,8 +252,8 @@ export function AdminMessages() {
                     onClick={() => setStatusFilter(item.value)}
                     className={`rounded-full px-3 py-1 text-xs font-semibold ${
                       statusFilter === item.value
-                        ? "bg-[#2a5f1e] text-white"
-                        : "bg-gray-100 text-gray-600"
+                        ? "bg-emerald-700 text-white"
+                        : "bg-[#f4faf5] text-slate-600"
                     }`}
                   >
                     {item.label}
@@ -261,12 +261,12 @@ export function AdminMessages() {
                 ))}
               </div>
 
-              <div className="inline-flex rounded-full border border-gray-200 bg-gray-50 p-1">
+              <div className="inline-flex rounded-full border border-emerald-100 bg-[#f4faf5] p-1">
                 <button
                   type="button"
                   onClick={() => setMobileView("queue")}
                   className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    mobileView === "queue" ? "bg-[#2a5f1e] text-white" : "text-gray-600"
+                    mobileView === "queue" ? "bg-emerald-700 text-white" : "text-slate-600"
                   }`}
                 >
                   Queue
@@ -275,7 +275,7 @@ export function AdminMessages() {
                   type="button"
                   onClick={() => setMobileView("detail")}
                   className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    mobileView === "detail" ? "bg-[#2a5f1e] text-white" : "text-gray-600"
+                    mobileView === "detail" ? "bg-emerald-700 text-white" : "text-slate-600"
                   }`}
                 >
                   Detail
@@ -297,24 +297,24 @@ export function AdminMessages() {
                           className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors duration-150 ${
                             isActive
                               ? "border-emerald-200 bg-emerald-50"
-                              : "border-gray-100 bg-gray-50"
+                              : "border-emerald-100 bg-[#f0f8f2]"
                           }`}
                         >
                           <div className="mb-1 flex items-center justify-between gap-2">
-                            <p className="truncate text-sm font-semibold text-gray-900">{item.name}</p>
+                            <p className="truncate text-sm font-semibold text-slate-900">{item.name}</p>
                             <span
                               className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusClasses[status] || "bg-gray-100 text-gray-700"}`}
                             >
                               {status}
                             </span>
                           </div>
-                          <p className="truncate text-xs text-gray-500">{item.subject || "No subject"}</p>
-                          <p className="mt-1 truncate text-xs text-gray-400">{formatDateTime(item.created_at)}</p>
+                          <p className="truncate text-xs text-slate-500">{item.subject || "No subject"}</p>
+                          <p className="mt-1 truncate text-xs text-slate-400">{formatDateTime(item.created_at)}</p>
                         </button>
                       );
                     })
                   ) : (
-                    <p className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-3 text-sm text-gray-500">
+                    <p className="rounded-xl border border-emerald-100 bg-[#f0f8f2] px-3 py-3 text-sm text-slate-500">
                       No messages found.
                     </p>
                   )}
@@ -323,7 +323,7 @@ export function AdminMessages() {
                     <button
                       type="button"
                       onClick={() => setShowAllMobileRows((prev) => !prev)}
-                      className="inline-flex min-h-[36px] items-center rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                      className="inline-flex min-h-[36px] items-center rounded-lg border border-emerald-200 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-50"
                     >
                       {showAllMobileRows
                         ? "Show fewer messages"
@@ -332,13 +332,13 @@ export function AdminMessages() {
                   ) : null}
                 </div>
               ) : selectedMessage ? (
-                <div className="space-y-4 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                <div className="space-y-4 rounded-xl border border-emerald-100 bg-[#f0f8f2] p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-lg font-bold text-gray-900">
+                      <p className="truncate text-lg font-bold text-slate-900">
                         {selectedMessage.subject || "Contact Message"}
                       </p>
-                      <p className="mt-1 text-sm text-gray-500">
+                      <p className="mt-1 text-sm text-slate-500">
                         Received {formatDateTime(selectedMessage.created_at)}
                       </p>
                     </div>
@@ -351,25 +351,25 @@ export function AdminMessages() {
                     </button>
                   </div>
 
-                  <div className="space-y-2 rounded-xl border border-gray-100 bg-white p-3">
-                    <div className="inline-flex items-center gap-2 text-sm text-gray-700">
-                      <Mail className="h-4 w-4 text-gray-500" />
+                  <div className="space-y-2 rounded-xl border border-emerald-100 bg-white p-3">
+                    <div className="inline-flex items-center gap-2 text-sm text-slate-700">
+                      <Mail className="h-4 w-4 text-slate-500" />
                       <span className="truncate">{selectedMessage.email}</span>
                     </div>
-                    <div className="inline-flex items-center gap-2 text-sm text-gray-700">
-                      <MessageSquare className="h-4 w-4 text-gray-500" />
+                    <div className="inline-flex items-center gap-2 text-sm text-slate-700">
+                      <MessageSquare className="h-4 w-4 text-slate-500" />
                       <span>{selectedMessage.phone || "No phone"}</span>
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-gray-100 bg-white p-3">
-                    <p className="whitespace-pre-wrap text-sm leading-6 text-gray-700">
+                  <div className="rounded-xl border border-emerald-100 bg-white p-3">
+                    <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
                       {selectedMessage.message}
                     </p>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-600">Update status:</span>
+                    <span className="text-sm font-semibold text-slate-600">Update status:</span>
                     {[
                       { value: "new", label: "New" },
                       { value: "read", label: "Read" },
@@ -381,8 +381,8 @@ export function AdminMessages() {
                         onClick={() => void updateStatus(item.value)}
                         className={`rounded-full px-3 py-1 text-xs font-semibold ${
                           String(selectedMessage.status || "new").toLowerCase() === item.value
-                            ? "bg-[#2a5f1e] text-white"
-                            : "bg-gray-100 text-gray-600"
+                            ? "bg-emerald-700 text-white"
+                            : "bg-white text-slate-600"
                         }`}
                       >
                         {item.label}
@@ -393,15 +393,15 @@ export function AdminMessages() {
                   <button
                     type="button"
                     onClick={() => setMobileView("queue")}
-                    className="inline-flex min-h-[36px] items-center rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-700 hover:bg-white"
+                    className="inline-flex min-h-[36px] items-center rounded-lg border border-emerald-200 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-50"
                   >
                     Back to inbox
                   </button>
                 </div>
               ) : (
-                <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-5 text-center">
-                  <p className="text-sm font-semibold text-gray-900">Select a message</p>
-                  <p className="mt-1 text-xs text-gray-500">
+                <div className="rounded-xl border border-emerald-100 bg-[#f0f8f2] px-3 py-5 text-center">
+                  <p className="text-sm font-semibold text-slate-900">Select a message</p>
+                  <p className="mt-1 text-xs text-slate-500">
                     Open any inquiry from queue to view details.
                   </p>
                 </div>
@@ -411,23 +411,23 @@ export function AdminMessages() {
         </section>
 
         <div className="hidden grid-cols-1 gap-4 md:grid xl:grid-cols-[36%_64%]">
-          <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-100 p-4">
-              <p className="text-lg font-bold text-gray-900">Inbox</p>
-              <p className="text-sm text-gray-500">
+          <div className="rounded-3xl border border-emerald-100 bg-white shadow-[0_14px_30px_rgba(15,64,28,0.08)]">
+            <div className="border-b border-emerald-100 p-4">
+              <p className="text-lg font-bold text-slate-900">Inbox</p>
+              <p className="text-sm text-slate-500">
                 {filteredMessages.length} messages · {unreadCount} unread
               </p>
             </div>
 
-            <div className="border-b border-gray-100 p-4 space-y-3">
+            <div className="border-b border-emerald-100 p-4 space-y-3">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-500" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder="Search messages..."
-                  className="w-full rounded-xl border border-gray-200 py-2.5 pl-10 pr-3 text-sm focus:border-green-500 focus:outline-none"
+                  className="w-full rounded-xl border border-emerald-100 py-2.5 pl-10 pr-3 text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                 />
               </div>
 
@@ -442,10 +442,10 @@ export function AdminMessages() {
                     key={item.value}
                     type="button"
                     onClick={() => setStatusFilter(item.value)}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 ${
                       statusFilter === item.value
-                        ? "bg-[#2a5f1e] text-white"
-                        : "bg-gray-100 text-gray-600"
+                        ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
+                        : "bg-emerald-100 text-slate-600 hover:bg-emerald-200/70 hover:text-emerald-800"
                     }`}
                   >
                     {item.label}
@@ -464,34 +464,34 @@ export function AdminMessages() {
                       key={item.id}
                       type="button"
                       onClick={() => void openMessage(item)}
-                      className={`w-full border-b border-gray-100 px-4 py-3 text-left transition-colors duration-150 ${
-                        isActive ? "bg-emerald-50" : "hover:bg-gray-50"
+                      className={`w-full border-b border-emerald-100 px-4 py-3 text-left transition-colors duration-150 ${
+                        isActive ? "bg-emerald-50" : "hover:bg-emerald-50/40"
                       }`}
                     >
                       <div className="mb-1 flex items-center justify-between gap-2">
-                        <p className="truncate text-sm font-semibold text-gray-900">{item.name}</p>
+                        <p className="truncate text-sm font-semibold text-slate-900">{item.name}</p>
                         <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusClasses[status] || "bg-gray-100 text-gray-700"}`}>
                           {status}
                         </span>
                       </div>
-                      <p className="truncate text-xs text-gray-500">{item.subject || "No subject"}</p>
-                      <p className="mt-1 truncate text-xs text-gray-400">{formatDateTime(item.created_at)}</p>
+                      <p className="truncate text-xs text-slate-500">{item.subject || "No subject"}</p>
+                      <p className="mt-1 truncate text-xs text-slate-400">{formatDateTime(item.created_at)}</p>
                     </button>
                   );
                 })
               ) : (
-                <p className="p-4 text-sm text-gray-500">No messages found.</p>
+                <p className="p-4 text-sm text-slate-500">No messages found.</p>
               )}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="rounded-3xl border border-emerald-100 bg-white p-5 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6">
             {selectedMessage ? (
               <div className="space-y-5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xl font-bold text-gray-900">{selectedMessage.subject || "Contact Message"}</p>
-                    <p className="mt-1 text-sm text-gray-500">Received {formatDateTime(selectedMessage.created_at)}</p>
+                    <p className="text-xl font-bold text-slate-900">{selectedMessage.subject || "Contact Message"}</p>
+                    <p className="mt-1 text-sm text-slate-500">Received {formatDateTime(selectedMessage.created_at)}</p>
                   </div>
                   <button
                     type="button"
@@ -502,25 +502,25 @@ export function AdminMessages() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 sm:grid-cols-2">
-                  <div className="inline-flex items-center gap-2 text-sm text-gray-700">
-                    <Mail className="h-4 w-4 text-gray-500" />
+                <div className="grid grid-cols-1 gap-3 rounded-xl border border-emerald-100 bg-[#f0f8f2] p-4 sm:grid-cols-2">
+                  <div className="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <Mail className="h-4 w-4 text-slate-500" />
                     <span className="truncate">{selectedMessage.email}</span>
                   </div>
-                  <div className="inline-flex items-center gap-2 text-sm text-gray-700">
-                    <MessageSquare className="h-4 w-4 text-gray-500" />
+                  <div className="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <MessageSquare className="h-4 w-4 text-slate-500" />
                     <span>{selectedMessage.phone || "No phone"}</span>
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-gray-100 bg-white p-4">
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-gray-700">
+                <div className="rounded-xl border border-emerald-100 bg-white p-4">
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
                     {selectedMessage.message}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-gray-600">Update status:</span>
+                  <span className="text-sm font-semibold text-slate-600">Update status:</span>
                   {[
                     { value: "new", label: "New" },
                     { value: "read", label: "Read" },
@@ -530,10 +530,10 @@ export function AdminMessages() {
                       key={item.value}
                       type="button"
                       onClick={() => void updateStatus(item.value)}
-                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 ${
                         selectedMessage.status === item.value
-                          ? "bg-[#2a5f1e] text-white"
-                          : "bg-gray-100 text-gray-600"
+                          ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
+                          : "bg-emerald-100 text-slate-600 hover:bg-emerald-200/70 hover:text-emerald-800"
                       }`}
                     >
                       {item.label}
@@ -546,8 +546,8 @@ export function AdminMessages() {
                 <div className="mb-3 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
                   <MessageSquare className="h-6 w-6" />
                 </div>
-                <p className="text-lg font-semibold text-gray-900">Select a Message</p>
-                <p className="mt-1 max-w-sm text-sm text-gray-500">
+                <p className="text-lg font-semibold text-slate-900">Select a Message</p>
+                <p className="mt-1 max-w-sm text-sm text-slate-500">
                   Choose any inquiry from the left panel to review customer details and update status.
                 </p>
               </div>

@@ -3,6 +3,91 @@ import { productAPI } from "@/services/api";
 
 const ProductContext = createContext(null);
 
+const STARTUP_PRODUCT_GROUPS = [
+  {
+    key: "honey",
+    preferredSlugs: ["organic-honey", "honey"],
+    keywords: ["honey"],
+  },
+  {
+    key: "coconut-oil",
+    preferredSlugs: ["organic-coconut-oil", "coconut-oil", "coconut-oil-1"],
+    keywords: ["coconut", "oil"],
+  },
+  {
+    key: "ispaghol",
+    preferredSlugs: ["ispaghol", "ispaghol-husk", "psyllium", "psyllium-husk"],
+    keywords: ["ispaghol", "psyllium"],
+  },
+];
+
+const normalizeText = (value = "") => String(value).toLowerCase().trim();
+
+const buildProductSearchText = (product) => {
+  return [
+    product?.slug,
+    product?.name,
+    product?.category,
+    product?.category_name,
+    product?.description,
+    product?.image,
+    product?.image_url,
+  ]
+    .map(normalizeText)
+    .join(" ");
+};
+
+const scoreProductMatch = (product, group) => {
+  const slug = normalizeText(product?.slug);
+  const searchableText = buildProductSearchText(product);
+
+  if (group.preferredSlugs.includes(slug)) {
+    return 100;
+  }
+
+  let matchedKeywords = 0;
+  group.keywords.forEach((keyword) => {
+    if (searchableText.includes(keyword)) {
+      matchedKeywords += 1;
+    }
+  });
+
+  if (matchedKeywords === 0) {
+    return -1;
+  }
+
+  return matchedKeywords * 10;
+};
+
+const pickStartupProducts = (productList) => {
+  const selectedProducts = [];
+  const usedProductIds = new Set();
+
+  STARTUP_PRODUCT_GROUPS.forEach((group) => {
+    let bestProduct = null;
+    let bestScore = -1;
+
+    productList.forEach((product) => {
+      if (usedProductIds.has(product.id)) {
+        return;
+      }
+
+      const score = scoreProductMatch(product, group);
+      if (score > bestScore) {
+        bestScore = score;
+        bestProduct = product;
+      }
+    });
+
+    if (bestProduct && bestScore > 0) {
+      usedProductIds.add(bestProduct.id);
+      selectedProducts.push(bestProduct);
+    }
+  });
+
+  return selectedProducts;
+};
+
 export const useProducts = () => {
   const context = useContext(ProductContext);
   if (!context) {
@@ -25,7 +110,12 @@ export const ProductProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await productAPI.getAll();
+      
+      // Check if we're in admin panel - include inactive products for admin
+      const isAdminPage = typeof window !== 'undefined' && 
+        window.location.pathname.startsWith('/admin');
+      
+      const data = await productAPI.getAll(isAdminPage);
       setProducts(Array.isArray(data) ? data : data.data || []);
     } catch (err) {
       setError(err.message);
@@ -83,16 +173,23 @@ export const ProductProvider = ({ children }) => {
     );
   };
 
-  // Get featured products
+  // Get featured products (only products marked as featured)
   const getFeaturedProducts = () => {
-    return products
-      .filter((p) => p.is_featured === true || p.is_featured === 1)
-      .slice(0, 8);
+    return products.filter((p) => 
+      (p.is_active === true || p.is_active === 1) && 
+      (p.is_featured === true || p.is_featured === 1)
+    );
   };
 
   // Get active products only
   const getActiveProducts = () => {
     return products.filter((p) => p.is_active === true || p.is_active === 1);
+  };
+
+  // Startup catalog (only Honey, Coconut Oil, Ispaghol)
+  const getStartupProducts = () => {
+    const activeProducts = getActiveProducts();
+    return pickStartupProducts(activeProducts);
   };
 
   const value = {
@@ -107,6 +204,7 @@ export const ProductProvider = ({ children }) => {
     getProductsByCategory,
     getFeaturedProducts,
     getActiveProducts,
+    getStartupProducts,
   };
 
   return (

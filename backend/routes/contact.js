@@ -1,17 +1,28 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { db } = require('../config/db');
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Submit contact form
 router.post('/', (req, res) => {
-    const { name, email, phone, subject, message } = req.body;
-    
+    const name    = String(req.body?.name    || '').trim().slice(0, 100);
+    const email   = String(req.body?.email   || '').trim().toLowerCase().slice(0, 200);
+    const phone   = String(req.body?.phone   || '').trim().slice(0, 30)  || null;
+    const subject = String(req.body?.subject || '').trim().slice(0, 200) || null;
+    const message = String(req.body?.message || '').trim().slice(0, 5000);
+
     if (!name || !email || !message) {
         return res.status(400).json({ error: 'Name, email, and message are required' });
     }
-    
+
+    if (!EMAIL_REGEX.test(email)) {
+        return res.status(400).json({ error: 'Please provide a valid email address' });
+    }
+
     const query = 'INSERT INTO contacts (name, email, phone, subject, message) VALUES (?, ?, ?, ?, ?)';
-    
+
     db.query(query, [name, email, phone, subject, message], (err, result) => {
         if (err) {
             return res.status(500).json({ error: 'Error submitting contact form' });

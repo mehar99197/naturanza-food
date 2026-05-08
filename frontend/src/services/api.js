@@ -1,8 +1,28 @@
 import axios from "axios";
 
+const resolveApiBaseUrl = () => {
+  const configuredApiUrl = String(import.meta.env.VITE_API_URL || "").trim();
+  if (configuredApiUrl) {
+    return configuredApiUrl;
+  }
+
+  if (typeof window !== "undefined") {
+    const protocol = String(window.location.protocol || "http:");
+    const hostname = String(window.location.hostname || "localhost");
+    const apiPort = Number.parseInt(
+      String(import.meta.env.VITE_API_PORT || "5000"),
+      10,
+    );
+    const safePort = Number.isFinite(apiPort) && apiPort > 0 ? apiPort : 5000;
+
+    return `${protocol}//${hostname}:${safePort}/api`;
+  }
+
+  return "http://localhost:5000/api";
+};
+
 // Create axios instance pointing to backend
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_BASE_URL = resolveApiBaseUrl();
 
 const INVOICE_DOWNLOAD_TIMEOUT_MS = Math.max(
   Number.parseInt(import.meta.env.VITE_INVOICE_DOWNLOAD_TIMEOUT_MS || "120000", 10) ||
@@ -12,6 +32,7 @@ const INVOICE_DOWNLOAD_TIMEOUT_MS = Math.max(
 
 const axiosInstance = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
   timeout: 10000,
   headers: {
     "Content-Type": "application/json",
@@ -20,16 +41,128 @@ const axiosInstance = axios.create({
 
 export const AUTH_SESSION_SYNC_EVENT = "naturanza:auth-session-sync";
 
+const ADMIN_ACCESS_TOKEN_STORAGE_KEY = "adminAccessToken";
+const USER_ACCESS_TOKEN_STORAGE_KEY = "token";
+
+const canUseWebStorage = () =>
+  typeof window !== "undefined" &&
+  typeof window.localStorage !== "undefined" &&
+  typeof window.sessionStorage !== "undefined";
+
+const readStoredAdminAccessToken = () => {
+  if (!canUseWebStorage()) {
+    return null;
+  }
+
+  const storedToken = String(
+    window.localStorage.getItem(ADMIN_ACCESS_TOKEN_STORAGE_KEY) || "",
+  ).trim();
+
+  return storedToken || null;
+};
+
+const readStoredUserAccessToken = () => {
+  if (!canUseWebStorage()) {
+    return null;
+  }
+
+  const storedToken = String(
+    window.localStorage.getItem(USER_ACCESS_TOKEN_STORAGE_KEY) || "",
+  ).trim();
+
+  return storedToken || null;
+};
+
+let userAccessToken = readStoredUserAccessToken();
+let adminAccessToken = readStoredAdminAccessToken();
+let refreshPromise = null;
+
+const purgeLegacyUserTokenStorage = () => {
+  if (!canUseWebStorage()) {
+    return;
+  }
+
+  window.localStorage.removeItem("authToken");
+  window.sessionStorage.removeItem("authToken");
+};
+
+const purgeLegacyAdminTokenStorage = () => {
+  if (!canUseWebStorage()) {
+    return;
+  }
+
+  window.localStorage.removeItem("adminAuthToken");
+};
+
+export const setUserAccessToken = (token) => {
+  userAccessToken = token ? String(token) : null;
+  
+  if (!canUseWebStorage()) {
+    return;
+  }
+
+  if (userAccessToken) {
+    window.localStorage.setItem(USER_ACCESS_TOKEN_STORAGE_KEY, userAccessToken);
+  } else {
+    window.localStorage.removeItem(USER_ACCESS_TOKEN_STORAGE_KEY);
+  }
+};
+
+export const getUserAccessToken = () => userAccessToken;
+
+export const clearUserAccessToken = () => {
+  userAccessToken = null;
+  
+  if (!canUseWebStorage()) {
+    return;
+  }
+
+  window.localStorage.removeItem(USER_ACCESS_TOKEN_STORAGE_KEY);
+};
+
+export const setAdminAccessToken = (token) => {
+  adminAccessToken = token ? String(token) : null;
+
+  if (!canUseWebStorage()) {
+    return;
+  }
+
+  if (adminAccessToken) {
+    window.localStorage.setItem(ADMIN_ACCESS_TOKEN_STORAGE_KEY, adminAccessToken);
+  } else {
+    window.localStorage.removeItem(ADMIN_ACCESS_TOKEN_STORAGE_KEY);
+  }
+};
+
+export const getAdminAccessToken = () => adminAccessToken;
+
+export const clearAdminAccessToken = () => {
+  adminAccessToken = null;
+
+  if (!canUseWebStorage()) {
+    return;
+  }
+
+  window.localStorage.removeItem(ADMIN_ACCESS_TOKEN_STORAGE_KEY);
+};
+
+purgeLegacyUserTokenStorage();
+purgeLegacyAdminTokenStorage();
+
 const clearUserSessionStorage = () => {
-  localStorage.removeItem("authToken");
-  sessionStorage.removeItem("authToken");
-  localStorage.removeItem("userData");
-  localStorage.removeItem("profileImage");
+  clearUserAccessToken();
+  purgeLegacyUserTokenStorage();
+  if (canUseWebStorage()) {
+    window.localStorage.removeItem("userData");
+    window.localStorage.removeItem("profileImage");
+  }
 };
 
 const clearAdminSessionStorage = () => {
-  localStorage.removeItem("adminAuthToken");
-  localStorage.removeItem("adminData");
+  clearAdminAccessToken();
+  if (canUseWebStorage()) {
+    window.localStorage.removeItem("adminData");
+  }
 };
 
 const emitAuthSessionSync = (source) => {
@@ -49,16 +182,16 @@ const emitAuthSessionSync = (source) => {
 
 // Add token to requests
 axiosInstance.interceptors.request.use((config) => {
-  const adminToken = localStorage.getItem("adminAuthToken");
-  const userToken =
-    localStorage.getItem("authToken") || sessionStorage.getItem("authToken");
+  const adminToken = getAdminAccessToken();
+  const userToken = getUserAccessToken();
   const requestUrl = String(config.url || "");
   const isUserScopedRoute =
     /^\/auth(\/|$)/.test(requestUrl) ||
     /^\/profile(\/|$)/.test(requestUrl) ||
     /^\/wishlist(\/|$)/.test(requestUrl) ||
     /^\/cart(\/|$)/.test(requestUrl) ||
-    /^\/orders\/my-orders(\/|$)/.test(requestUrl);
+    /^\/orders(\/|$)/.test(requestUrl) ||
+    /^\/reviews(\/|$)/.test(requestUrl);
   const isAdminRoute =
     /^\/admin(\/|$)/.test(requestUrl) ||
     requestUrl.includes("/admin/") ||
@@ -69,12 +202,10 @@ axiosInstance.interceptors.request.use((config) => {
 
   let token = null;
 
-  if (isUserScopedRoute) {
+  if (isAdminRoute || isAdminPage) {
+    token = adminToken || null;
+  } else if (isUserScopedRoute) {
     token = userToken || null;
-  } else if (isAdminRoute || isAdminPage) {
-    token = adminToken || userToken;
-  } else {
-    token = userToken || adminToken;
   }
 
   if (token) {
@@ -87,12 +218,99 @@ axiosInstance.interceptors.request.use((config) => {
 });
 
 // Handle response errors
+const isAdminRequestUrl = (requestUrl) =>
+  /^\/admin(\/|$)/.test(requestUrl) ||
+  requestUrl.includes("/admin/") ||
+  /^\/orders\/admin(\/|$)/.test(requestUrl);
+
+const isRefreshBypassRequest = (config) =>
+  Boolean(
+    config?.headers?.["X-Skip-Auth-Refresh"] ||
+      config?.headers?.["x-skip-auth-refresh"],
+  );
+
+const isAuthBootstrapRoute = (requestUrl) =>
+  /^\/auth\/(login|register|google|refresh|forgot-password|reset-password)(\/|$)/.test(
+    requestUrl,
+  );
+
+const requestUserTokenRefresh = async () => {
+  const response = await axiosInstance.post(
+    "/auth/refresh",
+    {},
+    {
+      headers: {
+        "X-Skip-Auth-Refresh": "true",
+      },
+    },
+  );
+
+  const payload = response?.data || {};
+  const refreshedToken = payload.accessToken || null;
+  if (!refreshedToken) {
+    throw new Error("Refresh endpoint did not return an access token");
+  }
+
+  setUserAccessToken(refreshedToken);
+  emitAuthSessionSync("user-token-refresh");
+  return payload;
+};
+
+const isUserSessionTerminalError = (error) => {
+  const status = Number(error?.response?.status || 0);
+  return status === 401 || status === 403;
+};
+
+const refreshUserAccessToken = async () => {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = requestUserTokenRefresh()
+    .catch((error) => {
+      if (isUserSessionTerminalError(error)) {
+        clearUserSessionStorage();
+        emitAuthSessionSync("user-token-refresh-failed");
+      }
+      throw error;
+    })
+    .finally(() => {
+      refreshPromise = null;
+    });
+
+  return refreshPromise;
+};
+
 axiosInstance.interceptors.response.use(
   (response) => response,
-  (error) => {
-    // Don't auto-clear tokens here; auth contexts perform explicit verification
-    // and storage cleanup to avoid false logouts from transient 401/403 responses.
-    return Promise.reject(error);
+  async (error) => {
+    const originalRequest = error?.config || {};
+    const status = Number(error?.response?.status || 0);
+    const requestUrl = String(originalRequest.url || "");
+    const shouldAttemptRefresh =
+      status === 401 &&
+      !originalRequest._retry &&
+      !isRefreshBypassRequest(originalRequest) &&
+      !isAdminRequestUrl(requestUrl) &&
+      !isAuthBootstrapRoute(requestUrl);
+
+    if (!shouldAttemptRefresh) {
+      return Promise.reject(error);
+    }
+
+    try {
+      originalRequest._retry = true;
+      const refreshPayload = await refreshUserAccessToken();
+      const refreshedToken = refreshPayload?.accessToken || null;
+      if (!refreshedToken) {
+        throw new Error("Refresh endpoint did not return an access token");
+      }
+      originalRequest.headers = originalRequest.headers || {};
+      originalRequest.headers.Authorization = `Bearer ${refreshedToken}`;
+      return axiosInstance(originalRequest);
+    } catch (refreshError) {
+      return Promise.reject(refreshError);
+    }
   },
 );
 
@@ -156,8 +374,10 @@ const hasDownloadablePayload = (payload) => {
 
 // Product APIs
 export const productAPI = {
-  getAll: async () => {
-    const response = await axiosInstance.get("/products");
+  getAll: async (includeInactive = false) => {
+    const response = await axiosInstance.get("/products", {
+      params: includeInactive ? { includeInactive: 'true' } : {}
+    });
     return response.data;
   },
 
@@ -219,8 +439,9 @@ export const productAPI = {
 export const userAPI = {
   register: async (userData) => {
     const response = await axiosInstance.post("/auth/register", userData);
-    if (response.data.token) {
-      localStorage.setItem("authToken", response.data.token);
+    const nextToken = response.data.accessToken || response.data.token;
+    if (nextToken) {
+      setUserAccessToken(nextToken);
       emitAuthSessionSync("user-register");
     }
     return response.data;
@@ -228,8 +449,9 @@ export const userAPI = {
 
   login: async (credentials) => {
     const response = await axiosInstance.post("/auth/login", credentials);
-    if (response.data.token) {
-      localStorage.setItem("authToken", response.data.token);
+    const nextToken = response.data.accessToken || response.data.token;
+    if (nextToken) {
+      setUserAccessToken(nextToken);
       emitAuthSessionSync("user-login");
     }
     return response.data;
@@ -237,16 +459,31 @@ export const userAPI = {
 
   loginWithGoogle: async (idToken) => {
     const response = await axiosInstance.post("/auth/google", { idToken });
-    if (response.data.token) {
-      localStorage.setItem("authToken", response.data.token);
+    const nextToken = response.data.accessToken || response.data.token;
+    if (nextToken) {
+      setUserAccessToken(nextToken);
       emitAuthSessionSync("user-google-login");
     }
     return response.data;
   },
 
+  refreshToken: async () => {
+    const payload = await refreshUserAccessToken();
+    emitAuthSessionSync("user-refresh");
+    return payload;
+  },
+
   logout: async () => {
     try {
-      await axiosInstance.post("/auth/logout");
+      await axiosInstance.post(
+        "/auth/logout",
+        {},
+        {
+          headers: {
+            "X-Skip-Auth-Refresh": "true",
+          },
+        },
+      );
     } catch (error) {}
     clearUserSessionStorage();
     emitAuthSessionSync("user-logout");
@@ -392,19 +629,26 @@ export const profileSecurityAPI = {
   },
 };
 
+export const settingsAPI = {
+  getPublicSettings: async () => {
+    const response = await axiosInstance.get("/settings");
+    return response.data;
+  },
+};
+
 // Admin APIs
 export const adminAPI = {
   login: async (credentials) => {
     const response = await axiosInstance.post("/admin/login", credentials);
     if (response.data.token) {
-      localStorage.setItem("adminAuthToken", response.data.token);
+      setAdminAccessToken(response.data.token);
       emitAuthSessionSync("admin-login");
     }
     return response.data;
   },
 
   verify: async () => {
-    if (!localStorage.getItem("adminAuthToken")) {
+    if (!getAdminAccessToken()) {
       return { success: false, status: 401 };
     }
     try {
@@ -429,15 +673,32 @@ export const adminAPI = {
   },
 
   getDashboardStats: async () => {
-    if (!localStorage.getItem("adminAuthToken")) {
+    if (!getAdminAccessToken()) {
       return {};
     }
     const response = await axiosInstance.get("/admin/dashboard/stats");
     return response.data;
   },
 
+  getSettings: async () => {
+    const response = await axiosInstance.get("/admin/settings");
+    return response.data;
+  },
+
+  updateSettings: async (settings) => {
+    const response = await axiosInstance.put("/admin/settings", settings);
+    return response.data;
+  },
+
+  sendTestEmail: async (email) => {
+    const response = await axiosInstance.post("/admin/settings/test-email", {
+      email,
+    });
+    return response.data;
+  },
+
   getRecentOrders: async (limit = 10) => {
-    if (!localStorage.getItem("adminAuthToken")) {
+    if (!getAdminAccessToken()) {
       return [];
     }
     const response = await axiosInstance.get("/admin/dashboard/recent-orders", {
@@ -447,7 +708,7 @@ export const adminAPI = {
   },
 
   getSalesReport: async (params = {}) => {
-    if (!localStorage.getItem("adminAuthToken")) {
+    if (!getAdminAccessToken()) {
       return [];
     }
     const response = await axiosInstance.get("/admin/reports/sales", {
@@ -457,7 +718,7 @@ export const adminAPI = {
   },
 
   getProductSalesReport: async () => {
-    if (!localStorage.getItem("adminAuthToken")) {
+    if (!getAdminAccessToken()) {
       return [];
     }
     const response = await axiosInstance.get("/admin/reports/products");
@@ -465,7 +726,7 @@ export const adminAPI = {
   },
 
   getCustomers: async () => {
-    if (!localStorage.getItem("adminAuthToken")) {
+    if (!getAdminAccessToken()) {
       return [];
     }
     const response = await axiosInstance.get("/admin/users");
@@ -473,7 +734,7 @@ export const adminAPI = {
   },
 
   getUsers: async (params = {}) => {
-    if (!localStorage.getItem("adminAuthToken")) {
+    if (!getAdminAccessToken()) {
       return [];
     }
     const response = await axiosInstance.get("/admin/users", { params });
@@ -517,7 +778,7 @@ export const adminAPI = {
   },
 
   getCoupons: async () => {
-    if (!localStorage.getItem("adminAuthToken")) {
+    if (!getAdminAccessToken()) {
       return [];
     }
     const response = await axiosInstance.get("/coupons");
@@ -610,7 +871,7 @@ export const adminAPI = {
   },
 
   getReviews: async (params = {}) => {
-    if (!localStorage.getItem("adminAuthToken")) {
+    if (!getAdminAccessToken()) {
       return [];
     }
     const response = await axiosInstance.get("/admin/reviews", { params });
@@ -627,6 +888,11 @@ export const adminAPI = {
     return response.data;
   },
 
+  deleteReview: async (reviewId) => {
+    const response = await axiosInstance.delete(`/admin/reviews/${reviewId}`);
+    return response.data;
+  },
+
   updateReturnStatus: async (returnRequestId, payload) => {
     const response = await axiosInstance.put(
       `/admin/returns/${returnRequestId}/status`,
@@ -634,14 +900,104 @@ export const adminAPI = {
     );
     return response.data;
   },
+
+  // Admin Management APIs
+  getAdmins: async (params = {}) => {
+    const response = await axiosInstance.get("/admin-management/admins", { params });
+    return response.data;
+  },
+
+  createAdmin: async (formData) => {
+    const response = await axiosInstance.post("/admin-management/admins", formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  updateAdminStatus: async (adminId, status) => {
+    const response = await axiosInstance.patch(
+      `/admin-management/admins/${adminId}/status`,
+      { status }
+    );
+    return response.data;
+  },
+
+  updateAdminRole: async (adminId, role, permissions) => {
+    const response = await axiosInstance.patch(
+      `/admin-management/admins/${adminId}/role`,
+      { role, permissions }
+    );
+    return response.data;
+  },
+
+  removeAdminRole: async (adminId) => {
+    const response = await axiosInstance.delete(
+      `/admin-management/admins/${adminId}/role`
+    );
+    return response.data;
+  },
+
+  getAdminLogs: async (adminId, limit = 20) => {
+    const response = await axiosInstance.get(
+      `/admin-management/admins/${adminId}/logs`,
+      { params: { limit } }
+    );
+    return response.data;
+  },
+
+  changePassword: async (adminId, passwordData) => {
+    const response = await axiosInstance.patch(
+      `/admin-management/admins/${adminId}/change-password`,
+      passwordData
+    );
+    return response.data;
+  },
+
+  resetPassword: async (adminId) => {
+    const response = await axiosInstance.post(
+      `/admin-management/admins/${adminId}/reset-password`
+    );
+    return response.data;
+  },
+
+  // Admin notification methods (use same endpoints but with admin token)
+  getNotifications: async (limit = 30) => {
+    const response = await axiosInstance.get("/auth/notifications", {
+      params: { limit },
+    });
+    return response.data;
+  },
+
+  markNotificationRead: async (notificationId) => {
+    const response = await axiosInstance.patch(
+      `/auth/notifications/${notificationId}/read`,
+    );
+    return response.data;
+  },
+
+  markAllNotificationsRead: async () => {
+    const response = await axiosInstance.patch("/auth/notifications/read-all");
+    return response.data;
+  },
+
+  getNotificationSettings: async () => {
+    const response = await axiosInstance.get("/auth/notifications/settings");
+    return response.data;
+  },
+
+  updateNotificationSettings: async (settings) => {
+    const response = await axiosInstance.put("/auth/notifications/settings", settings);
+    return response.data;
+  },
 };
 
 // Order APIs
 export const orderAPI = {
   getAll: async () => {
-    const hasAdminToken = !!localStorage.getItem("adminAuthToken");
-    const userToken =
-      localStorage.getItem("authToken") || sessionStorage.getItem("authToken");
+    const hasAdminToken = !!getAdminAccessToken();
+    const userToken = getUserAccessToken();
     if (!hasAdminToken && !userToken) {
       return [];
     }
@@ -656,8 +1012,7 @@ export const orderAPI = {
   },
 
   getUserOrders: async (userId) => {
-    const userToken =
-      localStorage.getItem("authToken") || sessionStorage.getItem("authToken");
+    const userToken = getUserAccessToken();
     if (!userToken) {
       return [];
     }
@@ -687,7 +1042,7 @@ export const orderAPI = {
     return response.data;
   },
 
-  downloadInvoice: async (id) => {
+  downloadInvoice: async function downloadInvoiceFn(id, retryCount = 1) {
     const fallbackFilename = `ord-${String(id).padStart(6, "0")}-invoice.pdf`;
 
     try {
@@ -696,6 +1051,7 @@ export const orderAPI = {
         timeout: INVOICE_DOWNLOAD_TIMEOUT_MS,
         headers: {
           Accept: "application/pdf",
+          "X-Skip-Auth-Refresh": "true",
         },
       });
 
@@ -738,6 +1094,16 @@ export const orderAPI = {
           status: Number(xhr?.status) || 200,
           contentType: xhrContentType,
         };
+      }
+
+      // Retry once on network error. The browser may report a false Network
+      // Error for blob requests where the XHR response was cleared before
+      // the error handler ran (making the recovery path above unreachable).
+      if (
+        retryCount > 0 &&
+        /network error/i.test(String(error?.message || ""))
+      ) {
+        return downloadInvoiceFn(id, 0);
       }
 
       throw error;
@@ -801,8 +1167,8 @@ export const returnAPI = {
 
 // Category APIs
 export const categoryAPI = {
-  getAll: async () => {
-    const response = await axiosInstance.get("/categories");
+  getAll: async (params = {}) => {
+    const response = await axiosInstance.get("/categories", { params });
     return response.data;
   },
 
@@ -823,6 +1189,15 @@ export const categoryAPI = {
 
   delete: async (id) => {
     const response = await axiosInstance.delete(`/categories/${id}`);
+    return response.data;
+  },
+
+  uploadImage: async (file) => {
+    const formData = new FormData();
+    formData.append("category_image", file);
+    const response = await axiosInstance.post("/categories/upload-image", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
     return response.data;
   },
 };
@@ -940,6 +1315,27 @@ export const wishlistAPI = {
   },
 };
 
+// Reviews API (for customers to submit reviews)
+export const reviewAPI = {
+  // Submit a review for a product
+  submitReview: async (reviewData) => {
+    const response = await axiosInstance.post("/reviews", reviewData);
+    return response.data;
+  },
+
+  // Get reviews for a specific product (approved only)
+  getProductReviews: async (productId) => {
+    const response = await axiosInstance.get(`/reviews/product/${productId}`);
+    return response.data;
+  },
+
+  // Get current user's reviews
+  getMyReviews: async () => {
+    const response = await axiosInstance.get("/reviews/my-reviews");
+    return response.data;
+  },
+};
+
 export default {
   productAPI,
   userAPI,
@@ -952,5 +1348,6 @@ export default {
   cartAPI,
   wishlistAPI,
   returnAPI,
+  reviewAPI,
   axiosInstance,
 };

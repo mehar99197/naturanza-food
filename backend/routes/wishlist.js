@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { authenticateToken } = require("../middleware/auth");
+const { db } = require("../config/db");
 
 const toProductId = (value) => {
     const parsed = Number(value);

@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_set_by_user BOOLEAN DEFAULT TRUE,
     role ENUM('customer', 'admin') DEFAULT 'customer',
     is_active BOOLEAN DEFAULT TRUE,
+    failed_login_attempts INT DEFAULT 0,
+    locked_until DATETIME,
     profile_image VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -27,6 +29,7 @@ CREATE TABLE IF NOT EXISTS categories (
     slug VARCHAR(160) NOT NULL UNIQUE,
     description TEXT,
     image_url VARCHAR(255),
+    category_type ENUM('shop', 'shop_by_category', 'both') DEFAULT 'both',
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -37,6 +40,9 @@ CREATE TABLE IF NOT EXISTS products (
     name VARCHAR(200) NOT NULL,
     slug VARCHAR(200) NOT NULL UNIQUE,
     description TEXT,
+    ingredients TEXT,
+    benefits TEXT,
+    `usage` TEXT,
     price DECIMAL(10, 2) NOT NULL,
     category_id INT,
     image_url VARCHAR(255),
@@ -73,18 +79,8 @@ CREATE TABLE IF NOT EXISTS wishlist (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
-    UNIQUE KEY unique_user_product (user_id, product_id)
-);
--- User wishlist table (profile module)
-CREATE TABLE IF NOT EXISTS user_wishlist (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    user_id INT NOT NULL,
-    product_id INT NOT NULL,
-    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
-    UNIQUE KEY unique_user_wishlist_product (user_id, product_id),
-    INDEX idx_user_wishlist_user_time (user_id, added_at)
+    UNIQUE KEY unique_user_product (user_id, product_id),
+    INDEX idx_wishlist_user_time (user_id, created_at)
 );
 -- Orders table
 CREATE TABLE IF NOT EXISTS orders (
@@ -405,6 +401,41 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     INDEX idx_user_sessions_user_active (user_id, is_active),
     INDEX idx_user_sessions_last_seen (last_seen_at)
 );
+-- Refresh token storage with rotation support
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    session_id INT NOT NULL,
+    jti CHAR(36) NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    revoked_at DATETIME,
+    revoked_reason VARCHAR(120),
+    replaced_by_jti CHAR(36),
+    created_by_ip VARCHAR(64),
+    user_agent VARCHAR(255),
+    last_used_at DATETIME,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_refresh_token_jti (jti),
+    UNIQUE KEY unique_refresh_token_hash (token_hash),
+    INDEX idx_refresh_tokens_user_active (user_id, revoked_at, expires_at),
+    INDEX idx_refresh_tokens_session (session_id, revoked_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id) REFERENCES user_sessions(id) ON DELETE CASCADE
+);
+-- Access token blacklist for explicit revocation
+CREATE TABLE IF NOT EXISTS token_blacklist (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    jti CHAR(36) NOT NULL,
+    token_hash CHAR(64),
+    user_id INT,
+    expires_at DATETIME NOT NULL,
+    reason VARCHAR(120) DEFAULT 'revoked',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_blacklisted_jti (jti),
+    INDEX idx_token_blacklist_expires (expires_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
 -- Login history tracking
 CREATE TABLE IF NOT EXISTS user_login_history (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -444,6 +475,21 @@ CREATE TABLE IF NOT EXISTS user_notification_settings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_notification_settings_muted (is_muted, muted_until)
+);
+CREATE TABLE IF NOT EXISTS admin_settings (
+    id INT PRIMARY KEY DEFAULT 1,
+    store_name VARCHAR(120) NOT NULL,
+    store_email VARCHAR(120) NOT NULL,
+    store_phone VARCHAR(30) DEFAULT '',
+    currency VARCHAR(10) DEFAULT 'PKR',
+    tax_rate DECIMAL(5, 2) DEFAULT 18.00,
+    shipping_flat DECIMAL(10, 2) DEFAULT 250.00,
+    shipping_free DECIMAL(10, 2) DEFAULT 5000.00,
+    email_notifications BOOLEAN DEFAULT TRUE,
+    order_notifications BOOLEAN DEFAULT TRUE,
+    low_stock_alerts BOOLEAN DEFAULT TRUE,
+    low_stock_threshold INT DEFAULT 10,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 -- Platform audit log
 CREATE TABLE IF NOT EXISTS audit_logs (

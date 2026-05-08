@@ -16,6 +16,7 @@ const MOBILE_INITIAL_NOTIFICATIONS = 8;
 
 const typeClassMap = {
   admin_order_created: "bg-blue-100 text-blue-700",
+  admin_low_stock: "bg-amber-100 text-amber-700",
   admin_contact_created: "bg-violet-100 text-violet-700",
   return_review_required: "bg-amber-100 text-amber-700",
   default: "bg-gray-100 text-gray-700",
@@ -79,7 +80,7 @@ export function AdminNotifications() {
 
   const filteredNotifications = useMemo(() => {
     if (activeFilter === "unread") {
-      return notifications.filter((item) => !Boolean(item.is_read));
+      return notifications.filter((item) => !item.is_read);
     }
 
     return notifications;
@@ -201,11 +202,11 @@ export function AdminNotifications() {
 
   return (
     <AdminLayout>
-      <div className="mx-auto w-full max-w-7xl space-y-4 sm:space-y-5">
+      <div className="mx-auto w-full max-w-[1240px] space-y-4 sm:space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-[2rem] font-bold text-gray-900 sm:text-3xl">Notifications</h1>
-            <p className="text-sm text-gray-600 sm:text-base">
+            <h1 className="text-[2rem] font-bold text-slate-900 sm:text-3xl">Notifications</h1>
+            <p className="text-sm text-slate-600 sm:text-base">
               Real-time alerts from orders, customer messages, and store operations.
             </p>
           </div>
@@ -213,7 +214,7 @@ export function AdminNotifications() {
             <button
               type="button"
               onClick={() => void refreshNotifications()}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 sm:h-auto sm:min-h-[42px] sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2 sm:text-sm"
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-emerald-200/90 bg-white px-3 text-[13px] font-semibold text-emerald-800 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 sm:h-11 sm:gap-2 sm:rounded-2xl sm:px-4 sm:text-sm"
             >
               <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading ? "animate-spin" : ""}`} />
               Refresh
@@ -223,7 +224,7 @@ export function AdminNotifications() {
               type="button"
               onClick={() => void handleToggleMute()}
               disabled={isSavingMute}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-70 sm:h-auto sm:min-h-[42px] sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2 sm:text-sm"
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-emerald-200/90 bg-white px-3 text-[13px] font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-70 sm:h-11 sm:gap-2 sm:rounded-2xl sm:px-4 sm:text-sm"
             >
               {isMuted ? <Volume2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : <VolumeX className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
               {isMuted ? "Unmute" : "Mute"}
@@ -233,7 +234,7 @@ export function AdminNotifications() {
               type="button"
               onClick={() => void handleMuteForOneHour()}
               disabled={isSavingMute}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-70 sm:h-auto sm:min-h-[42px] sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2 sm:text-sm"
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-emerald-200/90 bg-white px-3 text-[13px] font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-70 sm:h-11 sm:gap-2 sm:rounded-2xl sm:px-4 sm:text-sm"
             >
               <Clock3 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               Mute 1h
@@ -250,21 +251,21 @@ export function AdminNotifications() {
         ) : null}
 
         {error || actionError ? (
-          <div className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
             <AlertCircle className="h-5 w-5" />
             {actionError || error}
           </div>
         ) : null}
 
         <section className="md:hidden">
-          <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm">
+          <div className="rounded-2xl border border-emerald-100 bg-white p-2.5 shadow-[0_10px_24px_rgba(15,64,28,0.08)]">
             <div className="grid grid-cols-4 gap-1.5">
               {quickSummaryItems.map((item) => (
-                <article key={item.key} className="rounded-xl border border-gray-200 bg-gray-50 px-1.5 py-2">
-                  <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
+                <article key={item.key} className="rounded-xl border border-emerald-100 bg-[#f7fbf7] px-1.5 py-2">
+                  <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
                     {item.label}
                   </p>
-                  <p className="mt-0.5 truncate text-xs font-extrabold text-gray-900">{item.value}</p>
+                  <p className="mt-0.5 truncate text-xs font-extrabold text-slate-900">{item.value}</p>
                 </article>
               ))}
             </div>
@@ -272,25 +273,25 @@ export function AdminNotifications() {
         </section>
 
         <section className="md:hidden">
-          <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+          <div className="rounded-2xl border border-emerald-100 bg-white p-3 shadow-[0_10px_24px_rgba(15,64,28,0.08)]">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <p className="text-base font-bold text-gray-900">Inbox</p>
+              <p className="text-base font-bold text-slate-900">Inbox</p>
               <button
                 type="button"
                 onClick={() => void handleMarkAllRead()}
-                className="inline-flex min-h-[34px] items-center gap-1 rounded-lg border border-gray-200 px-2.5 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+                className="inline-flex min-h-[34px] items-center gap-1 rounded-lg border border-emerald-200 px-2.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-50"
               >
                 <CheckCheck className="h-3.5 w-3.5" />
                 Read all
               </button>
             </div>
 
-            <div className="mb-3 inline-flex rounded-full border border-gray-200 bg-gray-50 p-1">
+            <div className="mb-3 inline-flex rounded-full border border-emerald-100 bg-[#f4faf5] p-1">
               <button
                 type="button"
                 onClick={() => setActiveFilter("all")}
                 className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                  activeFilter === "all" ? "bg-[#2a5f1e] text-white" : "text-gray-600"
+                  activeFilter === "all" ? "bg-emerald-700 text-white" : "text-slate-600"
                 }`}
               >
                 All
@@ -299,7 +300,7 @@ export function AdminNotifications() {
                 type="button"
                 onClick={() => setActiveFilter("unread")}
                 className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                  activeFilter === "unread" ? "bg-[#2a5f1e] text-white" : "text-gray-600"
+                  activeFilter === "unread" ? "bg-emerald-700 text-white" : "text-slate-600"
                 }`}
               >
                 Unread
@@ -315,23 +316,23 @@ export function AdminNotifications() {
                       key={item.id}
                       type="button"
                       onClick={() => void handleSelectNotification(item)}
-                      className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 text-left"
+                      className="w-full rounded-xl border border-emerald-100 bg-[#f0f8f2] px-3 py-2.5 text-left"
                     >
                       <div className="mb-1 flex items-start justify-between gap-2">
-                        <p className="line-clamp-1 text-sm font-semibold text-gray-900">{item.title}</p>
+                        <p className="line-clamp-1 text-sm font-semibold text-slate-900">{item.title}</p>
                         <span className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusClass}`}>
                           {item.is_read ? "read" : "new"}
                         </span>
                       </div>
-                      <p className="line-clamp-2 text-xs text-gray-600">{item.message}</p>
-                      <p className="mt-1 text-[11px] text-gray-500">{formatDateTime(item.created_at)}</p>
+                      <p className="line-clamp-2 text-xs text-slate-600">{item.message}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">{formatDateTime(item.created_at)}</p>
                     </button>
                   );
                 })
               ) : (
-                <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-5 text-center">
-                  <p className="text-sm font-semibold text-gray-900">No notifications</p>
-                  <p className="mt-1 text-xs text-gray-500">New activity will appear here automatically.</p>
+                <div className="rounded-xl border border-emerald-100 bg-[#f0f8f2] px-3 py-5 text-center">
+                  <p className="text-sm font-semibold text-slate-900">No notifications</p>
+                  <p className="mt-1 text-xs text-slate-500">New activity will appear here automatically.</p>
                 </div>
               )}
 
@@ -339,7 +340,7 @@ export function AdminNotifications() {
                 <button
                   type="button"
                   onClick={() => setShowAllMobileRows((prev) => !prev)}
-                  className="inline-flex min-h-[36px] items-center rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                  className="inline-flex min-h-[36px] items-center rounded-lg border border-emerald-200 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-50"
                 >
                   {showAllMobileRows
                     ? "Show fewer notifications"
@@ -351,26 +352,28 @@ export function AdminNotifications() {
         </section>
 
         <section className="hidden grid-cols-[40%_60%] gap-4 md:grid xl:grid-cols-[36%_64%]">
-          <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-100 p-4">
+          <div className="rounded-3xl border border-emerald-100 bg-white shadow-[0_14px_30px_rgba(15,64,28,0.08)]">
+            <div className="border-b border-emerald-100 p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="text-lg font-bold text-gray-900">Notification Inbox</p>
+                <p className="text-lg font-bold text-slate-900">Notification Inbox</p>
                 <button
                   type="button"
                   onClick={() => void handleMarkAllRead()}
-                  className="inline-flex min-h-[34px] items-center gap-1 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                  className="inline-flex min-h-[34px] items-center gap-1 rounded-xl border border-emerald-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-emerald-50"
                 >
                   <CheckCheck className="h-3.5 w-3.5" />
                   Mark all read
                 </button>
               </div>
 
-              <div className="inline-flex rounded-full border border-gray-200 bg-gray-50 p-1">
+              <div className="inline-flex rounded-full border border-emerald-200 bg-emerald-50/65 p-1">
                 <button
                   type="button"
                   onClick={() => setActiveFilter("all")}
                   className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                    activeFilter === "all" ? "bg-[#2a5f1e] text-white" : "text-gray-600"
+                    activeFilter === "all"
+                      ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
+                      : "text-slate-600"
                   }`}
                 >
                   All ({notifications.length})
@@ -379,7 +382,9 @@ export function AdminNotifications() {
                   type="button"
                   onClick={() => setActiveFilter("unread")}
                   className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                    activeFilter === "unread" ? "bg-[#2a5f1e] text-white" : "text-gray-600"
+                    activeFilter === "unread"
+                      ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
+                      : "text-slate-600"
                   }`}
                 >
                   Unread ({unreadCount})
@@ -387,7 +392,7 @@ export function AdminNotifications() {
               </div>
             </div>
 
-            <div className="max-h-[70vh] overflow-y-auto divide-y divide-gray-100">
+            <div className="max-h-[70vh] overflow-y-auto divide-y divide-emerald-100">
               {filteredNotifications.length > 0 ? (
                 filteredNotifications.map((item) => {
                   const isActive = selectedNotification?.id === item.id;
@@ -397,51 +402,51 @@ export function AdminNotifications() {
                       type="button"
                       onClick={() => void handleSelectNotification(item)}
                       className={`w-full px-4 py-3 text-left transition-colors ${
-                        isActive ? "bg-emerald-50" : "hover:bg-gray-50"
+                        isActive ? "bg-emerald-50" : "hover:bg-emerald-50/40"
                       }`}
                     >
                       <div className="mb-1 flex items-center justify-between gap-2">
-                        <p className="line-clamp-1 text-sm font-semibold text-gray-900">{item.title}</p>
+                        <p className="line-clamp-1 text-sm font-semibold text-slate-900">{item.title}</p>
                         {!item.is_read ? <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> : null}
                       </div>
-                      <p className="line-clamp-2 text-xs text-gray-600">{item.message}</p>
-                      <p className="mt-1 text-xs text-gray-400">{formatDateTime(item.created_at)}</p>
+                      <p className="line-clamp-2 text-xs text-slate-600">{item.message}</p>
+                      <p className="mt-1 text-xs text-slate-400">{formatDateTime(item.created_at)}</p>
                     </button>
                   );
                 })
               ) : (
-                <p className="p-4 text-sm text-gray-500">No notifications found.</p>
+                <p className="p-4 text-sm text-slate-500">No notifications found.</p>
               )}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="rounded-3xl border border-emerald-100 bg-white p-5 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6">
             {selectedNotification ? (
               <div className="space-y-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xl font-bold text-gray-900">{selectedNotification.title}</p>
-                    <p className="mt-1 text-sm text-gray-500">
+                    <p className="text-xl font-bold text-slate-900">{selectedNotification.title}</p>
+                    <p className="mt-1 text-sm text-slate-500">
                       {formatDateTime(selectedNotification.created_at)}
                     </p>
                   </div>
                   <span
                     className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                      selectedNotification.is_read ? "bg-gray-100 text-gray-700" : "bg-emerald-100 text-emerald-700"
+                      selectedNotification.is_read ? "bg-slate-100 text-slate-700" : "bg-emerald-100 text-emerald-700"
                     }`}
                   >
                     {selectedNotification.is_read ? "Read" : "Unread"}
                   </span>
                 </div>
 
-                <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-gray-700">
+                <div className="rounded-xl border border-emerald-100 bg-[#f0f8f2] p-4">
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
                     {selectedNotification.message}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-600">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
                     <Bell className="h-3.5 w-3.5" />
                     Type: {selectedNotification.type || "general"}
                   </span>
@@ -452,8 +457,8 @@ export function AdminNotifications() {
                 <div className="mb-3 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
                   <Bell className="h-6 w-6" />
                 </div>
-                <p className="text-lg font-semibold text-gray-900">No notification selected</p>
-                <p className="mt-1 max-w-sm text-sm text-gray-500">
+                <p className="text-lg font-semibold text-slate-900">No notification selected</p>
+                <p className="mt-1 max-w-sm text-sm text-slate-500">
                   Select any notification from inbox to view details.
                 </p>
               </div>
