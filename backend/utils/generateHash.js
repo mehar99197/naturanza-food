@@ -15,17 +15,8 @@ async function generateHash(password, userType = 'user') {
         
         const hash = await bcrypt.hash(password, saltRounds);
         
-        console.log('\n=================================');
-        console.log('Password Hash Generator');
-        console.log('=================================');
-        console.log('Password:', password);
-        console.log('User Type:', userType);
-        console.log('Salt Rounds:', saltRounds);
-        console.log('Hash:', hash);
-        console.log('=================================\n');
        
     } catch (error) {
-        console.error('Error generating hash:', error);
     }
 }
 

@@ -7,6 +7,7 @@ import {
 	useState,
 } from 'react';
 import { wishlistAPI } from '@/services/api';
+import { reviewEvents, REVIEW_EVENTS } from '@/utils/reviewEvents';
 import { useAuth } from './AuthContext';
 
 const WishlistContext = createContext(undefined);
@@ -21,7 +22,7 @@ const emitWishlistUpdated = () => {
 };
 
 export function WishlistProvider({ children }) {
-	const { isAuthenticated } = useAuth();
+	const { isAuthenticated, loading: authLoading } = useAuth();
 	const [items, setItems] = useState([]);
 	const [showToast, setShowToast] = useState(false);
 	const [toastMessage, setToastMessage] = useState('');
@@ -43,14 +44,16 @@ export function WishlistProvider({ children }) {
 		}, 3000);
 	}, []);
 
-	const fetchWishlist = useCallback(async () => {
+	const fetchWishlist = useCallback(async ({ silent = false } = {}) => {
 		if (!isAuthenticated) {
 			setItems([]);
 			return [];
 		}
 
 		try {
-			setLoading(true);
+			if (!silent) {
+				setLoading(true);
+			}
 			setError(null);
 			const data = await wishlistAPI.get();
 			const nextItems = Array.isArray(data?.items) ? data.items : [];
@@ -62,11 +65,18 @@ export function WishlistProvider({ children }) {
 			setItems([]);
 			return [];
 		} finally {
-			setLoading(false);
+			if (!silent) {
+				setLoading(false);
+			}
 		}
 	}, [isAuthenticated]);
 
 	useEffect(() => {
+		// Don't fetch while auth is loading
+		if (authLoading) {
+			return;
+		}
+		
 		if (isAuthenticated) {
 			void fetchWishlist();
 			return;
@@ -75,7 +85,7 @@ export function WishlistProvider({ children }) {
 		setItems([]);
 		setError(null);
 		setUpdatingIds(new Set());
-	}, [isAuthenticated, fetchWishlist]);
+	}, [isAuthenticated, authLoading, fetchWishlist]);
 
 	useEffect(() => {
 		const handleWishlistUpdated = () => {
@@ -83,13 +93,44 @@ export function WishlistProvider({ children }) {
 				return;
 			}
 
-			void fetchWishlist();
+			void fetchWishlist({ silent: true });
 		};
 
 		window.addEventListener('wishlistUpdated', handleWishlistUpdated);
 
 		return () => {
 			window.removeEventListener('wishlistUpdated', handleWishlistUpdated);
+		};
+	}, [fetchWishlist, isAuthenticated]);
+
+	useEffect(() => {
+		if (!isAuthenticated) {
+			return undefined;
+		}
+
+		const refreshLiveWishlist = () => {
+			if (document.visibilityState === 'visible') {
+				void fetchWishlist({ silent: true });
+			}
+		};
+
+		const intervalId = window.setInterval(refreshLiveWishlist, 15000);
+		const handleWindowFocus = () => refreshLiveWishlist();
+		const handleVisibilityChange = () => refreshLiveWishlist();
+		const unsubscribeSubmitted = reviewEvents.on(REVIEW_EVENTS.REVIEW_SUBMITTED, refreshLiveWishlist);
+		const unsubscribeUpdated = reviewEvents.on(REVIEW_EVENTS.REVIEW_UPDATED, refreshLiveWishlist);
+		const unsubscribeDeleted = reviewEvents.on(REVIEW_EVENTS.REVIEW_DELETED, refreshLiveWishlist);
+
+		window.addEventListener('focus', handleWindowFocus);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+
+		return () => {
+			window.clearInterval(intervalId);
+			window.removeEventListener('focus', handleWindowFocus);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			unsubscribeSubmitted();
+			unsubscribeUpdated();
+			unsubscribeDeleted();
 		};
 	}, [fetchWishlist, isAuthenticated]);
 

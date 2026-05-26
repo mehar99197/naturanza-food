@@ -3,11 +3,13 @@ import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { ProductCard } from '@/components/ProductCard';
 import { useProducts } from '@/context/ProductContext';
+import { useScrollReveal } from '@/hooks/useScrollReveal';
 
 export function FeaturedProducts() {
  const { getFeaturedProducts } = useProducts();
  const trackRef = useRef(null);
  const programmaticScrollRef = useRef(false);
+ const { ref: headerRef, isVisible: headerVisible } = useScrollReveal();
 
  const featuredProducts = useMemo(() => getFeaturedProducts(), [getFeaturedProducts]);
 
@@ -61,7 +63,12 @@ export function FeaturedProducts() {
  <div className="hidden sm:block absolute inset-0 bg-[linear-gradient(rgba(61,122,61,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(61,122,61,0.02)_1px,transparent_1px)] bg-[size:40px_40px]"></div>
  
  <div className="w-full max-w-screen-2xl mx-auto px-2.5 xs:px-3.5 sm:px-4 md:px-5 lg:px-6 relative z-10">
- <div className="text-center mb-7 sm:mb-10 md:mb-12 lg:mb-14">
+ <div
+ className={`text-center mb-7 sm:mb-10 md:mb-12 lg:mb-14 reveal reveal-left ${
+ headerVisible ? 'active' : ''
+ }`}
+ ref={headerRef}
+ >
  <span className="inline-block text-white font-bold text-xs uppercase tracking-wider mb-2 md:mb-3 px-3 py-1 md:px-4 md:py-1.5 bg-green-600 rounded-full shadow-md animate-fade-in-up opacity-0 [animation-fill-mode:forwards]">Featured Collection</span>
  <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight mb-2.5 md:mb-3.5 lg:mb-4 text-gray-900 animate-fade-in-up opacity-0 [animation-delay:0.1s] [animation-fill-mode:forwards]">
  <span className="bg-gradient-to-r from-green-700 to-emerald-600 bg-clip-text text-transparent">Featured Products</span>

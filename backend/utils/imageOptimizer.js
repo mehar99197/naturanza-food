@@ -26,10 +26,8 @@ async function optimizeImage(inputPath, outputPath, options = {}) {
       .toFormat(format, { quality })
       .toFile(outputPath);
 
-    console.log(`✅ Image optimized: ${outputPath}`);
     return outputPath;
   } catch (error) {
-    console.error('❌ Image optimization error:', error);
     throw error;
   }
 }
@@ -62,10 +60,8 @@ async function createImageVariants(inputPath, baseName, outputDir = 'public/uplo
       results[size] = outputPath.replace('public/', '/'); // Return web-accessible path
     }
 
-    console.log(`✅ Created ${Object.keys(variants).length} variants for ${baseName}`);
     return results;
   } catch (error) {
-    console.error('❌ Error creating image variants:', error);
     throw error;
   }
 }
@@ -84,10 +80,8 @@ async function convertToWebP(inputPath, quality = 80) {
       .webp({ quality })
       .toFile(outputPath);
 
-    console.log(`✅ Converted to WebP: ${outputPath}`);
     return outputPath;
   } catch (error) {
-    console.error('❌ WebP conversion error:', error);
     throw error;
   }
 }
@@ -118,7 +112,6 @@ async function optimizeProductImage(file, outputDir = 'public/uploads/products')
       primary: variants.medium // Use medium as primary display image
     };
   } catch (error) {
-    console.error('❌ Error optimizing product image:', error);
     throw error;
   }
 }
@@ -144,10 +137,8 @@ async function batchOptimizeImages(inputDir, outputDir) {
       count++;
     }
 
-    console.log(`✅ Batch optimized ${count} images`);
     return count;
   } catch (error) {
-    console.error('❌ Batch optimization error:', error);
     throw error;
   }
 }

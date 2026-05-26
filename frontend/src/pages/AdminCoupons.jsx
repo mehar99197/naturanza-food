@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { AdminLayout } from '@/components/AdminLayout';
 import { useAdminData } from '@/context/AdminDataContext';
+import { useSettings } from '@/context/SettingsContext';
 import { formatPrice } from '../lib/utils';
 import { 
   AlertCircle, 
@@ -20,6 +21,8 @@ import {
 
 export default function AdminCoupons() {
  const { coupons, addCoupon, updateCoupon, deleteCoupon, toggleCouponStatus } = useAdminData();
+ const { settings } = useSettings();
+ const currency = settings.currency || 'PKR';
  const [showForm, setShowForm] = useState(false);
  const [editingCoupon, setEditingCoupon] = useState(null);
  const [showSuccessToast, setShowSuccessToast] = useState(false);
@@ -294,16 +297,16 @@ export default function AdminCoupons() {
  <p className="mt-0.5 font-semibold text-slate-900">
  {coupon.discount_type === 'percentage'
  ? `${coupon.discount_value}%`
- : formatPrice(coupon.discount_value)
+ : formatPrice(coupon.discount_value, currency)
  }
  </p>
  {coupon.max_discount && coupon.discount_type === 'percentage' && (
- <p className="mt-0.5 text-[11px] text-slate-500">Max: {formatPrice(coupon.max_discount)}</p>
+ <p className="mt-0.5 text-[11px] text-slate-500">Max: {formatPrice(coupon.max_discount, currency)}</p>
  )}
  </div>
  <div className="rounded-md border border-emerald-100 bg-[#f0f8f2] p-2.5">
  <p className="text-slate-500">Min. Order</p>
- <p className="mt-0.5 font-semibold text-slate-900">{formatPrice(coupon.min_order_amount)}</p>
+ <p className="mt-0.5 font-semibold text-slate-900">{formatPrice(coupon.min_order_amount, currency)}</p>
  </div>
  <div className="rounded-md border border-emerald-100 bg-[#f0f8f2] p-2.5">
  <p className="text-slate-500">Usage</p>
@@ -385,14 +388,14 @@ export default function AdminCoupons() {
  <span className="font-semibold text-slate-900">
  {coupon.discount_type === 'percentage' 
  ? `${coupon.discount_value}%`
- : formatPrice(coupon.discount_value)
+ : formatPrice(coupon.discount_value, currency)
  }
  </span>
  {coupon.max_discount && coupon.discount_type === 'percentage' && (
- <div className="text-xs text-slate-500">Max: {formatPrice(coupon.max_discount)}</div>
+ <div className="text-xs text-slate-500">Max: {formatPrice(coupon.max_discount, currency)}</div>
  )}
  </td>
- <td className="px-4 py-4 text-sm font-semibold text-slate-800">{formatPrice(coupon.min_order_amount)}</td>
+ <td className="px-4 py-4 text-sm font-semibold text-slate-800">{formatPrice(coupon.min_order_amount, currency)}</td>
  <td className="px-4 py-4">
  <div className="text-sm font-semibold text-slate-800">
  {coupon.used_count || 0}

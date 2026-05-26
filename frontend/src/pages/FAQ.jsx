@@ -1,40 +1,64 @@
 import { HelpCircle } from 'lucide-react';
+import { Helmet } from 'react-helmet-async';
 import { BUSINESS_INFO } from '@/config/legal';
-
-const faqs = [
- {
- question: 'How long does delivery take?',
- answer: 'Most orders are delivered within 2 to 5 business days, depending on your location.',
- },
- {
- question: 'Are your products 100% organic?',
- answer: 'Yes, we source from trusted farms and prioritize certified organic and natural ingredients.',
- },
- {
- question: 'Can I track my order?',
- answer: 'Yes, you can track your order from your account order section after dispatch.',
- },
- {
- question: 'Do you offer refunds?',
- answer: 'Yes, eligible products can be returned under our returns policy if conditions are met.',
- },
- {
- question: 'How can I contact support quickly?',
- answer: `You can reach us at ${BUSINESS_INFO.contacts.supportEmail} or call ${BUSINESS_INFO.contacts.phone} during ${BUSINESS_INFO.supportHours}.`,
- },
- {
- question: 'Do you deliver outside Pakistan?',
- answer: 'At the moment, we primarily serve Pakistan. International shipping availability may vary by product and destination.',
- },
- {
- question: 'How do I change or cancel an order?',
- answer: 'Order changes or cancellations are possible before dispatch. Contact support immediately with your order ID for assistance.',
- },
-];
+import { FAQSEO } from '@/components/SEO';
+import { useSettings } from '@/context/SettingsContext';
 
 export function FAQ() {
- return (
- <main className="pt-24 pb-16 min-h-screen bg-[#faf8f3]">
+  const { settings } = useSettings();
+  const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
+  const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
+  const faqs = [
+    {
+    question: 'How long does delivery take?',
+    answer: 'Most orders are delivered within 2 to 5 business days, depending on your location.',
+    },
+    {
+    question: 'Are your products 100% organic?',
+    answer: 'Yes, we source from trusted farms and prioritize certified organic and natural ingredients.',
+    },
+    {
+    question: 'Can I track my order?',
+    answer: 'Yes, you can track your order from your account order section after dispatch.',
+    },
+    {
+    question: 'Do you offer refunds?',
+    answer: 'Yes, eligible products can be returned under our returns policy if conditions are met.',
+    },
+    {
+    question: 'How can I contact support quickly?',
+    answer: `You can reach us at ${supportEmail} or call ${supportPhone} during ${BUSINESS_INFO.supportHours}.`,
+    },
+    {
+    question: 'Do you deliver outside Pakistan?',
+    answer: 'At the moment, we primarily serve Pakistan. International shipping availability may vary by product and destination.',
+    },
+    {
+    question: 'How do I change or cancel an order?',
+    answer: 'Order changes or cancellations are possible before dispatch. Contact support immediately with your order ID for assistance.',
+    },
+  ];
+  const faqStructuredData = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": faqs.map((faq) => ({
+      "@type": "Question",
+      "name": faq.question,
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": faq.answer
+      }
+    }))
+  };
+  return (
+    <>
+      <FAQSEO />
+      <Helmet>
+        <script type="application/ld+json">
+          {JSON.stringify(faqStructuredData)}
+        </script>
+      </Helmet>
+    <main className="pt-24 pb-16 min-h-screen bg-[#faf8f3]">
  <div className="container-custom">
  <header className="text-center mb-10">
  <span className="inline-flex items-center gap-2 text-[#3d7a3d] font-semibold text-xs uppercase tracking-wider">
@@ -58,12 +82,13 @@ export function FAQ() {
 
  <section className="max-w-4xl mx-auto mt-6 bg-green-50 border border-green-100 rounded-2xl p-5 md:p-6">
  <p className="text-sm text-[#4f5f4f] leading-relaxed">
- Need more help? Contact our support desk at {BUSINESS_INFO.contacts.supportEmail} or {BUSINESS_INFO.contacts.phone}.
+ Need more help? Contact our support desk at {supportEmail} or {supportPhone}.
  </p>
- </section>
- </div>
- </main>
- );
+</section>
+  </div>
+  </main>
+  </>
+  );
 }
 
 export default FAQ;

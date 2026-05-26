@@ -1,7 +1,12 @@
 import { RefreshCw, ShieldAlert, BadgeCheck } from 'lucide-react';
 import { BUSINESS_INFO, RETURNS_POLICY } from '@/config/legal';
+import { ReturnsSEO } from '@/components/SEO';
+import { ReturnPolicyStructuredData } from '@/components/StructuredData';
+import { useSettings } from '@/context/SettingsContext';
 
 export function Returns() {
+ const { settings } = useSettings();
+ const returnsEmail = settings.storeEmail || BUSINESS_INFO.contacts.returnsEmail;
  const sections = [
  {
  title: 'Return Window',
@@ -24,8 +29,11 @@ export function Returns() {
  },
  ];
 
- return (
- <main className="pt-24 pb-16 min-h-screen bg-[#faf8f3]">
+return (
+    <>
+      <ReturnsSEO />
+      <ReturnPolicyStructuredData />
+    <main className="pt-24 pb-16 min-h-screen bg-[#faf8f3]">
  <div className="container-custom">
  <header className="text-center mb-10">
  <span className="inline-flex items-center gap-2 text-[#3d7a3d] font-semibold text-xs uppercase tracking-wider">
@@ -57,13 +65,14 @@ export function Returns() {
  <div className="flex items-start gap-3 mt-3">
  <BadgeCheck className="w-5 h-5 text-[#3d7a3d] mt-0.5" />
  <p className="text-sm text-[#4f5f4f] leading-relaxed">
- For return assistance, contact {BUSINESS_INFO.contacts.returnsEmail} with your order ID and issue details.
+ For return assistance, contact {returnsEmail} with your order ID and issue details.
  </p>
  </div>
  </section>
- </div>
- </main>
- );
+</div>
+  </main>
+  </>
+  );
 }
 
 export default Returns;

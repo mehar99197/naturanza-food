@@ -9,8 +9,8 @@ const REFRESH_TOKEN_DAYS = Math.max(
   Number.parseInt(process.env.REFRESH_TOKEN_DAYS || "7", 10) || 7,
   1,
 );
-const JWT_ISSUER = String(process.env.JWT_ISSUER || "naturanza-foods-api").trim();
-const JWT_AUDIENCE = String(process.env.JWT_AUDIENCE || "naturanza-foods-web").trim();
+const JWT_ISSUER = String(process.env.JWT_ISSUER || "naturanza-food-api").trim();
+const JWT_AUDIENCE = String(process.env.JWT_AUDIENCE || "naturanza-food-web").trim();
 const REFRESH_COOKIE_NAME =
   String(process.env.REFRESH_COOKIE_NAME || "refreshToken").trim() ||
   "refreshToken";
@@ -155,12 +155,24 @@ const shouldUseSecureCookies = () => {
   return process.env.NODE_ENV === "production";
 };
 
+const resolveSameSite = () => {
+  const explicitValue = String(process.env.COOKIE_SAMESITE || "")
+    .trim()
+    .toLowerCase();
+
+  if (explicitValue === "strict" || explicitValue === "lax" || explicitValue === "none") {
+    return explicitValue;
+  }
+
+  return IS_PRODUCTION ? "strict" : "lax";
+};
+
 const getRefreshCookieOptions = () => ({
   httpOnly: true,
   secure: shouldUseSecureCookies(),
-  sameSite: "strict",
+  sameSite: resolveSameSite(),
   maxAge: REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
-  path: "/api/auth",
+  path: "/",
 });
 
 const clearRefreshCookie = (res) => {

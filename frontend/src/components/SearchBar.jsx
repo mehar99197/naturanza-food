@@ -3,6 +3,18 @@ import { Search, X, TrendingUp, Package } from 'lucide-react';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useSettings } from '@/context/SettingsContext';
 import { formatPrice } from '@/lib/utils';
+import { getAbsoluteImageUrl } from '@/lib/imageUtils';
+
+const getSearchResultImage = (product) => {
+  const img = product?.image_url || product?.image;
+  if (img) return getAbsoluteImageUrl(img, { defaultFolder: 'products' });
+  const text = `${product?.name || ''} ${product?.category_name || ''} ${product?.category || ''}`.toLowerCase();
+  if (text.includes('ispaghol') || text.includes('psyllium')) return '/images/products/ispaghol_2.webp';
+  if (text.includes('honey')) return '/images/products/honey.webp';
+  if (text.includes('coconut')) return '/images/products/coconut-oil.webp';
+  if (text.includes('oil')) return '/images/products/oil.webp';
+  return '/images/products/herbs.webp';
+};
 
 /**
  * SearchBar component with live suggestions
@@ -197,12 +209,12 @@ export function SearchBar({ value, onChange, products = [], placeholder = 'Searc
  selectedIndex === index ? 'bg-green-50' : ''
  }`}
  >
- <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
- <img
- src={product.image_url || product.image}
- alt={String(product?.name || 'Product')}
- className="w-full h-full object-contain"
- />
+<div className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
+  <img
+  src={getSearchResultImage(product)}
+  alt={String(product?.name || 'Product')}
+  className="w-full h-full object-contain"
+  />
  </div>
  <div className="flex-1 min-w-0">
  <p className="text-[#2d3a2d] font-medium truncate">

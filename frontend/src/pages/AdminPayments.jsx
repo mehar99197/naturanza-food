@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, CreditCard, RefreshCw, RotateCcw, Wallet } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { AdminPageSkeleton } from "@/components/Skeletons/AdminPageSkeleton";
+import { AdminPaymentsExtensions } from "@/components/AdminPaymentsExtensions";
 import { useOrders } from "@/context/OrderContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
 import { adminAPI } from "@/services/api";
+import { useSWRCache, invalidateSWRKey } from "@/hooks/useSWRCache";
+
+const META_CACHE_KEY = "admin:payments:meta";
 
 const paymentStatusClass = {
   paid: "bg-emerald-100 text-emerald-700",
@@ -29,35 +32,52 @@ const formatMethodLabel = (value) => {
 };
 
 export function AdminPayments() {
-  const { orders, loading: ordersLoading, fetchOrders } = useOrders();
+  const { orders, fetchOrders } = useOrders();
   const { settings } = useSettings();
   const [refundAmount, setRefundAmount] = useState(0);
+  const [verifiedRevenue, setVerifiedRevenue] = useState(null);
   const [error, setError] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [metaLoading, setMetaLoading] = useState(true);
   const [mobileView, setMobileView] = useState("transactions");
   const [showAllMobileMethods, setShowAllMobileMethods] = useState(false);
   const [showAllMobileTransactions, setShowAllMobileTransactions] = useState(false);
 
-  const loadMeta = async () => {
-    try {
-      setError("");
-      const stats = await adminAPI.getDashboardStats();
-      setRefundAmount(Number(stats?.totalRefundAmount || 0));
-    } catch (requestError) {
-      setError(
-        requestError?.response?.data?.error ||
-          requestError?.message ||
-          "Failed to load payment analytics",
-      );
-    } finally {
-      setMetaLoading(false);
-    }
-  };
+  // SWR cache fans out the two stat endpoints in parallel and returns a single
+  // memoised payload. Re-visits to this section now render the cards instantly
+  // while the background refresh keeps numbers fresh.
+  const {
+    data: metaData,
+    refresh: refreshMeta,
+  } = useSWRCache(META_CACHE_KEY, async () => {
+    const [stats, analytics] = await Promise.all([
+      adminAPI.getDashboardStats().catch(() => null),
+      adminAPI.getPaymentAnalytics().catch(() => null),
+    ]);
+    return { stats, analytics };
+  });
 
   useEffect(() => {
-    void loadMeta();
-  }, []);
+    if (!metaData) return;
+    setRefundAmount(Number(metaData.stats?.totalRefundAmount || 0));
+    if (metaData.analytics?.success) {
+      setVerifiedRevenue({
+        total: Number(metaData.analytics.total_revenue) || 0,
+        month: Number(metaData.analytics.month_revenue) || 0,
+        today: Number(metaData.analytics.today_revenue) || 0,
+        approvedCount: Number(metaData.analytics.approved_count) || 0,
+        pendingCount: Number(metaData.analytics.pending_count) || 0,
+        prepaid: Number(metaData.analytics.prepaid_revenue) || 0,
+        codAdvance: Number(metaData.analytics.cod_advance_revenue) || 0,
+        codFinal: Number(metaData.analytics.cod_final_revenue) || 0,
+        pendingCodCollections: Number(metaData.analytics.pending_cod_collections) || 0,
+      });
+    }
+  }, [metaData]);
+
+  const loadMeta = async () => {
+    invalidateSWRKey(META_CACHE_KEY);
+    await refreshMeta();
+  };
 
   const refreshAll = async () => {
     try {
@@ -119,14 +139,18 @@ export function AdminPayments() {
       )
       .slice(0, 12);
 
+    // Prefer the server-side rollup when present — it queries
+    // advance_payment_verifications directly with PKT timezone pinned, so
+    // it can't drift the way client-side date math does across timezones.
+    // Fall back to the orders-derived totals when the endpoint is unreachable.
     return {
-      totalRevenue,
-      thisMonthRevenue,
-      todayRevenue,
+      totalRevenue: verifiedRevenue?.total ?? totalRevenue,
+      thisMonthRevenue: verifiedRevenue?.month ?? thisMonthRevenue,
+      todayRevenue: verifiedRevenue?.today ?? todayRevenue,
       paymentMethods,
       recentTransactions,
     };
-  }, [orders]);
+  }, [orders, verifiedRevenue]);
 
   const quickSummaryItems = useMemo(
     () => [
@@ -158,14 +182,6 @@ export function AdminPayments() {
     ...metrics.paymentMethods.map((item) => item.amount),
     1,
   );
-
-  if (ordersLoading || metaLoading) {
-    return (
-      <AdminLayout>
-        <AdminPageSkeleton cards={4} showCharts rows={8} />
-      </AdminLayout>
-    );
-  }
 
   return (
     <AdminLayout>
@@ -250,6 +266,51 @@ export function AdminPayments() {
             <p className="mt-1 text-sm font-medium text-slate-600">Refunded</p>
           </div>
         </div>
+
+        {/* COD vs Prepaid breakdown — populated from verified analytics endpoint */}
+        {verifiedRevenue && (
+          <div className="hidden grid-cols-1 gap-4 md:grid md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
+              <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+                <Wallet className="h-5 w-5" />
+              </div>
+              <p className="text-2xl font-extrabold text-slate-900">
+                {formatPrice(verifiedRevenue.prepaid, settings.currency)}
+              </p>
+              <p className="mt-1 text-sm font-medium text-slate-600">Prepaid Revenue</p>
+            </div>
+
+            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
+              <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
+                <CreditCard className="h-5 w-5" />
+              </div>
+              <p className="text-2xl font-extrabold text-slate-900">
+                {formatPrice(verifiedRevenue.codAdvance, settings.currency)}
+              </p>
+              <p className="mt-1 text-sm font-medium text-slate-600">COD Advance Revenue</p>
+            </div>
+
+            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
+              <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                <Wallet className="h-5 w-5" />
+              </div>
+              <p className="text-2xl font-extrabold text-slate-900">
+                {formatPrice(verifiedRevenue.codFinal, settings.currency)}
+              </p>
+              <p className="mt-1 text-sm font-medium text-slate-600">COD Collected Revenue</p>
+            </div>
+
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/40 p-5 shadow-[0_10px_28px_rgba(120,80,10,0.08)]">
+              <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <p className="text-2xl font-extrabold text-amber-900">
+                {verifiedRevenue.pendingCodCollections}
+              </p>
+              <p className="mt-1 text-sm font-medium text-amber-800">Pending COD Collections</p>
+            </div>
+          </div>
+        )}
 
         <section className="md:hidden">
           <div className="rounded-2xl border border-emerald-100 bg-white p-3 shadow-[0_10px_24px_rgba(15,64,28,0.08)]">
@@ -393,46 +454,44 @@ export function AdminPayments() {
 
           <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-5">
             <h2 className="mb-4 text-lg font-bold text-slate-900">Recent Transactions</h2>
-            {ordersLoading ? (
-              <p className="text-sm text-slate-500">Loading transactions...</p>
-            ) : (
-              <div className="space-y-3">
-                {metrics.recentTransactions.length > 0 ? (
-                  metrics.recentTransactions.map((order) => {
-                    const paymentStatus = String(order.payment_status || "pending").toLowerCase();
-                    return (
-                      <div
-                        key={order.id}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-[#f0f8f2] px-3 py-2.5"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-slate-900">
-                            #{order.id} · {order.customer_name || order.customer_email || "Customer"}
-                          </p>
-                          <p className="truncate text-xs text-slate-500">
-                            {formatMethodLabel(order.payment_method)}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-slate-900">
-                            {formatPrice(Number(order.total_amount || 0), settings.currency)}
-                          </p>
-                          <span
-                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${paymentStatusClass[paymentStatus] || "bg-gray-100 text-gray-700"}`}
-                          >
-                            {paymentStatus}
-                          </span>
-                        </div>
+            <div className="space-y-3">
+              {metrics.recentTransactions.length > 0 ? (
+                metrics.recentTransactions.map((order) => {
+                  const paymentStatus = String(order.payment_status || "pending").toLowerCase();
+                  return (
+                    <div
+                      key={order.id}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-[#f0f8f2] px-3 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">
+                          #{order.id} · {order.customer_name || order.customer_email || "Customer"}
+                        </p>
+                        <p className="truncate text-xs text-slate-500">
+                          {formatMethodLabel(order.payment_method)}
+                        </p>
                       </div>
-                    );
-                  })
-                ) : (
-                  <p className="text-sm text-slate-500">No transactions found.</p>
-                )}
-              </div>
-            )}
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-slate-900">
+                          {formatPrice(Number(order.total_amount || 0), settings.currency)}
+                        </p>
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${paymentStatusClass[paymentStatus] || "bg-gray-100 text-gray-700"}`}
+                        >
+                          {paymentStatus}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-sm text-slate-500">No transactions found.</p>
+              )}
+            </div>
           </div>
         </div>
+
+        <AdminPaymentsExtensions />
       </div>
     </AdminLayout>
   );

@@ -32,21 +32,47 @@ export const getApiBaseUrl = () => {
  * @param {string} imageUrl - The image URL (can be relative or absolute)
  * @returns {string} - The absolute image URL
  */
-export const getAbsoluteImageUrl = (imageUrl) => {
-  if (!imageUrl) return '';
-  
-  // If it's already an absolute URL (http:// or https://), return as is
-  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-    return imageUrl;
+export const getAbsoluteImageUrl = (imageUrl, options = {}) => {
+  const rawValue = String(imageUrl || "").trim();
+  if (!rawValue) return "";
+
+  const normalized = rawValue.replace(/\\/g, "/");
+  if (normalized.startsWith("data:") || normalized.startsWith("blob:")) {
+    return normalized;
   }
-  
-  // If it's a relative URL starting with /, prepend the API base URL
-  if (imageUrl.startsWith('/')) {
-    return `${getApiBaseUrl()}${imageUrl}`;
+
+  if (/^https?:\/\//i.test(normalized)) {
+    return normalized;
   }
-  
-  // If it doesn't start with /, assume it needs /images/ prefix
-  return `${getApiBaseUrl()}/images/${imageUrl}`;
+
+  const apiBaseUrl = getApiBaseUrl();
+  const lower = normalized.toLowerCase();
+  const rootMarkers = ["/images/", "/uploads/"];
+
+  for (const marker of rootMarkers) {
+    const markerIndex = lower.indexOf(marker);
+    if (markerIndex !== -1) {
+      const relativePath = normalized.slice(markerIndex);
+      return `${apiBaseUrl}${relativePath.startsWith("/") ? "" : "/"}${relativePath}`;
+    }
+  }
+
+  if (normalized.startsWith("/")) {
+    return `${apiBaseUrl}${normalized}`;
+  }
+
+  if (/^(images|uploads)\//i.test(normalized)) {
+    return `${apiBaseUrl}/${normalized}`;
+  }
+
+  const defaultFolder = String(options?.defaultFolder || "")
+    .trim()
+    .replace(/^\/+|\/+$/g, "");
+  if (defaultFolder && !normalized.includes("/")) {
+    return `${apiBaseUrl}/images/${defaultFolder}/${normalized}`;
+  }
+
+  return `${apiBaseUrl}/images/${normalized}`;
 };
 
 /**

@@ -1,7 +1,12 @@
 import { FileText, Scale } from 'lucide-react';
 import { BUSINESS_INFO } from '@/config/legal';
+import { TermsSEO } from '@/components/SEO';
+import { useSettings } from '@/context/SettingsContext';
 
 export function Terms() {
+ const { settings } = useSettings();
+ const legalEmail = settings.storeEmail || BUSINESS_INFO.contacts.legalEmail;
+ const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
  const sections = [
  {
  title: 'Acceptance of Terms',
@@ -30,8 +35,10 @@ export function Terms() {
  },
  ];
 
- return (
- <main className="pt-24 pb-16 min-h-screen bg-[#faf8f3]">
+return (
+    <>
+      <TermsSEO />
+    <main className="pt-24 pb-16 min-h-screen bg-[#faf8f3]">
  <div className="container-custom">
  <header className="text-center mb-10">
  <span className="inline-flex items-center gap-2 text-[#3d7a3d] font-semibold text-xs uppercase tracking-wider">
@@ -58,13 +65,14 @@ export function Terms() {
  <div className="flex items-start gap-3">
  <FileText className="w-5 h-5 text-[#3d7a3d] mt-0.5" />
  <p className="text-sm text-[#4f5f4f] leading-relaxed">
- For legal questions, contact {BUSINESS_INFO.legalName} at {BUSINESS_INFO.contacts.legalEmail} or {BUSINESS_INFO.contacts.phone}. Registered office: {BUSINESS_INFO.officeAddress}. Continued use of this website indicates acceptance of these terms.
+ For legal questions, contact {BUSINESS_INFO.legalName} at {legalEmail} or {supportPhone}. Registered office: {BUSINESS_INFO.officeAddress}. Continued use of this website indicates acceptance of these terms.
  </p>
  </div>
  </section>
- </div>
- </main>
- );
+</div>
+  </main>
+  </>
+  );
 }
 
 export default Terms;

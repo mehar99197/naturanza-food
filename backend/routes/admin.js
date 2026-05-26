@@ -2,17 +2,30 @@ const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
 const { db } = require("../config/db");
-const chatPool = require("../db/connection");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const { restrictBody } = require("../middleware/security");
 const { issueAccessToken, verifyAccessToken, toExpiryDate } = require("../utils/jwtTokens");
 const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/tokenStore");
 const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
+const asyncHandler = require("../middleware/asyncHandler");
+const newsletterController = require("../controllers/newsletterController");
 const { syncDefaultAdminPassword } = require("../utils/envSync");
 const {
   createUserSession,
   revokeSessionByToken,
   revokeSessionsByUserId,
 } = require("../utils/sessionManager");
+const { adminResetPasswordSchema } = require("../validation/authSchemas");
+const {
+  ensurePasswordHistoryTable,
+  addPasswordToHistory,
+  hasReusedPassword,
+} = require("../utils/passwordHistory");
+const {
+  recordFailedLoginAtomic,
+  resetLoginFailuresAtomic,
+  checkAccountLockout,
+} = require("../utils/loginSecurity");
 
 const { toNullableString, toBoolean } = require("../utils/helpers");
 
@@ -327,13 +340,19 @@ const ALLOWED_PAYMENT_METHOD_CODES = new Set([
   "jazzcash",
 ]);
 
-// Admin Login - NO authentication required for this endpoint
-router.post("/login", async (req, res) => {
+// Shared login handler — parameterized so the super-admin route and the
+// staff-admin route can enforce their own admin_role allowlist without
+// duplicating 150+ lines of credential/lockout/session bookkeeping.
+//
+// allowedAdminRoles : Set<string>   admin_role values this gate accepts
+// gateLabel         : string         used in failure-reason logs ('super_admin' | 'staff')
+async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
+  const connection = await db.promise().getConnection();
+
   try {
     const { email, password } = req.body;
     const normalizedEmail = String(email || "").trim().toLowerCase();
 
-    // Validation
     if (!email || !password) {
       void recordAdminLoginHistorySafely({
         req,
@@ -341,17 +360,16 @@ router.post("/login", async (req, res) => {
         status: "failed",
         failureReason: "Missing credentials",
       });
-
+      connection.release();
       return res.status(400).json({
         success: false,
         error: "Email and password are required",
       });
     }
 
-    // Find user and verify they are an admin
-    const [results] = await db.promise().query(
+    const [results] = await connection.query(
       "SELECT * FROM users WHERE email = ?",
-      [normalizedEmail],
+      [normalizedEmail]
     );
 
     if (results.length === 0) {
@@ -361,7 +379,7 @@ router.post("/login", async (req, res) => {
         status: "failed",
         failureReason: "Email not found",
       });
-
+      connection.release();
       return res.status(401).json({
         success: false,
         error: "Invalid email or password",
@@ -378,21 +396,22 @@ router.post("/login", async (req, res) => {
         status: "failed",
         failureReason: "Account disabled",
       });
-
+      connection.release();
       return res.status(403).json({
         success: false,
         error: "Account is disabled. Contact super admin.",
       });
     }
 
-    if (isAccountLocked(user)) {
+    const lockStatus = await checkAccountLockout(connection, user.id);
+    if (lockStatus.locked) {
+      connection.release();
       return res.status(423).json({
         success: false,
         error: "Account temporarily locked due to multiple failed attempts.",
       });
     }
 
-    // Check if user is admin
     if (user.role !== "admin") {
       void recordAdminLoginHistorySafely({
         req,
@@ -401,17 +420,40 @@ router.post("/login", async (req, res) => {
         status: "failed",
         failureReason: "Not an admin",
       });
-
+      connection.release();
       return res.status(403).json({
         success: false,
         error: "Access denied. Admin privileges required.",
       });
     }
 
-    // Compare password
+    // Gate by admin_role. NULL admin_role used to fall back to 'super_admin',
+    // which was a privilege-escalation footgun — every legacy admin would
+    // pass the super-admin gate. Now NULL is treated as untyped and rejected
+    // from both gates; super admins must have admin_role='super_admin' set.
+    if (!allowedAdminRoles.has(String(user.admin_role || ""))) {
+      void recordAdminLoginHistorySafely({
+        req,
+        userId: user.id,
+        attemptedEmail: user.email,
+        status: "failed",
+        failureReason: `Wrong gate: ${user.admin_role || 'none'} not allowed via ${gateLabel}`,
+      });
+      connection.release();
+      // Generic 403 — don't leak which gate the user belongs to.
+      return res.status(403).json({
+        success: false,
+        error: gateLabel === "super_admin"
+          ? "This portal is for super administrators only."
+          : "This portal is for staff accounts only.",
+      });
+    }
+
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
-      await markFailedLoginAttempt(user);
+      await recordFailedLoginAtomic(connection, user.id, user.email, true);
+      const newLockStatus = await checkAccountLockout(connection, user.id);
+
       void recordAdminLoginHistorySafely({
         req,
         userId: user.id,
@@ -420,13 +462,24 @@ router.post("/login", async (req, res) => {
         failureReason: "Invalid password",
       });
 
+      connection.release();
+
+      if (newLockStatus.locked) {
+        return res.status(423).json({
+          success: false,
+          error: "Account temporarily locked due to multiple failed attempts.",
+        });
+      }
+
       return res.status(401).json({
         success: false,
         error: "Invalid email or password",
+        attemptsLeft: newLockStatus.attemptsLeft,
       });
     }
 
-    await resetLoginFailures(user.id);
+    await resetLoginFailuresAtomic(connection, user.id);
+    connection.release();
 
     const accessToken = issueAccessToken(user);
     const token = accessToken.token;
@@ -435,12 +488,12 @@ router.post("/login", async (req, res) => {
       await createUserSession(db.promise(), {
         userId: user.id,
         token,
-        provider: "admin-password",
+        provider: gateLabel === "super_admin" ? "admin-password" : "staff-password",
         ipAddress: getRequestIp(req),
         userAgent: req.headers["user-agent"] || null,
       });
     } catch (sessionError) {
-      console.warn(
+      console.error(
         "Could not persist admin session:",
         sessionError.message,
       );
@@ -453,7 +506,6 @@ router.post("/login", async (req, res) => {
       status: "success",
     });
 
-    // Parse admin_permissions
     let adminPermissions = user.admin_permissions;
     if (typeof adminPermissions === 'string') {
       try {
@@ -463,9 +515,9 @@ router.post("/login", async (req, res) => {
       }
     }
 
-    res.json({
+    return res.json({
       success: true,
-      message: "Admin login successful",
+      message: gateLabel === "super_admin" ? "Admin login successful" : "Staff login successful",
       token,
       accessTokenExpiresIn: accessToken.expiresInSeconds,
       admin: {
@@ -473,12 +525,13 @@ router.post("/login", async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        admin_role: user.admin_role || 'super_admin',
+        admin_role: user.admin_role, // no fallback — authoritative value from DB
         admin_permissions: adminPermissions,
+        profile_image: user.profile_image || null,
       },
     });
   } catch (error) {
-    console.error("Admin login error:", error);
+    try { connection.release(); } catch {}
     void recordAdminLoginHistorySafely({
       req,
       attemptedEmail: String(req.body?.email || "")
@@ -487,13 +540,25 @@ router.post("/login", async (req, res) => {
       status: "failed",
       failureReason: "Server error",
     });
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: "Server error",
+      error: "Login failed due to a server error.",
     });
   }
-});
+}
+
+const SUPER_ADMIN_ROLES = new Set(["super_admin"]);
+const STAFF_ADMIN_ROLES = new Set(["staff_admin", "admin", "moderator"]);
+
+// POST /api/admin/login — super admins only
+router.post("/login", restrictBody('email', 'password'), (req, res) =>
+  processAdminLogin(req, res, { allowedAdminRoles: SUPER_ADMIN_ROLES, gateLabel: "super_admin" })
+);
+
+// POST /api/admin/staff-login — staff admins / moderators only (not super admins)
+router.post("/staff-login", restrictBody('email', 'password'), (req, res) =>
+  processAdminLogin(req, res, { allowedAdminRoles: STAFF_ADMIN_ROLES, gateLabel: "staff" })
+);
 
 // Admin Verify Token - Requires authentication
 router.get("/verify", authenticateToken, isAdmin, (req, res) => {
@@ -506,12 +571,13 @@ router.get("/verify", authenticateToken, isAdmin, (req, res) => {
       role: req.user.role,
       admin_role: req.user.admin_role || 'super_admin',
       admin_permissions: req.user.admin_permissions,
+      profile_image: req.user.profile_image || null,
     },
   });
 });
 
 // Admin Logout - Requires authentication
-router.post("/logout", authenticateToken, isAdmin, (req, res) => {
+router.post("/logout", authenticateToken, isAdmin, restrictBody(), (req, res) => {
   const token = getBearerToken(req);
 
   const finalizeLogout = () => {
@@ -560,14 +626,20 @@ const {
   invalidateAllUserTokens,
 } = require("../utils/passwordResetTokens");
 
-// Admin Forgot Password - Send reset link
-router.post("/forgot-password", async (req, res) => {
+// Admin Forgot Password — works for super admin AND staff admins.
+// To avoid email-enumeration, we return the same generic success response
+// regardless of whether the address belongs to an admin in our system; the
+// actual email is only dispatched when a matching admin row is found.
+router.post("/forgot-password", restrictBody('email'), async (req, res) => {
+  const genericSuccess = {
+    success: true,
+    message:
+      "If that email belongs to an admin account, a password reset link has been sent.",
+  };
+
   try {
     const { email } = req.body;
     const normalizedEmail = String(email || "").trim().toLowerCase();
-    const defaultAdminEmail = String(process.env.DEFAULT_ADMIN_EMAIL || "")
-      .trim()
-      .toLowerCase();
 
     if (!normalizedEmail) {
       return res.status(400).json({
@@ -576,83 +648,67 @@ router.post("/forgot-password", async (req, res) => {
       });
     }
 
-    if (!defaultAdminEmail) {
-      return res.status(500).json({
-        success: false,
-        error: "Default admin email is not configured.",
-      });
-    }
-
-    if (normalizedEmail !== defaultAdminEmail) {
-      return res.status(400).json({
-        success: false,
-        error: "Only the super admin email can request a password reset link.",
-      });
-    }
-
-    // Check if admin exists
     const [users] = await db.promise().query(
-      "SELECT id, name, email, role, admin_role FROM users WHERE email = ? LIMIT 1",
+      "SELECT id, name, email, role, admin_role, is_active FROM users WHERE email = ? LIMIT 1",
       [normalizedEmail]
     );
 
-    if (
-      users.length === 0 ||
-      users[0].role !== "admin" ||
-      users[0].admin_role !== "super_admin"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Only the super admin email can request a password reset link.",
-      });
+    const admin = users[0];
+    const isEligibleAdmin =
+      admin &&
+      String(admin.role || "").toLowerCase() === "admin" &&
+      admin.is_active;
+
+    if (!isEligibleAdmin) {
+      // Don't reveal whether the email exists / is admin / is deactivated.
+      return res.json(genericSuccess);
     }
 
-    const admin = users[0];
-
-    // Generate password reset token
-    const tokenData = await createPasswordResetToken(db.promise(), admin.id, admin.email);
+    const tokenData = await createPasswordResetToken(
+      db.promise(),
+      admin.id,
+      admin.email,
+    );
 
     if (!tokenData || !tokenData.token) {
-      console.error("Failed to generate password reset token for admin:", admin.email);
       return res.status(500).json({
         success: false,
         error: "Failed to generate password reset link. Please try again.",
       });
     }
 
-    // Send password reset email
-    const emailResult = await sendPasswordResetEmail(admin.email, admin.name, tokenData.token, true);
+    const emailResult = await sendPasswordResetEmail(
+      admin.email,
+      admin.name,
+      tokenData.token,
+      true,
+    );
 
     if (!emailResult.success) {
-      console.error("Failed to send admin password reset email:", emailResult.error);
       return res.status(500).json({
         success: false,
         error: "Failed to send password reset email. Please try again later.",
       });
     }
 
-    res.json({
-      success: true,
-      message: "Password reset link sent to the super admin email.",
-    });
+    return res.json(genericSuccess);
   } catch (error) {
-    console.error("Admin forgot password error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "An error occurred. Please try again later.",
     });
   }
 });
 
-// Admin Reset Password - Verify token and update password
-router.post("/reset-password", async (req, res) => {
+// Admin Reset Password — accepts any admin token (super or staff).
+// The response includes a `redirect_to` field so the frontend can route the
+// user to the correct login page (/admin/login for super_admin,
+// /admin/staff-login for staff). Super admin login URL must not be revealed
+// to staff users.
+router.post("/reset-password", restrictBody('token', 'password', 'confirmPassword'), async (req, res) => {
   try {
     const { token, password, confirmPassword } = req.body;
-    const defaultAdminEmail = String(process.env.DEFAULT_ADMIN_EMAIL || "")
-      .trim()
-      .toLowerCase();
 
-    // Validation
     if (!token) {
       return res.status(400).json({
         success: false,
@@ -660,10 +716,11 @@ router.post("/reset-password", async (req, res) => {
       });
     }
 
-    if (!password || password.length < 8) {
+    const passwordValidation = adminResetPasswordSchema.safeParse(password);
+    if (!passwordValidation.success) {
       return res.status(400).json({
         success: false,
-        error: "Password must be at least 8 characters long",
+        error: passwordValidation.error.issues[0]?.message || "Password does not meet security requirements",
       });
     }
 
@@ -674,7 +731,6 @@ router.post("/reset-password", async (req, res) => {
       });
     }
 
-    // Validate the token
     const tokenValidation = await validatePasswordResetToken(db.promise(), token);
 
     if (!tokenValidation) {
@@ -693,19 +749,22 @@ router.post("/reset-password", async (req, res) => {
       });
     }
 
-    // Verify the user is an admin
-    const [users] = await db.promise().query(
-      "SELECT id, role, email, admin_role, password FROM users WHERE id = ?",
+    const connection = await db.promise().getConnection();
+    await ensurePasswordHistoryTable(connection);
+
+    const [users] = await connection.query(
+      "SELECT id, role, email, admin_role, password, is_active FROM users WHERE id = ?",
       [tokenValidation.userId]
     );
 
-    if (
-      !defaultAdminEmail ||
-      users.length === 0 ||
-      users[0].role !== "admin" ||
-      users[0].admin_role !== "super_admin" ||
-      String(users[0].email || "").trim().toLowerCase() !== defaultAdminEmail
-    ) {
+    const userRow = users[0];
+    const userRole = String(userRow?.role || "").toLowerCase();
+    const userAdminRole = String(userRow?.admin_role || "").toLowerCase();
+    const isAdminUser = userRole === "admin";
+    const isActiveAdmin = isAdminUser && userRow?.is_active;
+
+    if (!userRow || !isActiveAdmin) {
+      connection.release();
       return res.status(400).json({
         success: false,
         error: "Invalid reset link. Please request a new password reset.",
@@ -715,6 +774,7 @@ router.post("/reset-password", async (req, res) => {
     if (users[0].password) {
       const isSamePassword = await bcrypt.compare(password, users[0].password);
       if (isSamePassword) {
+        connection.release();
         return res.status(400).json({
           success: false,
           error: "New password must be different from your current password.",
@@ -722,22 +782,35 @@ router.post("/reset-password", async (req, res) => {
       }
     }
 
-    // Hash new password
+    const reusedPassword = await hasReusedPassword(connection, tokenValidation.userId, password, 5);
+    if (reusedPassword) {
+      connection.release();
+      return res.status(400).json({
+        success: false,
+        error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
+      });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Update password
-    await db.promise().query(
+    await connection.query(
       "UPDATE users SET password = ?, updated_at = NOW() WHERE id = ?",
       [hashedPassword, tokenValidation.userId]
     );
 
-    try {
-      await syncDefaultAdminPassword(users[0]?.email, password);
-    } catch (envError) {
-      console.warn("Failed to sync DEFAULT_ADMIN_PASSWORD:", envError.message);
+    await addPasswordToHistory(connection, tokenValidation.userId, password);
+
+    connection.release();
+
+    // Only mirror the super admin password back into the .env shim — staff
+    // admin passwords are not stored there.
+    if (userAdminRole === "super_admin") {
+      try {
+        await syncDefaultAdminPassword(userRow.email, password);
+      } catch (envError) {
+      }
     }
 
-    // Invalidate the token
     await markTokenAsUsed(db.promise(), tokenValidation.tokenId);
     await invalidateAllUserTokens(db.promise(), tokenValidation.userId);
     await revokeSessionsByUserId(db.promise(), tokenValidation.userId);
@@ -747,169 +820,23 @@ router.post("/reset-password", async (req, res) => {
       "password_reset",
     );
 
+    // Tell the frontend which login page to send the user to next.
+    // Super admin → /admin/login (kept private).
+    // Everyone else (staff_admin / admin / moderator) → /admin/staff-login.
+    const redirectTo =
+      userAdminRole === "super_admin" ? "/admin/login" : "/admin/staff-login";
+
     res.json({
       success: true,
       message: "Password reset successfully. You can now log in with your new password.",
+      redirect_to: redirectTo,
+      role: userAdminRole || null,
     });
   } catch (error) {
-    console.error("Admin reset password error:", error);
     res.status(500).json({
       success: false,
       error: "An error occurred. Please try again later.",
     });
-  }
-});
-
-const requireAdminKey = (req, res, next) => {
-  const expectedKey = String(process.env.ADMIN_API_KEY || "").trim();
-  const providedKey = String(req.headers["x-admin-key"] || "").trim();
-
-  if (!expectedKey || !providedKey || providedKey !== expectedKey) {
-    return res.status(401).json({
-      success: false,
-      error: "Unauthorized",
-    });
-  }
-
-  return next();
-};
-
-router.use("/chats", requireAdminKey);
-router.use("/stats", requireAdminKey);
-
-router.get("/chats", async (req, res) => {
-  try {
-    const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.min(
-      Math.max(Number.parseInt(req.query.limit, 10) || 20, 1),
-      100,
-    );
-    const offset = (page - 1) * limit;
-
-    const [[countRow]] = await chatPool.query(
-      "SELECT COUNT(*) AS total FROM chat_sessions",
-    );
-
-    const [rows] = await chatPool.query(
-      `SELECT s.id, s.ip_address, s.user_agent, s.created_at, s.updated_at,
-              COUNT(m.id) AS message_count
-       FROM chat_sessions s
-       LEFT JOIN chat_messages m ON m.session_id = s.id
-       GROUP BY s.id
-       ORDER BY s.updated_at DESC
-       LIMIT ? OFFSET ?`,
-      [limit, offset],
-    );
-
-    res.json({
-      success: true,
-      page,
-      limit,
-      total: Number(countRow?.total || 0),
-      sessions: rows.map((session) => ({
-        id: session.id,
-        ip_address: session.ip_address,
-        user_agent: session.user_agent,
-        created_at: session.created_at,
-        updated_at: session.updated_at,
-        message_count: Number(session.message_count || 0),
-      })),
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: "Database error" });
-  }
-});
-
-router.get("/chats/:sessionId", async (req, res) => {
-  try {
-    const sessionId = String(req.params.sessionId || "").trim();
-
-    if (!sessionId) {
-      return res.status(400).json({
-        success: false,
-        error: "Session id is required",
-      });
-    }
-
-    const [rows] = await chatPool.query(
-      `SELECT id, role, content, created_at
-       FROM chat_messages
-       WHERE session_id = ?
-       ORDER BY created_at ASC`,
-      [sessionId],
-    );
-
-    res.json({
-      success: true,
-      sessionId,
-      messages: rows.map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        timestamp: message.created_at,
-      })),
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: "Database error" });
-  }
-});
-
-router.delete("/chats/:sessionId", async (req, res) => {
-  try {
-    const sessionId = String(req.params.sessionId || "").trim();
-
-    if (!sessionId) {
-      return res.status(400).json({
-        success: false,
-        error: "Session id is required",
-      });
-    }
-
-    await chatPool.query("DELETE FROM chat_messages WHERE session_id = ?", [
-      sessionId,
-    ]);
-    const [result] = await chatPool.query(
-      "DELETE FROM chat_sessions WHERE id = ?",
-      [sessionId],
-    );
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        error: "Session not found",
-      });
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: "Database error" });
-  }
-});
-
-router.get("/stats", async (req, res) => {
-  try {
-    const [[totalSessionsRow]] = await chatPool.query(
-      "SELECT COUNT(*) AS total FROM chat_sessions",
-    );
-    const [[totalMessagesRow]] = await chatPool.query(
-      "SELECT COUNT(*) AS total FROM chat_messages",
-    );
-    const [[todaySessionsRow]] = await chatPool.query(
-      "SELECT COUNT(*) AS total FROM chat_sessions WHERE created_at >= CURDATE()",
-    );
-    const [[todayMessagesRow]] = await chatPool.query(
-      "SELECT COUNT(*) AS total FROM chat_messages WHERE created_at >= CURDATE()",
-    );
-
-    res.json({
-      success: true,
-      total_sessions: Number(totalSessionsRow?.total || 0),
-      total_messages: Number(totalMessagesRow?.total || 0),
-      today_sessions: Number(todaySessionsRow?.total || 0),
-      today_messages: Number(todayMessagesRow?.total || 0),
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: "Database error" });
   }
 });
 
@@ -944,7 +871,8 @@ router.get("/dashboard/stats", async (req, res) => {
                 SUM(CASE WHEN status = 'shipped' THEN 1 ELSE 0 END) AS shippedOrders,
                 SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) AS deliveredOrders,
                 SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelledOrders
-             FROM orders`,
+             FROM orders
+             WHERE payment_status = 'paid'`,
     );
 
     const [[contactStats]] = await db
@@ -1002,6 +930,7 @@ router.get("/dashboard/recent-orders", async (req, res) => {
       SELECT o.*, u.name as customer_name, u.email as customer_email
       FROM orders o
       JOIN users u ON o.user_id = u.id
+      WHERE o.payment_status = 'paid'
       ORDER BY o.created_at DESC
       LIMIT ?
     `, [limit]);
@@ -1021,7 +950,7 @@ router.get("/settings", async (req, res) => {
   }
 });
 
-router.put("/settings", async (req, res) => {
+router.put("/settings", restrictBody('storeName', 'storeEmail', 'storePhone', 'currency', 'taxRate', 'shippingFlat', 'shippingFree', 'emailNotifications', 'orderNotifications', 'lowStockAlerts', 'lowStockThreshold', 'address', 'supportHours', 'facebookUrl', 'instagramUrl', 'twitterUrl', 'youtubeUrl', 'whatsappNumber', 'whatsappEnabled', 'mapLatitude', 'mapLongitude', 'mapLocationLabel', 'newsletterWelcomePromoCode'), async (req, res) => {
   try {
     const settings = await updateAdminSettings(db.promise(), req.body || {});
     res.json(settings);
@@ -1030,7 +959,7 @@ router.put("/settings", async (req, res) => {
   }
 });
 
-router.post("/settings/test-email", async (req, res) => {
+router.post("/settings/test-email", restrictBody('email'), async (req, res) => {
   try {
     const settings = await getAdminSettings(db.promise());
     const targetEmail = String(req.body?.email || settings.storeEmail || "").trim();
@@ -1064,6 +993,29 @@ router.post("/settings/test-email", async (req, res) => {
   }
 });
 
+// Newsletter subscribers (admin)
+router.get(
+  "/newsletter/subscribers",
+  asyncHandler(newsletterController.listSubscribers),
+);
+
+router.delete(
+  "/newsletter/subscribers/:id",
+  asyncHandler(newsletterController.deleteSubscriber),
+);
+
+router.post(
+  "/newsletter/broadcast",
+  restrictBody("subject", "message"),
+  asyncHandler(newsletterController.broadcast),
+);
+
+router.post(
+  "/newsletter/welcome-promo",
+  restrictBody("code"),
+  asyncHandler(newsletterController.setWelcomePromo),
+);
+
 // Sales report
 router.get("/reports/sales", async (req, res) => {
   try {
@@ -1076,6 +1028,7 @@ router.get("/reports/sales", async (req, res) => {
           AVG(total_amount) as average_order_value
       FROM orders
       WHERE status != 'cancelled'
+        AND payment_status = 'paid'
     `;
     const params = [];
 
@@ -1107,6 +1060,7 @@ router.get("/reports/products", async (req, res) => {
       JOIN products p ON oi.product_id = p.id
       JOIN orders o ON oi.order_id = o.id
       WHERE o.status != 'cancelled'
+        AND o.payment_status = 'paid'
       GROUP BY p.id
       ORDER BY total_sold DESC
       LIMIT 20
@@ -1187,7 +1141,6 @@ router.delete("/reviews/:id", async (req, res) => {
       message: "Review deleted successfully",
     });
   } catch (error) {
-    console.error("Delete review error:", error);
     res.status(500).json({ error: "Failed to delete review" });
   }
 });
@@ -1222,7 +1175,7 @@ router.get("/users", async (req, res) => {
 });
 
 // Create user/customer
-router.post("/users", async (req, res) => {
+router.post("/users", restrictBody('name', 'email', 'password', 'phone', 'address', 'role', 'is_active'), async (req, res) => {
   try {
     const {
       name,
@@ -1284,7 +1237,7 @@ router.post("/users", async (req, res) => {
 });
 
 // Update user profile details
-router.put("/users/:id", async (req, res) => {
+router.put("/users/:id", restrictBody('name', 'email', 'phone', 'address'), async (req, res) => {
   try {
     const userId = Number(req.params.id);
     if (!Number.isInteger(userId)) {
@@ -1335,7 +1288,7 @@ router.put("/users/:id", async (req, res) => {
 });
 
 // Activate/deactivate user
-router.patch("/users/:id/status", async (req, res) => {
+router.patch("/users/:id/status", restrictBody('is_active'), async (req, res) => {
   try {
     const userId = Number(req.params.id);
     if (!Number.isInteger(userId)) {
@@ -1369,7 +1322,7 @@ router.patch("/users/:id/status", async (req, res) => {
 });
 
 // Update user role
-router.put("/users/:id/role", async (req, res) => {
+router.put("/users/:id/role", restrictBody('role'), async (req, res) => {
   const { role } = req.body;
 
   if (!["customer", "admin"].includes(role)) {
@@ -1486,7 +1439,7 @@ router.get("/tax-rates", async (req, res) => {
   }
 });
 
-router.post("/tax-rates", async (req, res) => {
+router.post("/tax-rates", restrictBody('name', 'rate_percent', 'country', 'state', 'is_default', 'is_active'), async (req, res) => {
   try {
     const {
       name,
@@ -1537,7 +1490,7 @@ router.post("/tax-rates", async (req, res) => {
   }
 });
 
-router.put("/tax-rates/:id", async (req, res) => {
+router.put("/tax-rates/:id", restrictBody('name', 'rate_percent', 'country', 'state', 'is_default', 'is_active'), async (req, res) => {
   try {
     const {
       name,
@@ -1640,7 +1593,7 @@ router.get("/payment-methods", async (req, res) => {
   }
 });
 
-router.post("/payment-methods", async (req, res) => {
+router.post("/payment-methods", restrictBody('code', 'label', 'description', 'sort_order', 'supports_online', 'is_active'), async (req, res) => {
   try {
     const {
       code,
@@ -1703,7 +1656,7 @@ router.post("/payment-methods", async (req, res) => {
   }
 });
 
-router.put("/payment-methods/:id", async (req, res) => {
+router.put("/payment-methods/:id", restrictBody('code', 'label', 'description', 'sort_order', 'supports_online', 'is_active'), async (req, res) => {
   try {
     const paymentMethodId = Number(req.params.id);
     if (!Number.isInteger(paymentMethodId)) {
@@ -1832,7 +1785,7 @@ router.get("/returns", async (req, res) => {
   }
 });
 
-router.put("/returns/:id/status", async (req, res) => {
+router.put("/returns/:id/status", restrictBody('status', 'note', 'refund_amount', 'method', 'reference_number'), async (req, res) => {
   const { status, note, refund_amount, method, reference_number } =
     req.body || {};
   const allowedStatuses = new Set([
@@ -1936,6 +1889,38 @@ router.put("/returns/:id/status", async (req, res) => {
     res.status(500).json({ error: "Error updating return request" });
   } finally {
     connection.release();
+  }
+});
+
+// QR code data for a product
+router.get("/products/:id/qr-data", async (req, res) => {
+  try {
+    const productId = Number(req.params.id);
+    if (!Number.isInteger(productId)) {
+      return res.status(400).json({ error: "Invalid product id" });
+    }
+
+    const [rows] = await db.promise().query(
+      "SELECT id, name, slug, qr_code_url FROM products WHERE id = ? LIMIT 1",
+      [productId],
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    const product = rows[0];
+    const frontendUrl = String(process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
+    const productUrl = product.qr_code_url || `${frontendUrl}/product/${product.id}`;
+
+    res.json({
+      productId: product.id,
+      productName: product.name,
+      productSlug: product.slug,
+      productUrl,
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Database error" });
   }
 });
 

@@ -42,27 +42,66 @@ const isExcludedFromSQLCheck = (key) =>
         PASSWORD_FIELDS.has(key.toLowerCase()) ||
         CONFIRMATION_FIELDS.has(key.toLowerCase()));
 
-/**
- * Sanitize user input to prevent XSS and injection attacks
- * @param {string} input - User input to sanitize
- * @returns {string} - Sanitized input
- */
+const HTML_ENTITY_MAP = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#x27;',
+    '/': '&#x2F;',
+};
+
+const ESCAPE_REGEX = /[&<>"'/]/g;
+
+const escapeHTML = (str) => {
+    if (typeof str !== 'string') return str;
+    return str.replace(ESCAPE_REGEX, (char) => HTML_ENTITY_MAP[char]);
+};
+
+const JS_PROTOCOL_REGEX = /^\s*javascript\s*:/i;
+const DATA_PROTOCOL_REGEX = /^\s*data\s*:/i;
+const VBSCRIPT_PROTOCOL_REGEX = /^\s*vbscript\s*:/i;
+const EVENT_HANDLER_REGEX = /\bon\w+\s*=/gi;
+const SVG_SCRIPT_REGEX = /<svg[^>]*>(.*?)<\/svg>/gi;
+const EXPRESSION_REGEX = /expression\s*\(/gi;
+const URL_ENCODED_INJECTION_REGEX = /%[0-9a-f]{2}/gi;
+
 function sanitizeInput(input) {
     if (typeof input !== 'string') return input;
-    
-    // Remove potentially dangerous characters
-    return input
-        .replace(/[<>]/g, '') // Remove < and >
-        .replace(/javascript:/gi, '') // Remove javascript: protocol
-        .replace(/on\w+=/gi, '') // Remove inline event handlers
-        .trim();
+
+    let sanitized = input;
+
+    sanitized = sanitized.replace(/<[^>]*>/g, (match) => {
+        if (match.toLowerCase().startsWith('<script') ||
+            match.toLowerCase().startsWith('<iframe') ||
+            match.toLowerCase().startsWith('<object') ||
+            match.toLowerCase().startsWith('<embed') ||
+            match.toLowerCase().startsWith('<svg')) {
+            return '';
+        }
+        return match.replace(/on\w+\s*=/gi, 'data-safe-');
+    });
+
+    sanitized = sanitized.replace(/[<>]/g, '');
+
+    sanitized = sanitized.replace(JS_PROTOCOL_REGEX, '')
+        .replace(DATA_PROTOCOL_REGEX, '')
+        .replace(VBSCRIPT_PROTOCOL_REGEX, '');
+
+    sanitized = sanitized.replace(EVENT_HANDLER_REGEX, '')
+        .replace(EXPRESSION_REGEX, '');
+
+    sanitized = sanitized.replace(URL_ENCODED_INJECTION_REGEX, (match) => {
+        try {
+            return decodeURIComponent(match);
+        } catch {
+            return '';
+        }
+    });
+
+    return sanitized.trim();
 }
 
-/**
- * Sanitize object recursively
- * @param {object} obj - Object to sanitize
- * @returns {object} - Sanitized object
- */
 function sanitizeObject(obj) {
     if (typeof obj !== 'object' || obj === null) {
         return obj;
@@ -73,7 +112,7 @@ function sanitizeObject(obj) {
     for (const key in obj) {
         if (Object.prototype.hasOwnProperty.call(obj, key)) {
             const value = obj[key];
-            
+
             if (typeof value === 'string') {
                 sanitized[key] = isOpaqueTokenField(key)
                     ? value.trim()
@@ -89,9 +128,6 @@ function sanitizeObject(obj) {
     return sanitized;
 }
 
-/**
- * Middleware to sanitize request body
- */
 function sanitizeRequestBody(req, res, next) {
     if (req.body) {
         req.body = sanitizeObject(req.body);
@@ -99,9 +135,6 @@ function sanitizeRequestBody(req, res, next) {
     next();
 }
 
-/**
- * Middleware to sanitize query parameters
- */
 function sanitizeQueryParams(req, res, next) {
     if (req.query) {
         req.query = sanitizeObject(req.query);
@@ -109,23 +142,13 @@ function sanitizeQueryParams(req, res, next) {
     next();
 }
 
-/**
- * Validate email format
- * @param {string} email - Email to validate
- * @returns {boolean} - True if valid
- */
 function isValidEmail(email) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
 }
 
-/**
- * Validate password strength
- * @param {string} password - Password to validate
- * @returns {object} - Validation result
- */
 function validatePassword(password) {
-    const minLength = 8;
+    const minLength = 12;
     const hasUpperCase = /[A-Z]/.test(password);
     const hasLowerCase = /[a-z]/.test(password);
     const hasNumber = /[0-9]/.test(password);
@@ -142,20 +165,13 @@ function validatePassword(password) {
             number: hasNumber,
             special: hasSpecial
         },
-        message: !isValid ? 'Password must be at least 8 characters with uppercase, lowercase, and numbers' : ''
+        message: !isValid ? 'Password must be at least 12 characters with uppercase, lowercase, and numbers' : ''
     };
 }
 
-/**
- * Prevent SQL injection by validating input
- * @param {string} input - Input to validate
- * @returns {boolean} - True if safe
- */
 function isSafeSQLInput(input) {
     if (typeof input !== 'string') return true;
 
-    // Check for SQL injection patterns — only flag dangerous sequences
-    // that indicate an active injection attempt, not normal words.
     const sqlInjectionPatterns = [
         /(\b(?:DROP\s+(?:TABLE|DATABASE|INDEX|VIEW|PROCEDURE|FUNCTION)|TRUNCATE\s+TABLE|ALTER\s+(?:TABLE|DATABASE|COLUMN))\b)/gi,
         /(?:;\s*(?:DROP|TRUNCATE|ALTER|DELETE|EXEC)\b)/gi,
@@ -164,19 +180,19 @@ function isSafeSQLInput(input) {
         /(?:\bSELECT\b.*\bINTO\s+(?:OUT|DUMP)FILE\b)/gi,
         /(?:\bLOAD\s+(?:DATA|FILE)\b)/gi,
         /(?:--\s|\/\*!|\/\*)/gi,
+        /(\bINSERT\s+INTO\b.*\bVALUES\b.*\bSELECT\b)/gi,
+        /(\bWAITFOR\s+DELAY\b)/gi,
+        /(\bBENCHMARK\b\s*\()/gi,
+        /(sleep\s*\(\s*\d+\s*\))/gi,
     ];
 
     return !sqlInjectionPatterns.some(pattern => pattern.test(input));
 }
 
-/**
- * Middleware to validate SQL injection attempts
- */
 function preventSQLInjection(req, res, next) {
     const checkObject = (obj) => {
         for (const key in obj) {
             if (Object.prototype.hasOwnProperty.call(obj, key)) {
-                // Skip SQL injection check for excluded fields (passwords, tokens, confirmation text)
                 if (isExcludedFromSQLCheck(key)) {
                     continue;
                 }
@@ -203,6 +219,22 @@ function preventSQLInjection(req, res, next) {
     next();
 }
 
+function restrictBody(...allowedFields) {
+    const allowedSet = new Set(allowedFields);
+    return (req, res, next) => {
+        if (!req.body || typeof req.body !== 'object') {
+            return next();
+        }
+        const extraFields = Object.keys(req.body).filter(key => !allowedSet.has(key));
+        if (extraFields.length > 0) {
+            return res.status(400).json({
+                error: `Unexpected fields: ${extraFields.join(', ')}`
+            });
+        }
+        next();
+    };
+}
+
 module.exports = {
     sanitizeInput,
     sanitizeObject,
@@ -211,5 +243,7 @@ module.exports = {
     isValidEmail,
     validatePassword,
     isSafeSQLInput,
-    preventSQLInjection
+    preventSQLInjection,
+    restrictBody,
+    escapeHTML,
 };

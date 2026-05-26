@@ -2,6 +2,7 @@ const bcrypt = require("bcryptjs");
 const { db } = require("../config/db");
 const { hashToken } = require("../utils/sessionManager");
 const { revokeRefreshTokensBySessionId } = require("../utils/tokenStore");
+const { addPasswordToHistory, hasReusedPassword } = require("../utils/passwordHistory");
 
 const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
   process.env.IP_LOOKUP_TIMEOUT_MS || "2000",
@@ -9,6 +10,15 @@ const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
 );
 const LOCATION_CACHE_TTL_MS = 1000 * 60 * 60 * 6;
 const loginHistoryLocationCache = new Map();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of loginHistoryLocationCache.entries()) {
+    if (now - entry.timestamp > LOCATION_CACHE_TTL_MS) {
+      loginHistoryLocationCache.delete(key);
+    }
+  }
+}, LOCATION_CACHE_TTL_MS);
 
 const toSessionId = (value) => {
   const parsed = Number(value);
@@ -336,6 +346,13 @@ const changePassword = async (req, res) => {
     }
   }
 
+  const isReused = await hasReusedPassword(db.promise(), req.user.id, newPassword);
+  if (isReused) {
+    return res.status(400).json({
+      error: "Password was recently used. Please choose a different password.",
+    });
+  }
+
   const hashedPassword = await bcrypt.hash(newPassword, 12);
 
   await db
@@ -344,6 +361,8 @@ const changePassword = async (req, res) => {
       "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
       [hashedPassword, req.user.id],
     );
+
+  await addPasswordToHistory(db.promise(), req.user.id, newPassword);
 
   return res.json({
     message: isFirstTimePasswordSetup

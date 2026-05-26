@@ -145,7 +145,8 @@ module.exports = {
         'fade-in-right': 'fadeInRight 0.6s ease-out forwards',
         'slide-in-right': 'slideInRight 0.3s ease-out',
         'pop-in': 'popIn 0.5s ease-out forwards',
-        'shimmer': 'shimmer 2s linear infinite',
+        shimmer: 'shimmer 2s linear infinite',
+        'whatsapp-glow': 'whatsAppGlow 2s ease-in-out infinite',
       },
       transitionProperty: {
         'all': 'all',

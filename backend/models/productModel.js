@@ -1,7 +1,15 @@
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 const { dbPool, withTransaction } = require("../config/db");
 const { createSlug } = require("../utils/slugify");
 const { getAdminSettings } = require("../utils/adminSettings");
 const { insertAdminNotifications } = require("../utils/adminNotifications");
+const { fillMissingProductContent } = require("../utils/productContentDefaults");
+
+const buildProductUrl = (productId) => {
+  const frontendUrl = String(process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
+  return `${frontendUrl}/product/${productId}`;
+};
 
 const safeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -301,6 +309,11 @@ const createProduct = async (payload = {}) => {
       connection,
       payload.slug || name,
     );
+    const defaultContent = fillMissingProductContent({
+      ...payload,
+      name,
+      slug,
+    });
 
     const imagesJson = JSON.stringify(getGalleryImageUrls(galleryImages, imageUrl));
 
@@ -311,10 +324,10 @@ const createProduct = async (payload = {}) => {
       [
         name,
         slug,
-        toNullableText(payload.description),
-        toNullableText(payload.ingredients),
-        toNullableText(payload.benefits),
-        toNullableText(payload.usage),
+        toNullableText(payload.description) || defaultContent.description,
+        toNullableText(payload.ingredients) || defaultContent.ingredients,
+        toNullableText(payload.benefits) || defaultContent.benefits,
+        toNullableText(payload.usage) || defaultContent.usage,
         safeNumber(payload.price, 0),
         toNullableInt(payload.category_id),
         imageUrl,
@@ -326,6 +339,9 @@ const createProduct = async (payload = {}) => {
         safeNumber(payload.discount_percentage, 0),
       ],
     );
+
+    const qrCodeUrl = buildProductUrl(result.insertId);
+    await connection.query("UPDATE products SET qr_code_url = ? WHERE id = ?", [qrCodeUrl, result.insertId]);
 
     if (galleryImages.length > 0) {
       await replaceProductGallery(connection, result.insertId, galleryImages);
@@ -356,13 +372,24 @@ const updateProduct = async (productId, payload = {}) => {
     }
 
     const existingProduct = existingRows[0];
+    const hasOwn = (key) => Object.prototype.hasOwnProperty.call(payload, key);
+    const resolvedName = hasOwn("name")
+      ? String(payload.name || "").trim()
+      : existingProduct.name;
+    const resolvedSlug = hasOwn("slug")
+      ? String(payload.slug || "").trim()
+      : existingProduct.slug;
+    const defaultContent = fillMissingProductContent({
+      ...existingProduct,
+      ...payload,
+      name: resolvedName,
+      slug: resolvedSlug,
+    });
     const previousStock = safeNumber(existingProduct.stock_quantity, 0);
     let lowStockEvent = null;
     let shouldSendLowStockEmail = false;
     const fields = [];
     const params = [];
-
-    const hasOwn = (key) => Object.prototype.hasOwnProperty.call(payload, key);
 
     if (hasOwn("name")) {
       const name = String(payload.name || "").trim();
@@ -387,10 +414,10 @@ const updateProduct = async (productId, payload = {}) => {
     }
 
     const scalarFields = [
-      ["description", "description = ?", toNullableText],
-      ["ingredients", "ingredients = ?", toNullableText],
-      ["benefits", "benefits = ?", toNullableText],
-      ["usage", "`usage` = ?", toNullableText],
+      ["description", "description = ?", (value) => toNullableText(value) || defaultContent.description],
+      ["ingredients", "ingredients = ?", (value) => toNullableText(value) || defaultContent.ingredients],
+      ["benefits", "benefits = ?", (value) => toNullableText(value) || defaultContent.benefits],
+      ["usage", "`usage` = ?", (value) => toNullableText(value) || defaultContent.usage],
       ["price", "price = ?", (value) => safeNumber(value, 0)],
       ["category_id", "category_id = ?", toNullableInt],
       ["image_url", "image_url = ?", (value) => (value ? String(value).trim() : null)],
@@ -469,6 +496,9 @@ const updateProduct = async (productId, payload = {}) => {
       shouldSendLowStockEmail =
         Boolean(adminSettings.emailNotifications) && Boolean(lowStockEvent);
     }
+
+    const qrCodeUrl = buildProductUrl(productId);
+    await connection.query("UPDATE products SET qr_code_url = ? WHERE id = ?", [qrCodeUrl, productId]);
 
     return {
       updated: true,

@@ -2,8 +2,8 @@ const { dbPool } = require("../config/db");
 
 const DEFAULT_ADMIN_SETTINGS = {
   storeName: process.env.BUSINESS_LEGAL_NAME || "Naturanza",
-  storeEmail: process.env.BUSINESS_SUPPORT_EMAIL || "support@naturanza.com",
-  storePhone: process.env.BUSINESS_SUPPORT_PHONE || "+92 (300) 123-4567",
+  storeEmail: process.env.BUSINESS_SUPPORT_EMAIL || "support@naturanzafood.com",
+  storePhone: process.env.BUSINESS_SUPPORT_PHONE || "+92340 9502646",
   currency: "PKR",
   taxRate: 18,
   shippingFlat: 250,
@@ -12,6 +12,18 @@ const DEFAULT_ADMIN_SETTINGS = {
   orderNotifications: true,
   lowStockAlerts: true,
   lowStockThreshold: 10,
+  address: "Pakistan",
+  supportHours: "Available 24/7",
+  facebookUrl: "",
+  instagramUrl: "",
+  twitterUrl: "",
+  youtubeUrl: "",
+  whatsappNumber: "",
+  whatsappEnabled: true,
+  mapLatitude: 31.5204,
+  mapLongitude: 74.3587,
+  mapLocationLabel: "Pakistan, Lahore",
+  newsletterWelcomePromoCode: "",
 };
 
 const toBoolean = (value, fallback = false) => {
@@ -41,6 +53,13 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const toTrimmedString = (value, fallback = "") => {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  return String(value).trim();
+};
+
 const normalizeSettingsRow = (row = {}) => ({
   storeName: row.store_name || DEFAULT_ADMIN_SETTINGS.storeName,
   storeEmail: row.store_email || DEFAULT_ADMIN_SETTINGS.storeEmail,
@@ -62,7 +81,30 @@ const normalizeSettingsRow = (row = {}) => ({
     row.low_stock_threshold,
     DEFAULT_ADMIN_SETTINGS.lowStockThreshold,
   ),
-  updatedAt: row.updated_at || null,
+  address:
+    row.address === undefined || row.address === null
+      ? DEFAULT_ADMIN_SETTINGS.address
+      : String(row.address),
+  supportHours:
+    row.support_hours === undefined || row.support_hours === null
+      ? DEFAULT_ADMIN_SETTINGS.supportHours
+      : String(row.support_hours),
+  facebookUrl: row.facebook_url == null ? "" : String(row.facebook_url),
+  instagramUrl: row.instagram_url == null ? "" : String(row.instagram_url),
+  twitterUrl: row.twitter_url == null ? "" : String(row.twitter_url),
+  youtubeUrl: row.youtube_url == null ? "" : String(row.youtube_url),
+  whatsappNumber: row.whatsapp_number == null ? "" : String(row.whatsapp_number),
+  whatsappEnabled: toBoolean(row.whatsapp_enabled, DEFAULT_ADMIN_SETTINGS.whatsappEnabled),
+  mapLatitude: toNumber(row.map_latitude, DEFAULT_ADMIN_SETTINGS.mapLatitude),
+  mapLongitude: toNumber(row.map_longitude, DEFAULT_ADMIN_SETTINGS.mapLongitude),
+  mapLocationLabel:
+    row.map_location_label === undefined || row.map_location_label === null
+      ? DEFAULT_ADMIN_SETTINGS.mapLocationLabel
+      : String(row.map_location_label),
+  newsletterWelcomePromoCode:
+    row.newsletter_welcome_promo_code == null
+      ? ""
+      : String(row.newsletter_welcome_promo_code),
 });
 
 const getAdminSettings = async (connection = null) => {
@@ -78,8 +120,11 @@ const getAdminSettings = async (connection = null) => {
   await db.query(
     `INSERT INTO admin_settings
      (id, store_name, store_email, store_phone, currency, tax_rate, shipping_flat, shipping_free,
-      email_notifications, order_notifications, low_stock_alerts, low_stock_threshold)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      email_notifications, order_notifications, low_stock_alerts, low_stock_threshold,
+      address, support_hours, facebook_url, instagram_url, twitter_url, youtube_url,
+      whatsapp_number, whatsapp_enabled, map_latitude, map_longitude, map_location_label,
+      newsletter_welcome_promo_code)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE id = id`,
     [
       defaults.storeName,
@@ -93,6 +138,18 @@ const getAdminSettings = async (connection = null) => {
       defaults.orderNotifications,
       defaults.lowStockAlerts,
       defaults.lowStockThreshold,
+      defaults.address,
+      defaults.supportHours,
+      defaults.facebookUrl,
+      defaults.instagramUrl,
+      defaults.twitterUrl,
+      defaults.youtubeUrl,
+      defaults.whatsappNumber,
+      defaults.whatsappEnabled,
+      defaults.mapLatitude,
+      defaults.mapLongitude,
+      defaults.mapLocationLabel,
+      defaults.newsletterWelcomePromoCode,
     ],
   );
 
@@ -102,6 +159,8 @@ const getAdminSettings = async (connection = null) => {
 
   return normalizeSettingsRow(nextRows[0] || {});
 };
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 const updateAdminSettings = async (connection = null, updates = {}) => {
   const db = connection || dbPool;
@@ -118,9 +177,11 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
       ? { storePhone: String(updates.storePhone || "").trim() }
       : {}),
     ...(hasOwn("currency")
-      ? { currency: String(updates.currency || "").trim().toUpperCase() }
+      ? { currency: String(updates.currency || "PKR").trim().toUpperCase() }
       : {}),
-    ...(hasOwn("taxRate") ? { taxRate: toNumber(updates.taxRate, current.taxRate) } : {}),
+    ...(hasOwn("taxRate")
+      ? { taxRate: toNumber(updates.taxRate, current.taxRate) }
+      : {}),
     ...(hasOwn("shippingFlat")
       ? { shippingFlat: toNumber(updates.shippingFlat, current.shippingFlat) }
       : {}),
@@ -139,7 +200,42 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
     ...(hasOwn("lowStockThreshold")
       ? { lowStockThreshold: toNumber(updates.lowStockThreshold, current.lowStockThreshold) }
       : {}),
+    ...(hasOwn("address") ? { address: toTrimmedString(updates.address, current.address) } : {}),
+    ...(hasOwn("supportHours")
+      ? { supportHours: toTrimmedString(updates.supportHours, current.supportHours) }
+      : {}),
+    ...(hasOwn("facebookUrl") ? { facebookUrl: toTrimmedString(updates.facebookUrl) } : {}),
+    ...(hasOwn("instagramUrl") ? { instagramUrl: toTrimmedString(updates.instagramUrl) } : {}),
+    ...(hasOwn("twitterUrl") ? { twitterUrl: toTrimmedString(updates.twitterUrl) } : {}),
+    ...(hasOwn("youtubeUrl") ? { youtubeUrl: toTrimmedString(updates.youtubeUrl) } : {}),
+    ...(hasOwn("whatsappNumber")
+      ? { whatsappNumber: toTrimmedString(updates.whatsappNumber) }
+      : {}),
+    ...(hasOwn("whatsappEnabled")
+      ? { whatsappEnabled: toBoolean(updates.whatsappEnabled, current.whatsappEnabled) }
+      : {}),
+    ...(hasOwn("mapLatitude")
+      ? { mapLatitude: clamp(toNumber(updates.mapLatitude, current.mapLatitude), -90, 90) }
+      : {}),
+    ...(hasOwn("mapLongitude")
+      ? { mapLongitude: clamp(toNumber(updates.mapLongitude, current.mapLongitude), -180, 180) }
+      : {}),
+    ...(hasOwn("mapLocationLabel")
+      ? { mapLocationLabel: toTrimmedString(updates.mapLocationLabel, current.mapLocationLabel) }
+      : {}),
+    ...(hasOwn("newsletterWelcomePromoCode")
+      ? {
+          newsletterWelcomePromoCode: toTrimmedString(updates.newsletterWelcomePromoCode)
+            .toUpperCase()
+            .slice(0, 40),
+        }
+      : {}),
   };
+
+  // Default currency to PKR if not set
+  if (!next.currency) {
+    next.currency = "PKR";
+  }
 
   await db.query(
     `UPDATE admin_settings
@@ -153,7 +249,19 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
          email_notifications = ?,
          order_notifications = ?,
          low_stock_alerts = ?,
-         low_stock_threshold = ?
+         low_stock_threshold = ?,
+         address = ?,
+         support_hours = ?,
+         facebook_url = ?,
+         instagram_url = ?,
+         twitter_url = ?,
+         youtube_url = ?,
+         whatsapp_number = ?,
+         whatsapp_enabled = ?,
+         map_latitude = ?,
+         map_longitude = ?,
+         map_location_label = ?,
+         newsletter_welcome_promo_code = ?
      WHERE id = 1`,
     [
       next.storeName,
@@ -167,6 +275,18 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
       next.orderNotifications,
       next.lowStockAlerts,
       next.lowStockThreshold,
+      next.address,
+      next.supportHours,
+      next.facebookUrl,
+      next.instagramUrl,
+      next.twitterUrl,
+      next.youtubeUrl,
+      next.whatsappNumber,
+      next.whatsappEnabled,
+      next.mapLatitude,
+      next.mapLongitude,
+      next.mapLocationLabel,
+      next.newsletterWelcomePromoCode,
     ],
   );
 
@@ -180,11 +300,25 @@ const toPublicSettings = (settings) => ({
   storeName: settings.storeName,
   storeEmail: settings.storeEmail,
   storePhone: settings.storePhone,
-  currency: settings.currency,
+  currency: settings.currency || "PKR",
   taxRate: settings.taxRate,
   shippingFlat: settings.shippingFlat,
   shippingFree: settings.shippingFree,
-  updatedAt: settings.updatedAt,
+  emailNotifications: settings.emailNotifications,
+  orderNotifications: settings.orderNotifications,
+  lowStockAlerts: settings.lowStockAlerts,
+  lowStockThreshold: settings.lowStockThreshold,
+  address: settings.address,
+  supportHours: settings.supportHours,
+  facebookUrl: settings.facebookUrl,
+  instagramUrl: settings.instagramUrl,
+  twitterUrl: settings.twitterUrl,
+  youtubeUrl: settings.youtubeUrl,
+  whatsappNumber: settings.whatsappNumber,
+  whatsappEnabled: settings.whatsappEnabled,
+  mapLatitude: settings.mapLatitude,
+  mapLongitude: settings.mapLongitude,
+  mapLocationLabel: settings.mapLocationLabel,
 });
 
 module.exports = {

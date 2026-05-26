@@ -4,9 +4,9 @@ const PDFDocument = require('pdfkit');
 
 const COMPANY = {
   legalName: process.env.BUSINESS_LEGAL_NAME || 'Naturanza Wellness Pvt. Ltd.',
-  website: process.env.BUSINESS_WEBSITE || 'www.naturanzafoods.com',
-  email: process.env.BUSINESS_SUPPORT_EMAIL || 'support@naturanzafoods.com',
-  phone: process.env.BUSINESS_SUPPORT_PHONE || '+92 42 3890 1144',
+  website: process.env.BUSINESS_WEBSITE || 'www.naturanzafood.com',
+  email: process.env.BUSINESS_SUPPORT_EMAIL || 'support@naturanzafood.com',
+  phone: process.env.BUSINESS_SUPPORT_PHONE || '+92340 9502646',
   officeAddress:
     process.env.BUSINESS_OFFICE_ADDRESS ||
     'Office 204, Cedar Tower, MM Alam Road, Gulberg III, Lahore 54660, Pakistan',
@@ -61,9 +61,12 @@ const formatDateTime = (value) => {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
-  }).format(parsed);
+  })
+    .format(parsed)
+    .replace(/\bam\b/g, 'AM')
+    .replace(/\bpm\b/g, 'PM');
 };
 
 let cachedLogoPath;
@@ -103,6 +106,61 @@ const drawRoundedRect = (doc, x, y, w, h, r = 8) => {
   doc.roundedRect(x, y, w, h, r).stroke(BORDER);
 };
 
+const drawPageBackground = (doc, pageWidth, pageHeight, margin, logoPath) => {
+  doc
+    .save()
+    .rect(0, 0, pageWidth, pageHeight)
+    .fill('#fdfefe')
+    .restore();
+
+  doc
+    .save()
+    .fillColor('#f0fdf4')
+    .circle(pageWidth - 28, 24, 84)
+    .fill()
+    .restore();
+
+  doc
+    .save()
+    .fillColor('#f7fee7')
+    .circle(44, pageHeight - 52, 72)
+    .fill()
+    .restore();
+
+  doc
+    .save()
+    .lineWidth(1)
+    .strokeColor('#e5efe8')
+    .roundedRect(18, 18, pageWidth - 36, pageHeight - 36, 18)
+    .stroke()
+    .restore();
+
+  doc
+    .save()
+    .lineWidth(1.5)
+    .strokeColor('#d7e9db')
+    .moveTo(margin, 112)
+    .lineTo(pageWidth - margin, 112)
+    .stroke()
+    .restore();
+
+  if (logoPath) {
+    try {
+      doc
+        .save()
+        .opacity(0.045)
+        .image(logoPath, pageWidth / 2 - 120, pageHeight / 2 - 68, {
+          fit: [240, 136],
+          align: 'center',
+          valign: 'center',
+        })
+        .restore();
+    } catch (_) {
+      // Ignore watermark errors so invoice generation never fails.
+    }
+  }
+};
+
 const drawItemsTableHeader = (doc, y, columns) => {
   doc
     .save()
@@ -114,15 +172,35 @@ const drawItemsTableHeader = (doc, y, columns) => {
     .font('Helvetica-Bold')
     .fontSize(10)
     .fillColor('#ffffff')
-    .text('#', columns.indexX + 6, y + 7)
-    .text('Product Name', columns.productX + 6, y + 7)
-    .text('Qty', columns.qtyX + 6, y + 7)
-    .text('Unit Price', columns.unitX + 6, y + 7)
-    .text('Amount', columns.amountX + 6, y + 7);
+    .text('#', columns.indexX, y + 8, {
+      width: columns.indexWidth,
+      align: 'center',
+      lineBreak: false,
+    })
+    .text('Product Name', columns.productX + 8, y + 8, {
+      width: columns.productWidth - 16,
+      lineBreak: false,
+    })
+    .text('Qty', columns.qtyX, y + 8, {
+      width: columns.qtyWidth,
+      align: 'center',
+      lineBreak: false,
+    })
+    .text('Unit Price', columns.unitX + 8, y + 8, {
+      width: columns.unitWidth - 16,
+      align: 'right',
+      lineBreak: false,
+    })
+    .text('Amount', columns.amountX + 8, y + 8, {
+      width: columns.amountWidth - 16,
+      align: 'right',
+      lineBreak: false,
+    });
 };
 
 const createInvoicePdfBuffer = async (order, options = {}) => {
   const currency = options.currency || 'PKR';
+  const company = { ...COMPANY, ...(options.company || {}) };
 
   return new Promise((resolve, reject) => {
     try {
@@ -131,7 +209,7 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         margin: 34,
         info: {
           Title: `Invoice ORD-${String(order.id || '').padStart(6, '0')}`,
-          Author: COMPANY.legalName,
+          Author: company.legalName,
           Subject: 'Order Invoice',
           CreationDate: new Date(),
         },
@@ -153,83 +231,72 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
       const paymentMethodText = getPaymentMethodLabel(order.payment_method);
       const logoPath = resolveLogoPath();
 
-      doc
-        .save()
-        .fillColor('#f0fdf4')
-        .circle(pageWidth - 20, 30, 120)
-        .fill()
-        .restore();
-      doc
-        .save()
-        .fillColor('#f7fee7')
-        .circle(0, pageHeight - 80, 90)
-        .fill()
-        .restore();
+      drawPageBackground(doc, pageWidth, pageHeight, margin, logoPath);
 
       if (logoPath) {
         try {
-          doc.image(logoPath, margin, margin - 4, {
-            fit: [64, 64],
+          doc.image(logoPath, margin, margin + 4, {
+            fit: [132, 52],
             align: 'left',
             valign: 'top',
           });
         } catch (_) {
           // Ignore logo errors so invoice generation never fails.
         }
+
+        const logoWidth = 148;
+        doc
+          .font('Helvetica')
+          .fontSize(8)
+          .fillColor(MUTED_TEXT)
+          .text(company.website, margin, margin + 60, {
+            width: logoWidth,
+            lineBreak: false,
+          });
       }
 
-      const companyTextX = logoPath ? margin + 72 : margin;
-      doc
-        .font('Helvetica-Bold')
-        .fontSize(14)
-        .fillColor(DARK_TEXT)
-        .text(COMPANY.legalName, companyTextX, margin + 2, {
-          width: 250,
-        });
-      doc
-        .font('Helvetica')
-        .fontSize(9)
-        .fillColor(MUTED_TEXT)
-        .text(COMPANY.website, companyTextX, margin + 22);
-
-      const rightWidth = 230;
+      const rightWidth = 256;
       const rightX = pageWidth - margin - rightWidth;
 
       doc
         .font('Helvetica-Bold')
-        .fontSize(18)
+        .fontSize(20)
         .fillColor(PRIMARY_GREEN)
-        .text('Naturanza Invoice', rightX, margin + 2, {
+        .text('Naturanza Invoice', rightX, margin + 4, {
           width: rightWidth,
           align: 'right',
+          lineBreak: false,
         });
 
       doc
         .font('Helvetica-Bold')
-        .fontSize(15)
+        .fontSize(16)
         .fillColor(DARK_TEXT)
-        .text(orderNumber, rightX, margin + 24, {
+        .text(orderNumber, rightX, margin + 28, {
           width: rightWidth,
           align: 'right',
+          lineBreak: false,
         });
 
       doc
         .font('Helvetica')
-        .fontSize(9)
+        .fontSize(9.5)
         .fillColor(MUTED_TEXT)
-        .text(`Invoice Date: ${invoiceDate}`, rightX, margin + 44, {
+        .text(`Invoice Date: ${invoiceDate}`, rightX, margin + 50, {
           width: rightWidth,
           align: 'right',
+          lineBreak: false,
         })
-        .text(`Payment Method: ${paymentMethodText}`, rightX, margin + 58, {
+        .text(`Payment Method: ${paymentMethodText}`, rightX, margin + 65, {
           width: rightWidth,
           align: 'right',
+          lineBreak: false,
         });
 
-      const badgeWidth = 92;
-      const badgeHeight = 20;
+      const badgeWidth = Math.max(96, doc.widthOfString(statusText) + 32);
+      const badgeHeight = 22;
       const badgeX = pageWidth - margin - badgeWidth;
-      const badgeY = margin + 73;
+      const badgeY = margin + 84;
 
       doc
         .save()
@@ -245,18 +312,44 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         .font('Helvetica-Bold')
         .fontSize(9)
         .fillColor(PRIMARY_GREEN)
-        .text(statusText, badgeX, badgeY + 6, {
+        .text(statusText, badgeX, badgeY + 7, {
           width: badgeWidth,
           align: 'center',
+          lineBreak: false,
         });
 
-      let y = margin + 106;
+      let y = margin + 118;
       doc.moveTo(margin, y).lineTo(pageWidth - margin, y).stroke(BORDER);
 
-      y += 14;
-      const cardGap = 10;
+      y += 18;
+      const cardGap = 14;
       const cardWidth = (contentWidth - cardGap) / 2;
-      const cardHeight = 110;
+      const cardPadding = 14;
+      const cardBodyWidth = cardWidth - cardPadding * 2;
+
+      const billToName = normalizeText(order.customer_name || order.user_name, 'Customer');
+      const billToEmail = normalizeText(order.customer_email, '-');
+      const billToAddress = normalizeText(order.shipping_address, 'Address not available');
+      const billToBlock = [billToName, billToEmail, billToAddress].join('\n');
+      const fromBlock = [
+        company.legalName,
+        company.email,
+        company.phone,
+        company.officeAddress,
+      ].join('\n');
+
+      doc.font('Helvetica').fontSize(9);
+      const cardTextOptions = {
+        width: cardBodyWidth,
+        lineGap: 2,
+      };
+      const cardHeight = Math.max(
+        98,
+        50 + Math.max(
+          doc.heightOfString(billToBlock, cardTextOptions),
+          doc.heightOfString(fromBlock, cardTextOptions),
+        ),
+      );
 
       drawRoundedRect(doc, margin, y, cardWidth, cardHeight);
       drawRoundedRect(doc, margin + cardWidth + cardGap, y, cardWidth, cardHeight);
@@ -265,52 +358,42 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         .font('Helvetica-Bold')
         .fontSize(10)
         .fillColor(PRIMARY_GREEN)
-        .text('Bill To', margin + 10, y + 10)
-        .text('From', margin + cardWidth + cardGap + 10, y + 10);
-
-      const billToName = normalizeText(order.customer_name || order.user_name, 'Customer');
-      const billToEmail = normalizeText(order.customer_email, '-');
-      const billToAddress = normalizeText(order.shipping_address, 'Address not available');
+        .text('Bill To', margin + cardPadding, y + 14)
+        .text('From', margin + cardWidth + cardGap + cardPadding, y + 14);
 
       doc
         .font('Helvetica')
         .fontSize(9)
         .fillColor(DARK_TEXT)
-        .text(billToName, margin + 10, y + 28, { width: cardWidth - 20 })
-        .text(billToEmail, margin + 10, y + 42, { width: cardWidth - 20 })
-        .text(billToAddress, margin + 10, y + 56, {
-          width: cardWidth - 20,
-          height: 44,
+        .text(billToBlock, margin + cardPadding, y + 34, {
+          width: cardBodyWidth,
+          lineGap: 2,
         });
 
       doc
         .font('Helvetica')
         .fontSize(9)
         .fillColor(DARK_TEXT)
-        .text(COMPANY.legalName, margin + cardWidth + cardGap + 10, y + 28, {
-          width: cardWidth - 20,
-        })
-        .text(COMPANY.email, margin + cardWidth + cardGap + 10, y + 42, {
-          width: cardWidth - 20,
-        })
-        .text(COMPANY.phone, margin + cardWidth + cardGap + 10, y + 56, {
-          width: cardWidth - 20,
-        })
-        .text(COMPANY.officeAddress, margin + cardWidth + cardGap + 10, y + 70, {
-          width: cardWidth - 20,
-          height: 34,
+        .text(fromBlock, margin + cardWidth + cardGap + cardPadding, y + 34, {
+          width: cardBodyWidth,
+          lineGap: 2,
         });
 
-      y += cardHeight + 16;
+      y += cardHeight + 20;
 
       const columns = {
         startX: margin,
         totalWidth: contentWidth,
         indexX: margin,
-        productX: margin + 34,
-        qtyX: margin + 334,
-        unitX: margin + 394,
-        amountX: margin + 484,
+        indexWidth: 36,
+        productX: margin + 36,
+        productWidth: 244,
+        qtyX: margin + 280,
+        qtyWidth: 56,
+        unitX: margin + 336,
+        unitWidth: 96,
+        amountX: margin + 432,
+        amountWidth: 95,
       };
 
       drawItemsTableHeader(doc, y, columns);
@@ -327,11 +410,12 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
           }];
 
       rows.forEach((item, index) => {
-        const rowHeight = 26;
+        const rowHeight = 30;
 
         if (y + rowHeight > pageHeight - 170) {
           doc.addPage();
-          y = margin;
+          drawPageBackground(doc, pageWidth, pageHeight, margin, logoPath);
+          y = margin + 10;
           drawItemsTableHeader(doc, y, columns);
           y += 24;
         }
@@ -363,35 +447,49 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
           .font('Helvetica')
           .fontSize(9)
           .fillColor(DARK_TEXT)
-          .text(item._placeholder ? '-' : String(index + 1), columns.indexX + 8, y + 8)
+          .text(item._placeholder ? '-' : String(index + 1), columns.indexX, y + 10, {
+            width: columns.indexWidth,
+            align: 'center',
+            lineBreak: false,
+          })
           .text(normalizeText(item.product_name || item.name, 'Product'), columns.productX + 8, y + 8, {
-            width: columns.qtyX - columns.productX - 12,
+            width: columns.productWidth - 16,
             ellipsis: true,
+            lineBreak: false,
           })
           .text(quantity, columns.qtyX, y + 8, {
-            width: columns.unitX - columns.qtyX,
+            width: columns.qtyWidth,
             align: 'center',
+            lineBreak: false,
           })
-          .text(item._placeholder ? '-' : formatMoney(unitPrice, currency), columns.unitX + 4, y + 8, {
-            width: columns.amountX - columns.unitX - 8,
+          .text(item._placeholder ? '-' : formatMoney(unitPrice, currency), columns.unitX + 8, y + 10, {
+            width: columns.unitWidth - 16,
             align: 'right',
+            lineBreak: false,
           })
-          .text(item._placeholder ? '-' : formatMoney(amount, currency), columns.amountX + 4, y + 8, {
-            width: columns.startX + columns.totalWidth - columns.amountX - 8,
+          .text(item._placeholder ? '-' : formatMoney(amount, currency), columns.amountX + 8, y + 10, {
+            width: columns.amountWidth - 16,
             align: 'right',
+            lineBreak: false,
           });
 
         y += rowHeight;
       });
 
       y += 16;
-      if (y + 120 > pageHeight - 100) {
+      const totalsBoxWidth = 244;
+      const totalsX = pageWidth - margin - totalsBoxWidth;
+      const totalValueX = totalsX + totalsBoxWidth - 14;
+      const totalLabelWidth = 112;
+      const totalValueWidth = 104;
+      const totalRowGap = 18;
+      const totalsBoxHeight = 128;
+
+      if (y + totalsBoxHeight > pageHeight - 110) {
         doc.addPage();
+        drawPageBackground(doc, pageWidth, pageHeight, margin, logoPath);
         y = margin + 20;
       }
-
-      const totalsX = pageWidth - margin - 230;
-      const totalValueX = pageWidth - margin;
 
       const subtotal = safeNumber(order.subtotal, 0);
       const tax = safeNumber(order.tax, 0);
@@ -399,21 +497,36 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
       const discount = safeNumber(order.discount_amount, 0);
       const grandTotal = safeNumber(order.total_amount, 0);
 
+      doc
+        .save()
+        .roundedRect(totalsX, y, totalsBoxWidth, totalsBoxHeight, 12)
+        .fill('#f8fafc')
+        .restore();
+      doc
+        .save()
+        .roundedRect(totalsX, y, totalsBoxWidth, totalsBoxHeight, 12)
+        .stroke(BORDER)
+        .restore();
+
+      y += 16;
+
       const drawTotalRow = (label, value, config = {}) => {
         doc
           .font(config.bold ? 'Helvetica-Bold' : 'Helvetica')
           .fontSize(config.size || 10)
           .fillColor(config.color || MUTED_TEXT)
-          .text(label, totalsX, y, {
-            width: 110,
+          .text(label, totalsX + 14, y, {
+            width: totalLabelWidth,
             align: 'left',
+            lineBreak: false,
           })
-          .text(value, totalValueX - 120, y, {
-            width: 120,
+          .text(value, totalValueX - totalValueWidth, y, {
+            width: totalValueWidth,
             align: 'right',
+            lineBreak: false,
           });
 
-        y += config.step || 16;
+        y += config.step || totalRowGap;
       };
 
       drawTotalRow('Subtotal', formatMoney(subtotal, currency), { color: MUTED_TEXT });
@@ -429,7 +542,7 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         { color: discount > 0 ? DISCOUNT_RED : MUTED_TEXT },
       );
 
-      doc.moveTo(totalsX, y - 6).lineTo(totalValueX, y - 6).stroke(BORDER);
+      doc.moveTo(totalsX + 14, y - 6).lineTo(totalValueX, y - 6).stroke(BORDER);
 
       drawTotalRow('Grand Total', formatMoney(grandTotal, currency), {
         bold: true,
@@ -456,7 +569,7 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
           width: contentWidth,
           align: 'center',
         })
-        .text(`${COMPANY.email} | ${COMPANY.phone}`, margin, footerY + 27, {
+        .text(`${company.email} | ${company.phone}`, margin, footerY + 27, {
           width: contentWidth,
           align: 'center',
         });

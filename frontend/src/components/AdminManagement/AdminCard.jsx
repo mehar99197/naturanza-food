@@ -1,12 +1,32 @@
 import { formatDistanceToNow } from "date-fns";
-import { Shield, ShieldCheck, Activity, Trash2, Key, RefreshCw } from "lucide-react";
-import { useState } from "react";
-import { adminAPI } from "@/services/api";
+import { Shield, ShieldCheck, Activity, Trash2, Key, RefreshCw, Upload, Settings2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { adminAPI, emitAuthSessionSync } from "@/services/api";
 import { toast } from "sonner";
+import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 
-export function AdminCard({ admin, currentUserId, currentUserRole, onUpdate, onViewActivity, onRemove, onChangePassword, onResetPassword }) {
+export function AdminCard({ admin, currentUserId, currentUserRole, onUpdate, onViewActivity, onRemove, onChangePassword, onResetPassword, onEditPermissions }) {
   const [loading, setLoading] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef(null);
   const isCurrentUser = admin.id === currentUserId;
+  const canEditImage = isCurrentUser || currentUserRole === "super_admin";
+
+  const resolveProfileImage = (value) => {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return null;
+
+    const lowered = trimmed.toLowerCase();
+    if (lowered === "null" || lowered === "undefined" || lowered === "none") {
+      return null;
+    }
+
+    return getAbsoluteImageUrl(trimmed);
+  };
+
+  const profileImageUrl = resolveProfileImage(admin.profile_image);
+  const shouldShowImage = Boolean(profileImageUrl) && !imageError;
 
   const getInitials = (name) => {
     return name
@@ -36,16 +56,49 @@ export function AdminCard({ admin, currentUserId, currentUserRole, onUpdate, onV
     }
   };
 
+  useEffect(() => {
+    setImageError(false);
+  }, [profileImageUrl]);
+
+  const handleProfileImageChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image size should be less than 5MB");
+      event.target.value = "";
+      return;
+    }
+
+    setUploadingImage(true);
+    try {
+      await adminAPI.updateAdminProfileImage(admin.id, file);
+      toast.success("Profile image updated successfully");
+      onUpdate();
+      if (isCurrentUser) {
+        emitAuthSessionSync("admin-profile-image");
+      }
+    } catch (error) {
+      toast.error(error?.response?.data?.error || "Failed to update profile image");
+    } finally {
+      setUploadingImage(false);
+      event.target.value = "";
+    }
+  };
+
   return (
     <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all hover:shadow-md hover:border-emerald-100 sm:p-5">
       {/* Mobile Layout - Centered */}
       <div className="flex flex-col items-center text-center sm:flex-row sm:items-start sm:text-left">
         {/* Profile Picture */}
         <div className="flex-shrink-0 mb-3 sm:mb-0 sm:mr-4">
-          {admin.profile_image ? (
+          {shouldShowImage ? (
             <img
-              src={admin.profile_image}
+              src={profileImageUrl}
               alt={admin.name}
+              onError={() => setImageError(true)}
               className="h-16 w-16 sm:h-14 sm:w-14 rounded-full border-2 border-emerald-100 object-cover shadow-sm"
             />
           ) : (
@@ -128,6 +181,28 @@ export function AdminCard({ admin, currentUserId, currentUserRole, onUpdate, onV
               {admin.is_active ? "Deactivate" : "Activate"}
             </button>
 
+            {canEditImage && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleProfileImageChange}
+                  className="hidden"
+                  disabled={uploadingImage}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingImage}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-700 transition-all duration-200 hover:bg-emerald-100 hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  {uploadingImage ? "Uploading..." : "Change Photo"}
+                </button>
+              </>
+            )}
+
             <button
               onClick={() => onViewActivity(admin)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-3.5 py-2 text-xs font-semibold text-purple-700 transition-all duration-200 hover:bg-purple-100 hover:border-purple-300"
@@ -153,6 +228,16 @@ export function AdminCard({ admin, currentUserId, currentUserRole, onUpdate, onV
               >
                 <RefreshCw className="h-3.5 w-3.5" />
                 <span className="hidden xs:inline">Reset</span> Password
+              </button>
+            )}
+
+            {!isCurrentUser && currentUserRole === 'super_admin' && onEditPermissions && (
+              <button
+                onClick={() => onEditPermissions(admin)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-700 transition-all duration-200 hover:bg-emerald-100 hover:border-emerald-300"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                <span className="hidden xs:inline">Edit</span> Permissions
               </button>
             )}
 

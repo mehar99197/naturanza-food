@@ -14,6 +14,9 @@ import {
 } from 'lucide-react';
 import { AdminLayout } from '@/components/AdminLayout';
 import { categoryAPI } from '@/services/api';
+import { useSWRCache, invalidateSWRKey } from '@/hooks/useSWRCache';
+
+const CATEGORIES_CACHE_KEY = 'admin:categories';
 
 const CATEGORY_TYPE_OPTIONS = [
   {
@@ -134,24 +137,40 @@ export default function AdminCategories() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  const fetchCategories = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      setActionMessage('');
-      const data = await categoryAPI.getAll({ include_inactive: true });
-      const list = parseApiList(data);
-      setCategories(list);
-    } catch (requestError) {
-      setError(requestError?.response?.data?.error || requestError.message || 'Failed to fetch categories');
-    } finally {
-      setLoading(false);
+  // SWR caches the categories list so re-visits to this section show
+  // instantly while a background refresh keeps the data fresh.
+  const {
+    data: cachedCategoriesData,
+    loading: swrLoading,
+    revalidating,
+    error: swrError,
+    refresh: swrRefresh,
+  } = useSWRCache(CATEGORIES_CACHE_KEY, () =>
+    categoryAPI.getAll({ include_inactive: true }),
+  );
+
+  // Sync SWR state into the existing local state so the rest of the page
+  // (filters, edit drafts, mutations) keeps working unchanged.
+  useEffect(() => {
+    if (cachedCategoriesData !== null && cachedCategoriesData !== undefined) {
+      setCategories(parseApiList(cachedCategoriesData));
     }
-  }, []);
+  }, [cachedCategoriesData]);
 
   useEffect(() => {
-    fetchCategories();
-  }, [fetchCategories]);
+    setLoading(swrLoading);
+  }, [swrLoading]);
+
+  useEffect(() => {
+    if (!swrError) return;
+    setError(swrError?.response?.data?.error || swrError.message || 'Failed to fetch categories');
+  }, [swrError]);
+
+  const fetchCategories = useCallback(async () => {
+    setActionMessage('');
+    invalidateSWRKey(CATEGORIES_CACHE_KEY);
+    await swrRefresh();
+  }, [swrRefresh]);
 
   const notifyCategoriesUpdated = useCallback(() => {
     window.dispatchEvent(new Event('categories:updated'));

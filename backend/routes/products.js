@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const { restrictBody } = require("../middleware/security");
 const asyncHandler = require("../middleware/asyncHandler");
 const productController = require("../controllers/productController");
 const { uploadProductImage } = require("../middleware/upload");
@@ -13,6 +14,7 @@ router.post(
   "/",
   authenticateToken,
   isAdmin,
+  restrictBody('name', 'slug', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'is_organic', 'ingredients', 'benefits', 'usage'),
   asyncHandler(productController.createProduct),
 );
 
@@ -20,6 +22,7 @@ router.put(
   "/:id",
   authenticateToken,
   isAdmin,
+  restrictBody('name', 'slug', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'is_organic', 'ingredients', 'benefits', 'usage'),
   asyncHandler(productController.updateProduct),
 );
 
@@ -34,6 +37,7 @@ router.patch(
   "/:id/stock",
   authenticateToken,
   isAdmin,
+  restrictBody('stock_quantity'),
   asyncHandler(productController.updateStock),
 );
 
@@ -55,7 +59,6 @@ router.post(
         filename: req.file.compressedFilename
       });
     } catch (error) {
-      console.error('Upload endpoint error:', error);
       return res.status(500).json({ 
         error: "Failed to process upload",
         details: error.message 

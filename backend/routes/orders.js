@@ -1,11 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
 const { createInvoicePdfBuffer } = require('../utils/invoicePdf');
 const { getAdminSettings } = require('../utils/adminSettings');
 const { insertAdminNotifications, getAdminRecipients } = require('../utils/adminNotifications');
 const { sendEmail } = require('../utils/emailService');
+const { reserveStockOnConnection } = require('../utils/stockReservations');
 
 const ALLOWED_ORDER_STATUSES = new Set([
   'pending',
@@ -18,6 +20,7 @@ const ALLOWED_ORDER_STATUSES = new Set([
 
 const ALLOWED_PAYMENT_STATUSES = new Set([
   'pending',
+  'partial',
   'paid',
   'failed',
 ]);
@@ -187,6 +190,192 @@ const sendAdminAlertEmails = async ({
 
     await sendEmail({ to, subject, html });
   }
+};
+
+const sendCustomerOrderConfirmation = async ({
+  order,
+  orderId,
+  customerEmail,
+  customerName,
+  totalAmount,
+  items,
+}) => {
+  if (!customerEmail) return;
+
+  const orderNumber = formatOrderNumber(orderId);
+  const orderDateRaw = order?.order_date || order?.created_at;
+  const orderDate = orderDateRaw
+    ? new Date(orderDateRaw).toLocaleString("en-PK")
+    : "-";
+  const paymentMethod = normalizePaymentMethod(order?.payment_method);
+  const paymentMethodLabel =
+    paymentMethod === "easypaisa"
+      ? "EasyPaisa"
+      : paymentMethod === "jazzcash"
+        ? "JazzCash"
+        : paymentMethod === "card"
+          ? "Card"
+          : paymentMethod === "online"
+            ? "Online"
+            : "Cash on Delivery";
+  const paymentStatusRaw = String(order?.payment_status || "pending").trim().toLowerCase();
+  const paymentStatusLabel =
+    paymentStatusRaw.charAt(0).toUpperCase() + paymentStatusRaw.slice(1);
+  const orderSubtotal = safeNumber(order?.subtotal, 0);
+  const orderDiscount = safeNumber(order?.discount_amount, 0);
+  const orderTax = safeNumber(order?.tax, 0);
+  const orderShipping = safeNumber(order?.shipping_cost, 0);
+  const orderTotal = safeNumber(order?.total_amount, safeNumber(totalAmount, 0));
+  const codRemaining = Math.max(0, orderSubtotal - orderDiscount + orderTax);
+  const orderCoupon = order?.coupon_code ? String(order.coupon_code) : null;
+  const orderNotes = order?.notes ? String(order.notes) : null;
+  const shippingAddress = order?.shipping_address
+    ? String(order.shipping_address)
+    : "-";
+  const shippingCity = order?.city ? String(order.city) : "-";
+  const phoneNumber = order?.phone ? String(order.phone) : "-";
+  const couponRow = orderCoupon
+    ? `<tr>
+          <td style="padding:8px 0;color:#64748b;font-size:13px;">Coupon Code</td>
+          <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">${orderCoupon}</td>
+        </tr>`
+    : "";
+  const notesRow = orderNotes
+    ? `<tr>
+          <td style="padding:8px 0;color:#64748b;font-size:13px;">Order Notes</td>
+          <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">${orderNotes}</td>
+        </tr>`
+    : "";
+  const codRows =
+    paymentMethod === "cod"
+      ? `<tr>
+            <td style="padding:8px 0;color:#64748b;font-size:13px;">Advance Paid (Delivery Fee)</td>
+            <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">PKR ${orderShipping.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#64748b;font-size:13px;">Remaining COD Balance</td>
+            <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">PKR ${codRemaining.toFixed(2)}</td>
+          </tr>`
+      : "";
+  const itemsHtml = (items || [])
+    .map(
+      (item, i) =>
+        `<tr>
+          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:center;">${i + 1}</td>
+          <td style="padding:8px;border-bottom:1px solid #e2e8f0;">${item.name || item.product_name}</td>
+          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:center;">${safeNumber(item.quantity, 0)}</td>
+          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;">PKR ${safeNumber(item.final_price || item.price, 0).toFixed(2)}</td>
+          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;">PKR ${(safeNumber(item.final_price || item.price, 0) * safeNumber(item.quantity, 0)).toFixed(2)}</td>
+        </tr>`,
+    )
+    .join("");
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background-color:#f0fdf4;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color:#f0fdf4;">
+    <tr>
+      <td align="center" style="padding:40px 20px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background-color:#ffffff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,0.08);overflow:hidden;">
+          <tr>
+            <td style="background:linear-gradient(135deg,#16a34a 0%,#059669 100%);padding:32px 40px;text-align:center;">
+              <h1 style="margin:0;color:#ffffff;font-size:24px;">Order Confirmed! 🎉</h1>
+              <p style="margin:8px 0 0;color:rgba(255,255,255,0.9);font-size:14px;">${orderNumber}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:40px;">
+              <p style="margin:0 0 24px;color:#475569;font-size:16px;line-height:1.6;">Hi <strong>${customerName || "Valued Customer"}</strong>,</p>
+              <p style="margin:0 0 24px;color:#475569;font-size:16px;line-height:1.6;">Thank you for your order! We're getting it ready for you.</p>
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin-bottom:24px;">
+                <tbody>
+                  <tr>
+                    <td style="padding:8px 0;color:#64748b;font-size:13px;">Order Date</td>
+                    <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">${orderDate}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:8px 0;color:#64748b;font-size:13px;">Payment Method</td>
+                    <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">${paymentMethodLabel}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:8px 0;color:#64748b;font-size:13px;">Payment Status</td>
+                    <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">${paymentStatusLabel}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:8px 0;color:#64748b;font-size:13px;">Phone</td>
+                    <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">${phoneNumber}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:8px 0;color:#64748b;font-size:13px;">Shipping Address</td>
+                    <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">${shippingAddress}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:8px 0;color:#64748b;font-size:13px;">City</td>
+                    <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">${shippingCity}</td>
+                  </tr>
+                  ${couponRow}
+                  ${notesRow}
+                </tbody>
+              </table>
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
+                <thead>
+                  <tr style="background-color:#f0fdf4;">
+                    <th style="padding:10px 8px;text-align:center;color:#166534;font-size:13px;">#</th>
+                    <th style="padding:10px 8px;text-align:left;color:#166534;font-size:13px;">Item</th>
+                    <th style="padding:10px 8px;text-align:center;color:#166534;font-size:13px;">Qty</th>
+                    <th style="padding:10px 8px;text-align:right;color:#166534;font-size:13px;">Unit Price</th>
+                    <th style="padding:10px 8px;text-align:right;color:#166534;font-size:13px;">Line Total</th>
+                  </tr>
+                </thead>
+                <tbody>${itemsHtml}</tbody>
+              </table>
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin-top:20px;">
+                <tbody>
+                  <tr>
+                    <td style="padding:6px 0;color:#64748b;font-size:13px;">Subtotal</td>
+                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">PKR ${orderSubtotal.toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 0;color:#64748b;font-size:13px;">Discount</td>
+                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">- PKR ${orderDiscount.toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 0;color:#64748b;font-size:13px;">Tax</td>
+                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">PKR ${orderTax.toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 0;color:#64748b;font-size:13px;">Shipping</td>
+                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">PKR ${orderShipping.toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:8px 0;font-size:16px;font-weight:bold;color:#0f172a;">Total</td>
+                    <td style="padding:8px 0;font-size:16px;font-weight:bold;color:#16a34a;text-align:right;">PKR ${orderTotal.toFixed(2)}</td>
+                  </tr>
+                  ${codRows}
+                </tbody>
+              </table>
+              <p style="margin:24px 0 0;color:#64748b;font-size:14px;line-height:1.6;">You can track your order status in your account dashboard.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f8fafc;padding:24px 40px;border-top:1px solid #e2e8f0;">
+              <p style="margin:0;color:#94a3b8;font-size:12px;text-align:center;">&copy; ${new Date().getFullYear()} Naturanza Food. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  await sendEmail({
+    to: customerEmail,
+    subject: `Order Confirmed - ${orderNumber}`,
+    html,
+  });
 };
 
 const insertOrderStatusHistory = async (
@@ -433,7 +622,7 @@ const getOrderWithAuthorization = async (connection, orderId, user) => {
 };
 
 // Create order from cart
-router.post('/create', authenticateToken, async (req, res) => {
+router.post('/create', authenticateToken, restrictBody('shipping_address', 'phone', 'discount_amount', 'tax', 'shipping_cost', 'payment_method', 'payment_status', 'customer_name', 'customer_email', 'city', 'coupon_code', 'notes', 'address_id', 'estimated_delivery', 'payment_details'), async (req, res) => {
   const shippingAddress = String(req.body?.shipping_address || '').trim();
   const phone = String(req.body?.phone || '').trim();
 
@@ -510,9 +699,6 @@ router.post('/create', authenticateToken, async (req, res) => {
       ? String(req.body.customer_email).trim().toLowerCase()
       : null;
     const city = req.body?.city ? String(req.body.city).trim() : null;
-    const postalCode = req.body?.postal_code
-      ? String(req.body.postal_code).trim()
-      : null;
     const couponCode = req.body?.coupon_code
       ? String(req.body.coupon_code).trim().toUpperCase()
       : null;
@@ -532,9 +718,9 @@ router.post('/create', authenticateToken, async (req, res) => {
     const [orderInsertResult] = await connection.query(
       `INSERT INTO orders
        (user_id, address_id, customer_name, customer_email, total_amount, subtotal, discount_amount, tax, shipping_cost,
-        coupon_code, status, payment_method, payment_status, payment_details, shipping_address, city, postal_code, phone,
+        coupon_code, status, payment_method, payment_status, payment_details, shipping_address, city, phone,
         estimated_delivery, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         req.user.id,
         addressId,
@@ -551,7 +737,6 @@ router.post('/create', authenticateToken, async (req, res) => {
         paymentDetailsPayload ? JSON.stringify(paymentDetailsPayload) : null,
         shippingAddress,
         city,
-        postalCode,
         phone,
         estimatedDelivery,
         notes,
@@ -573,39 +758,72 @@ router.post('/create', authenticateToken, async (req, res) => {
       [orderItemsValues],
     );
 
-    for (const item of cartItems) {
-      const previousStock = safeNumber(item.stock_quantity, 0);
-      const quantity = safeNumber(item.quantity, 0);
-      const newStock = previousStock - quantity;
+    // Stock policy:
+    //   - paymentStatus === 'paid'    : prepaid (card/online). Hard-deduct now, customer is committed.
+    //   - paymentStatus === 'pending' : awaiting manual verification (COD advance / wallet screenshot).
+    //                                   Reserve only. Admin approval will deduct; reject/timeout releases.
+    // This prevents overselling during the verification queue without locking stock forever
+    // on abandoned cart-uploads.
+    const shouldReserveOnly = paymentStatus === 'pending';
 
-      if (
-        adminSettings.lowStockAlerts &&
-        previousStock >= lowStockThreshold &&
-        newStock < lowStockThreshold
-      ) {
-        lowStockEvents.push({
-          product_id: item.product_id,
-          product_name: item.name,
-          stock_quantity: newStock,
-          threshold: lowStockThreshold,
-        });
+    if (shouldReserveOnly) {
+      const reservationItems = cartItems.map((item) => ({
+        product_id: item.product_id,
+        quantity: safeNumber(item.quantity, 0),
+      }));
+      try {
+        await reserveStockOnConnection(connection, orderId, reservationItems);
+      } catch (reserveErr) {
+        await connection.rollback();
+        if (reserveErr.code === 'INSUFFICIENT_STOCK') {
+          return res.status(409).json({
+            error: `Insufficient stock for product ${reserveErr.productId}`,
+            productId: reserveErr.productId,
+            available: reserveErr.available,
+            requested: reserveErr.requested,
+          });
+        }
+        throw reserveErr;
       }
 
-      await connection.query('UPDATE products SET stock_quantity = ? WHERE id = ?', [
-        newStock,
-        item.product_id,
-      ]);
+      // No inventory_movements row here on purpose — stock_quantity isn't moving yet,
+      // and the stock_reservations row is the authoritative audit trail until admin
+      // approval converts it to a real movement.
+    } else {
+      for (const item of cartItems) {
+        const previousStock = safeNumber(item.stock_quantity, 0);
+        const quantity = safeNumber(item.quantity, 0);
+        const newStock = previousStock - quantity;
 
-      await insertInventoryMovement(connection, {
-        productId: item.product_id,
-        orderId,
-        movementType: 'sale',
-        quantityChange: -Math.abs(quantity),
-        previousStock,
-        newStock,
-        note: `Stock reduced due to order #${orderId}`,
-        createdByUserId: req.user.id,
-      });
+        if (
+          adminSettings.lowStockAlerts &&
+          previousStock >= lowStockThreshold &&
+          newStock < lowStockThreshold
+        ) {
+          lowStockEvents.push({
+            product_id: item.product_id,
+            product_name: item.name,
+            stock_quantity: newStock,
+            threshold: lowStockThreshold,
+          });
+        }
+
+        await connection.query('UPDATE products SET stock_quantity = ? WHERE id = ?', [
+          newStock,
+          item.product_id,
+        ]);
+
+        await insertInventoryMovement(connection, {
+          productId: item.product_id,
+          orderId,
+          movementType: 'sale',
+          quantityChange: -Math.abs(quantity),
+          previousStock,
+          newStock,
+          note: `Stock reduced due to order #${orderId}`,
+          createdByUserId: req.user.id,
+        });
+      }
     }
 
     await insertOrderStatusHistory(connection, {
@@ -700,6 +918,20 @@ router.post('/create', authenticateToken, async (req, res) => {
       });
     }
 
+    const custEmail = order?.customer_email || customerEmail;
+    if (custEmail) {
+      setImmediate(() => {
+        sendCustomerOrderConfirmation({
+          order,
+          orderId,
+          customerEmail: custEmail,
+          customerName: order?.customer_name || customerName,
+          totalAmount,
+          items: cartItems,
+        }).catch((err) => console.error("Failed to send customer confirmation email:", err));
+      });
+    }
+
     res.status(201).json({
       message: 'Order created successfully',
       orderId,
@@ -708,7 +940,13 @@ router.post('/create', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
-    console.error('Order creation error:', error);
+    console.error('[orders] create order failed:', {
+      userId: req.user?.id,
+      code: error?.code,
+      errno: error?.errno,
+      sqlMessage: error?.sqlMessage,
+      message: error?.message,
+    });
     res.status(500).json({ error: 'Error creating order' });
   } finally {
     connection.release();
@@ -791,7 +1029,16 @@ router.get('/:id/invoice', authenticateToken, async (req, res) => {
     }
 
     const [order] = await hydrateOrders(db.promise(), orders);
-    const pdfBuffer = await createInvoicePdfBuffer(order, { currency: 'PKR' });
+    const adminSettings = await getAdminSettings(db.promise());
+    const companyOverrides = {
+      ...(adminSettings.storeName ? { legalName: adminSettings.storeName } : {}),
+      ...(adminSettings.storeEmail ? { email: adminSettings.storeEmail } : {}),
+      ...(adminSettings.storePhone ? { phone: adminSettings.storePhone } : {}),
+    };
+    const pdfBuffer = await createInvoicePdfBuffer(order, {
+      currency: adminSettings.currency || 'PKR',
+      company: companyOverrides,
+    });
     const orderNumber = `ORD-${String(order.id).padStart(6, '0')}`;
     const fileName = `invoice-${orderNumber}.pdf`;
 
@@ -807,7 +1054,6 @@ router.get('/:id/invoice', authenticateToken, async (req, res) => {
 
     return res.end(pdfBuffer);
   } catch (error) {
-    console.error('Invoice PDF generation error:', error);
 
     if (res.headersSent) {
       return;
@@ -899,7 +1145,7 @@ router.get('/:id/shipment', authenticateToken, async (req, res) => {
 });
 
 // Cancel order
-router.put('/:id/cancel', authenticateToken, async (req, res) => {
+router.put('/:id/cancel', authenticateToken, restrictBody(), async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId)) {
     return res.status(400).json({ error: 'Invalid order id' });
@@ -1002,7 +1248,7 @@ router.put('/:id/cancel', authenticateToken, async (req, res) => {
 });
 
 // Update shipment details (Admin only)
-router.put('/:id/shipment', authenticateToken, isAdmin, async (req, res) => {
+router.put('/:id/shipment', authenticateToken, isAdmin, restrictBody('courier_name', 'tracking_number', 'shipment_status', 'estimated_delivery', 'metadata'), async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId)) {
     return res.status(400).json({ error: 'Invalid order id' });
@@ -1075,7 +1321,7 @@ router.put('/:id/shipment', authenticateToken, isAdmin, async (req, res) => {
 });
 
 // Update order status (Admin only)
-router.put('/:id/status', authenticateToken, isAdmin, async (req, res) => {
+router.put('/:id/status', authenticateToken, isAdmin, restrictBody('status', 'payment_status', 'note', 'courier_name', 'tracking_number', 'estimated_delivery'), async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId)) {
     return res.status(400).json({ error: 'Invalid order id' });
@@ -1187,6 +1433,42 @@ router.put('/:id/status', authenticateToken, isAdmin, async (req, res) => {
         trackingNumber,
         estimatedDelivery,
       });
+    }
+
+    // COD two-stage: when admin marks a COD order as 'delivered' for the
+    // first time, refuse if stage-1 advance shipping payment isn't approved
+    // (payment_status would still be 'pending'). Otherwise auto-insert the
+    // pending stage-2 verification so admin can confirm cash collection.
+    const isCodOrder = String(order.payment_method || '').toLowerCase() === 'cod';
+    const becameDelivered = nextStatusRaw === 'delivered' && order.status !== 'delivered';
+
+    if (isCodOrder && becameDelivered) {
+      if (currentPaymentStatus !== 'partial') {
+        await connection.rollback();
+        return res.status(409).json({
+          error: 'Cannot mark COD order delivered: advance shipping payment must be approved first.',
+          code: 'STAGE_ONE_NOT_APPROVED',
+        });
+      }
+
+      const totalAmount = Number(order.total_amount) || 0;
+      const shippingCost = Number(order.shipping_cost) || 0;
+      const stage2Amount = Math.max(0, totalAmount - shippingCost);
+
+      // INSERT IGNORE + UNIQUE(order_id, verification_stage) keeps this idempotent
+      // when admin clicks "Mark delivered" twice or two admins race.
+      await connection.query(
+        `INSERT IGNORE INTO advance_payment_verifications
+           (order_id, customer_name, customer_phone, amount, payment_method,
+            verification_stage, status)
+         VALUES (?, ?, ?, ?, 'cod', 'final_collection', 'pending')`,
+        [
+          String(orderId),
+          order.customer_name || 'Customer',
+          order.phone || null,
+          stage2Amount,
+        ],
+      );
     }
 
     if (nextPaymentStatus !== currentPaymentStatus) {

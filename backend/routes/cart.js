@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth');
+const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
 
 // Get user's cart
@@ -29,13 +30,14 @@ router.get('/', authenticateToken, (req, res) => {
 });
 
 // Add item to cart
-router.post('/add', authenticateToken, (req, res) => {
+router.post('/add', authenticateToken, restrictBody('product_id', 'quantity'), (req, res) => {
     const { product_id, quantity } = req.body;
-    
-    if (!product_id || !quantity) {
-        return res.status(400).json({ error: 'Product ID and quantity are required' });
+
+    const parsedQuantity = parseInt(quantity, 10);
+    if (!product_id || !quantity || !Number.isInteger(parsedQuantity) || parsedQuantity < 1) {
+        return res.status(400).json({ error: 'Product ID and a valid quantity (integer >= 1) are required' });
     }
-    
+
     // Check if product exists and has enough stock
     db.query('SELECT stock_quantity FROM products WHERE id = ?', [product_id], (err, results) => {
         if (err) {
@@ -46,21 +48,21 @@ router.post('/add', authenticateToken, (req, res) => {
             return res.status(404).json({ error: 'Product not found' });
         }
         
-        if (results[0].stock_quantity < quantity) {
+        if (results[0].stock_quantity < parsedQuantity) {
             return res.status(400).json({ error: 'Insufficient stock' });
         }
-        
+
         // Check if item already in cart
-        db.query('SELECT * FROM cart WHERE user_id = ? AND product_id = ?', 
-            [req.user.id, product_id], 
+        db.query('SELECT * FROM cart WHERE user_id = ? AND product_id = ?',
+            [req.user.id, product_id],
             (err, cartResults) => {
                 if (err) {
                     return res.status(500).json({ error: 'Database error' });
                 }
-                
+
                 if (cartResults.length > 0) {
                     // Update quantity
-                    const newQuantity = cartResults[0].quantity + quantity;
+                    const newQuantity = cartResults[0].quantity + parsedQuantity;
                     db.query('UPDATE cart SET quantity = ? WHERE user_id = ? AND product_id = ?',
                         [newQuantity, req.user.id, product_id],
                         (err, result) => {
@@ -73,7 +75,7 @@ router.post('/add', authenticateToken, (req, res) => {
                 } else {
                     // Insert new item
                     db.query('INSERT INTO cart (user_id, product_id, quantity) VALUES (?, ?, ?)',
-                        [req.user.id, product_id, quantity],
+                        [req.user.id, product_id, parsedQuantity],
                         (err, result) => {
                             if (err) {
                                 return res.status(500).json({ error: 'Error adding to cart' });
@@ -88,11 +90,12 @@ router.post('/add', authenticateToken, (req, res) => {
 });
 
 // Update cart item quantity
-router.put('/update/:product_id', authenticateToken, (req, res) => {
+router.put('/update/:product_id', authenticateToken, restrictBody('quantity'), (req, res) => {
     const { quantity } = req.body;
-    
-    if (!quantity || quantity < 1) {
-        return res.status(400).json({ error: 'Valid quantity is required' });
+
+    const parsedQuantity = parseInt(quantity, 10);
+    if (!Number.isInteger(parsedQuantity) || parsedQuantity < 1) {
+        return res.status(400).json({ error: 'Valid quantity (integer >= 1) is required' });
     }
     
     // Check stock availability
@@ -105,12 +108,12 @@ router.put('/update/:product_id', authenticateToken, (req, res) => {
             return res.status(404).json({ error: 'Product not found' });
         }
         
-        if (results[0].stock_quantity < quantity) {
+        if (results[0].stock_quantity < parsedQuantity) {
             return res.status(400).json({ error: 'Insufficient stock' });
         }
-        
+
         db.query('UPDATE cart SET quantity = ? WHERE user_id = ? AND product_id = ?',
-            [quantity, req.user.id, req.params.product_id],
+            [parsedQuantity, req.user.id, req.params.product_id],
             (err, result) => {
                 if (err) {
                     return res.status(500).json({ error: 'Error updating cart' });

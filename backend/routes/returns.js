@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { restrictBody } = require('../middleware/security');
 
 const ALLOWED_RETURN_STATUSES = new Set([
   'requested',
@@ -16,7 +17,7 @@ const safeNumber = (value, fallback = 0) => {
 };
 
 // Create return request (customer)
-router.post('/request', authenticateToken, async (req, res) => {
+router.post('/request', authenticateToken, restrictBody('order_id', 'reason', 'details', 'requested_amount'), async (req, res) => {
   const orderId = Number(req.body?.order_id);
   const reason = String(req.body?.reason || '').trim();
   const details = req.body?.details ? String(req.body.details).trim() : null;

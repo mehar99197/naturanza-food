@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { userAPI } from "@/services/api";
+import { NoIndexSEO } from "@/components/SEO";
 
 const menuItems = [
   {
@@ -238,16 +239,21 @@ export default function ProfileLayout() {
 
   if (loading) {
     return (
+      <>
+        <NoIndexSEO title="My Profile" />
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pt-24 pb-16 px-4 flex items-center justify-center">
         <div className="flex items-center gap-2 text-green-700 font-medium">
           <Loader2 className="h-5 w-5 animate-spin" />
           Loading profile...
         </div>
       </div>
+      </>
     );
   }
 
   return (
+    <>
+      <NoIndexSEO title="My Profile" />
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pt-16 sm:pt-24 md:pt-28 pb-8 sm:pb-16 px-4 sm:px-6 lg:h-screen lg:overflow-hidden lg:px-8 lg:pb-8">
       <div className="max-w-6xl mx-auto lg:flex lg:h-full lg:flex-col">
         {showSuccessToast && (
@@ -423,5 +429,6 @@ export default function ProfileLayout() {
         </div>
       </div>
     </div>
+    </>
   );
 }

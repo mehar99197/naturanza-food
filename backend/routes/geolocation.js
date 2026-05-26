@@ -5,7 +5,17 @@ const router = express.Router();
 const CURRENCY_MAP = {
   'US': 'USD',
   'GB': 'GBP',
-  'EU': 'EUR',
+  'DE': 'EUR',
+  'FR': 'EUR',
+  'IT': 'EUR',
+  'ES': 'EUR',
+  'NL': 'EUR',
+  'BE': 'EUR',
+  'AT': 'EUR',
+  'IE': 'EUR',
+  'FI': 'EUR',
+  'PT': 'EUR',
+  'GR': 'EUR',
   'PK': 'PKR',
   'IN': 'INR',
   'AE': 'AED',
@@ -18,13 +28,17 @@ const CURRENCY_MAP = {
   'MY': 'MYR',
   'SG': 'SGD',
   'TH': 'THB',
+  'KR': 'KRW',
+  'TR': 'TRY',
+  'RU': 'RUB',
 };
 
 // Get currency based on user's IP location
 router.get('/currency', async (req, res) => {
   try {
-    // Get user's IP from request
-    let userIP = req.headers['x-forwarded-for'] || 
+    // Use client-provided IP (from frontend ipify detection) first, fall back to request headers
+    let userIP = String(req.query.ip || '').trim() ||
+                 req.headers['x-forwarded-for'] || 
                  req.headers['x-real-ip'] || 
                  req.socket.remoteAddress || 
                  req.connection.remoteAddress;
@@ -49,14 +63,29 @@ router.get('/currency', async (req, res) => {
       });
     }
 
-    // Call IP geolocation service (using ipapi.co - free tier: 1000 requests/day)
-    const response = await fetch(`https://ipapi.co/${userIP}/json/`);
-    
-    if (!response.ok) {
-      throw new Error('Geolocation service unavailable');
-    }
+    // Call IP geolocation service (ip-api.com - free, no key, 45 req/min)
+    const controller = new AbortController();
+    const geoTimeout = setTimeout(() => controller.abort(), 4000);
+    let data;
 
-    const data = await response.json();
+    try {
+      const response = await fetch(`http://ip-api.com/json/${userIP}?fields=status,country,countryCode`, {
+        signal: controller.signal,
+      });
+      const body = await response.json();
+      if (body.status === 'success') {
+        data = { country_code: body.countryCode, country_name: body.country };
+      } else {
+        throw new Error('ip-api lookup failed');
+      }
+    } catch {
+      // Fall back to ipapi.co
+      const fallbackRes = await fetch(`https://ipapi.co/${userIP}/json/`, { signal: AbortSignal.timeout(4000) });
+      if (!fallbackRes.ok) throw new Error('Geolocation service unavailable');
+      data = await fallbackRes.json();
+    } finally {
+      clearTimeout(geoTimeout);
+    }
     
     // Map country to currency
     const currency = CURRENCY_MAP[data.country_code] || data.currency || 'PKR';
@@ -70,7 +99,6 @@ router.get('/currency', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Geolocation error:', error);
     // Return default currency on error
     res.json({
       country_code: 'PK',

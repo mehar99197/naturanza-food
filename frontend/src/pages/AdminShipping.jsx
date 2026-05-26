@@ -9,7 +9,6 @@ import {
   Truck,
 } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { AdminPageSkeleton } from "@/components/Skeletons/AdminPageSkeleton";
 import { useOrders } from "@/context/OrderContext";
 import { orderAPI } from "@/services/api";
 
@@ -213,14 +212,6 @@ export function AdminShipping() {
   useEffect(() => {
     setShowAllMobileRows(false);
   }, [searchQuery, statusFilter]);
-
-  if (loading) {
-    return (
-      <AdminLayout>
-        <AdminPageSkeleton cards={4} rows={8} showSidebar />
-      </AdminLayout>
-    );
-  }
 
   return (
     <AdminLayout>

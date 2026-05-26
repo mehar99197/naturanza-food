@@ -1,7 +1,13 @@
 import { Lock, Eye, Database } from 'lucide-react';
 import { BUSINESS_INFO } from '@/config/legal';
+import { PrivacySEO } from '@/components/SEO';
+import { useSettings } from '@/context/SettingsContext';
 
 export function Privacy() {
+ const { settings } = useSettings();
+ const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
+ const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
+ const privacyEmail = settings.storeEmail || BUSINESS_INFO.contacts.privacyEmail;
  const sections = [
  {
  title: 'Information We Collect',
@@ -30,8 +36,10 @@ export function Privacy() {
  },
  ];
 
- return (
- <main className="pt-24 pb-16 min-h-screen bg-[#faf8f3]">
+return (
+    <>
+      <PrivacySEO />
+    <main className="pt-24 pb-16 min-h-screen bg-[#faf8f3]">
  <div className="container-custom">
  <header className="text-center mb-10">
  <span className="inline-flex items-center gap-2 text-[#3d7a3d] font-semibold text-xs uppercase tracking-wider">
@@ -58,19 +66,20 @@ export function Privacy() {
  <div className="flex items-start gap-3">
  <Eye className="w-5 h-5 text-[#3d7a3d] mt-0.5" />
  <p className="text-sm text-[#4f5f4f] leading-relaxed">
- We never sell your personal data. For privacy requests, email {BUSINESS_INFO.contacts.privacyEmail}.
+ We never sell your personal data. For privacy requests, email {privacyEmail}.
  </p>
  </div>
  <div className="flex items-start gap-3 mt-3">
  <Database className="w-5 h-5 text-[#3d7a3d] mt-0.5" />
  <p className="text-sm text-[#4f5f4f] leading-relaxed">
- Local storage may be used for cart, wishlist, and personalization to improve site performance. For account-related concerns, contact {BUSINESS_INFO.contacts.supportEmail} or {BUSINESS_INFO.contacts.phone}. Office: {BUSINESS_INFO.officeAddress}.
+ Local storage may be used for cart, wishlist, and personalization to improve site performance. For account-related concerns, contact {supportEmail} or {supportPhone}. Office: {BUSINESS_INFO.officeAddress}.
  </p>
  </div>
  </section>
- </div>
- </main>
- );
+</div>
+  </main>
+  </>
+  );
 }
 
 export default Privacy;

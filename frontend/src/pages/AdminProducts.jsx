@@ -9,6 +9,7 @@ import {
   Package,
   Pencil,
   Plus,
+  QrCode,
   RefreshCw,
   Search,
   Trash2,
@@ -17,12 +18,12 @@ import {
   XCircle,
 } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { AdminPageSkeleton } from "@/components/Skeletons/AdminPageSkeleton";
 import { useProducts } from "@/context/ProductContext";
 import { useAdminData } from "@/context/AdminDataContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
 import { getAbsoluteImageUrl } from "@/lib/imageUtils";
+import { ProductQRCode } from "@/components/ProductQRCode";
 
 const initialFormState = {
   name: "",
@@ -65,10 +66,109 @@ const getDisplayDescription = (product, fallback = "No description provided") =>
   return fallback;
 };
 
+const ADMIN_FALLBACK_IMAGES = {
+  honey: "/images/products/honey.webp",
+  tea: "/images/products/tea.webp",
+  oil: "/images/products/oil.webp",
+  powder: "/images/products/ispaghol_2.webp",
+  seeds: "/images/products/ispaghol_1.png",
+  supplements: "/images/products/herbs.webp",
+  aloe: "/images/products/herbs.webp",
+  coconut: "/images/products/coconut-oil.webp",
+  herbs: "/images/products/herbs.webp",
+  default: "/images/products/honey.webp",
+};
+
+const getAdminFallbackImage = (product) => {
+  const text = `${product?.name || ""} ${product?.category_name || ""} ${product?.category || ""}`
+    .toLowerCase();
+
+  if (text.includes("honey")) return ADMIN_FALLBACK_IMAGES.honey;
+  if (text.includes("tea") || text.includes("chai")) return ADMIN_FALLBACK_IMAGES.tea;
+  if (text.includes("coconut")) return ADMIN_FALLBACK_IMAGES.coconut;
+  if (text.includes("oil")) return ADMIN_FALLBACK_IMAGES.oil;
+  if (
+    text.includes("powder") ||
+    text.includes("superfood") ||
+    text.includes("greens") ||
+    text.includes("ispaghol") ||
+    text.includes("psyllium")
+  ) {
+    return ADMIN_FALLBACK_IMAGES.powder;
+  }
+  if (text.includes("seed")) return ADMIN_FALLBACK_IMAGES.seeds;
+  if (
+    text.includes("supplement") ||
+    text.includes("capsule") ||
+    text.includes("curcumin") ||
+    text.includes("probiotic")
+  ) {
+    return ADMIN_FALLBACK_IMAGES.supplements;
+  }
+  if (text.includes("aloe")) return ADMIN_FALLBACK_IMAGES.aloe;
+  if (text.includes("herb")) return ADMIN_FALLBACK_IMAGES.herbs;
+
+  return ADMIN_FALLBACK_IMAGES.default;
+};
+
+const pickProductImageValue = (product) => {
+  const candidates = [];
+  const addCandidate = (value) => {
+    const trimmed = String(value || "").trim();
+    if (trimmed) {
+      candidates.push(trimmed);
+    }
+  };
+
+  addCandidate(product?.image_url);
+  addCandidate(product?.image);
+
+  const collectFromList = (list) => {
+    if (!list) {
+      return;
+    }
+
+    if (typeof list === "string") {
+      addCandidate(list);
+      return;
+    }
+
+    if (!Array.isArray(list)) {
+      return;
+    }
+
+    list.forEach((entry) => {
+      if (typeof entry === "string") {
+        addCandidate(entry);
+        return;
+      }
+
+      if (entry && typeof entry === "object") {
+        addCandidate(entry.image_url);
+        addCandidate(entry.url);
+        addCandidate(entry.src);
+      }
+    });
+  };
+
+  collectFromList(product?.images);
+  collectFromList(product?.image_urls);
+  collectFromList(product?.gallery_images);
+
+  return candidates[0] || "";
+};
+
+const getProductImageSrc = (product) => {
+  const imageValue = pickProductImageValue(product);
+  const resolvedValue = imageValue || getAdminFallbackImage(product);
+  return resolvedValue
+    ? getAbsoluteImageUrl(resolvedValue, { defaultFolder: "products" })
+    : "";
+};
+
 export function AdminProducts() {
   const {
     products,
-    loading,
     addProduct,
     updateProduct,
     deleteProduct,
@@ -86,6 +186,8 @@ export function AdminProducts() {
   const [error, setError] = useState("");
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [qrProductData, setQrProductData] = useState(null);
 
   const productRows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -154,6 +256,7 @@ export function AdminProducts() {
   };
 
   const openEditModal = (product) => {
+    const resolvedImageUrl = pickProductImageValue(product);
     setEditingProduct(product);
     setFormData({
       name: String(product.name || ""),
@@ -163,7 +266,7 @@ export function AdminProducts() {
       usage: String(product.usage || ""),
       price: String(product.price || ""),
       category_id: product.category_id ? String(product.category_id) : "",
-      image_url: String(product.image_url || ""),
+      image_url: resolvedImageUrl,
       stock_quantity: String(product.stock_quantity || 0),
       discount_percentage: String(product.discount_percentage || 0),
       is_featured: Boolean(product.is_featured),
@@ -247,6 +350,20 @@ export function AdminProducts() {
     }
   };
 
+  const openQrModal = (product) => {
+    setQrProductData({
+      productId: product.id,
+      productName: product.name,
+      productSlug: product.slug,
+    });
+    setShowQrModal(true);
+  };
+
+  const closeQrModal = () => {
+    setShowQrModal(false);
+    setQrProductData(null);
+  };
+
   const handleImageUpload = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -307,14 +424,6 @@ export function AdminProducts() {
       setUploadingImage(false);
     }
   };
-
-  if (loading) {
-    return (
-      <AdminLayout>
-        <AdminPageSkeleton cards={4} rows={8} />
-      </AdminLayout>
-    );
-  }
 
   const statusFilterOptions = [
     { value: "all", label: "All", count: stats.total },
@@ -500,6 +609,7 @@ export function AdminProducts() {
                 const status = normalizeStatus(product);
                 const stock = Number(product.stock_quantity || 0);
                 const isLowStock = stock < 10;
+                const productImage = getProductImageSrc(product);
 
                 return (
                   <article
@@ -508,9 +618,9 @@ export function AdminProducts() {
                   >
                     <div className="flex items-start gap-3">
                       <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-emerald-100 bg-[#f4f8f3]">
-                        {product.image_url ? (
+                        {productImage ? (
                           <img
-                            src={getAbsoluteImageUrl(product.image_url)}
+                            src={productImage}
                             alt={product.name}
                             className="h-full w-full object-cover"
                           />
@@ -553,6 +663,14 @@ export function AdminProducts() {
                       </div>
 
                       <div className="inline-flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openQrModal(product)}
+                          aria-label={`QR Code for ${product.name}`}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-700"
+                        >
+                          <QrCode className="h-4 w-4" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => openEditModal(product)}
@@ -614,6 +732,7 @@ export function AdminProducts() {
                     const status = normalizeStatus(product);
                     const stock = Number(product.stock_quantity || 0);
                     const isLowStock = stock < 10;
+                    const productImage = getProductImageSrc(product);
 
                     return (
                       <tr
@@ -623,9 +742,9 @@ export function AdminProducts() {
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-4">
                             <div className="h-16 w-16 overflow-hidden rounded-2xl border border-emerald-100 bg-[#f4f8f3] shadow-sm">
-                              {product.image_url ? (
+                              {productImage ? (
                                 <img
-                                  src={getAbsoluteImageUrl(product.image_url)}
+                                  src={productImage}
                                   alt={product.name}
                                   className="h-full w-full object-cover"
                                 />
@@ -681,6 +800,15 @@ export function AdminProducts() {
                         </td>
                         <td className="px-6 py-4 text-right">
                           <div className="inline-flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openQrModal(product)}
+                              title="Generate QR Code"
+                              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition-colors duration-200 hover:bg-emerald-50"
+                            >
+                              <QrCode className="h-4 w-4" />
+                              QR
+                            </button>
                             <button
                               type="button"
                               onClick={() => openEditModal(product)}
@@ -946,7 +1074,7 @@ export function AdminProducts() {
                         <div className="space-y-2">
                           <div className="relative inline-block">
                             <img
-                              src={getAbsoluteImageUrl(formData.image_url)}
+                              src={getAbsoluteImageUrl(formData.image_url, { defaultFolder: 'products' })}
                               alt="Product preview"
                               className="h-32 w-32 rounded-xl border border-emerald-100 object-cover shadow-sm"
                             />
@@ -1035,6 +1163,45 @@ export function AdminProducts() {
                   </button>
                 </div>
               </div>
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )
+              : null}
+
+        {showQrModal && qrProductData && typeof document !== "undefined"
+          ? createPortal(
+              <div className="fixed inset-0 z-[130] overflow-hidden">
+                <div className="absolute -inset-1 bg-slate-950/80 backdrop-blur-lg" />
+                <div className="relative flex h-full w-full items-end justify-center overflow-y-auto px-0 pb-0 pt-0 sm:items-center sm:px-4 sm:pb-4">
+                  <div className="flex w-full max-w-md flex-col overflow-hidden rounded-none border-0 bg-white shadow-2xl sm:max-h-[90vh] sm:rounded-3xl sm:border sm:border-emerald-100">
+                    <div className="sticky top-0 z-20 border-b border-emerald-100/90 bg-white/95 px-4 py-4 backdrop-blur-sm sm:px-6 sm:py-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+                            Product QR Code
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            Scan to view product details
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={closeQrModal}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+                      <ProductQRCode
+                        productId={qrProductData.productId}
+                        productName={qrProductData.productName}
+                        productSlug={qrProductData.productSlug}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>,

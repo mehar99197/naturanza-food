@@ -7,11 +7,22 @@ import {
   Send,
   Check,
   ExternalLink,
+  Facebook,
+  Instagram,
+  Twitter,
+  Youtube,
 } from "lucide-react";
 import { useScrollReveal } from "@/hooks/useScrollReveal";
 import { contactAPI } from "@/services/api";
+import { ContactSEO } from "@/components/SEO";
+import { OrganizationStructuredData } from "@/components/StructuredData";
+import { useSettings } from "@/context/SettingsContext";
+import { BUSINESS_INFO } from "@/config/legal";
+
+const normalizePhoneLink = (value) => String(value || "").replace(/[^\d+]/g, "");
 
 export function Contact() {
+  const { settings } = useSettings();
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -22,12 +33,39 @@ export function Contact() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [mapLoaded, setMapLoaded] = useState(false);
-  const { ref, isVisible } = useScrollReveal();
+  const { ref: headerRef, isVisible: headerVisible } = useScrollReveal();
+  const { ref: infoRef, isVisible: infoVisible } = useScrollReveal({ threshold: 0.15 });
+  const { ref: formRef, isVisible: formVisible } = useScrollReveal({ threshold: 0.15 });
+  const { ref: mapRef, isVisible: mapVisible } = useScrollReveal({ threshold: 0.15 });
 
-  const mapEmbedUrl =
-    "https://www.openstreetmap.org/export/embed.html?bbox=74.280%2C31.500%2C74.390%2C31.620&layer=mapnik&marker=31.560%2C74.340";
-  const directionsUrl =
-    "https://www.google.com/maps/search/?api=1&query=Pakistan%2C+Lahore";
+  const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
+  const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
+  const phoneLink = normalizePhoneLink(supportPhone);
+  const address = settings.address || BUSINESS_INFO.officeAddress;
+  const supportHours = settings.supportHours || BUSINESS_INFO.supportHours;
+  const mapLocationLabel = settings.mapLocationLabel || "Pakistan, Lahore";
+
+  const lat = Number(settings.mapLatitude);
+  const lng = Number(settings.mapLongitude);
+  const safeLat = Number.isFinite(lat) ? lat : 31.5204;
+  const safeLng = Number.isFinite(lng) ? lng : 74.3587;
+  const bboxLeft = (safeLng - 0.055).toFixed(4);
+  const bboxRight = (safeLng + 0.055).toFixed(4);
+  const bboxBottom = (safeLat - 0.06).toFixed(4);
+  const bboxTop = (safeLat + 0.06).toFixed(4);
+  const mapEmbedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(
+    `${bboxLeft},${bboxBottom},${bboxRight},${bboxTop}`,
+  )}&layer=mapnik&marker=${encodeURIComponent(`${safeLat.toFixed(4)},${safeLng.toFixed(4)}`)}`;
+  const directionsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    mapLocationLabel,
+  )}`;
+
+  const socialLinks = [
+    { label: "Facebook", url: settings.facebookUrl, Icon: Facebook },
+    { label: "Instagram", url: settings.instagramUrl, Icon: Instagram },
+    { label: "Twitter", url: settings.twitterUrl, Icon: Twitter },
+    { label: "YouTube", url: settings.youtubeUrl, Icon: Youtube },
+  ].filter((item) => item.url);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -62,49 +100,50 @@ export function Contact() {
     {
       icon: Mail,
       title: "Email",
-      content: "support@naturanzafoods.com",
-      link: "mailto:support@naturanzafoods.com",
+      content: supportEmail,
+      link: `mailto:${supportEmail}`,
     },
     {
       icon: Phone,
       title: "Phone",
-      content: "+92 347 4147400",
-      link: "tel:+923474147400",
+      content: supportPhone,
+      link: `tel:${phoneLink}`,
     },
     {
       icon: MapPin,
       title: "Address",
-      content: "Pakistan",
+      content: address,
       link: null,
     },
     {
       icon: Clock,
       title: "Hours",
-      content: "Available 24/7",
+      content: supportHours,
       link: null,
     },
   ];
 
   return (
-    <main className="pt-20 sm:pt-24 pb-14 sm:pb-16 bg-[#faf8f3] min-h-screen overflow-x-hidden">
+    <>
+      <ContactSEO />
+      <OrganizationStructuredData />
+      <main className="pt-20 sm:pt-24 pb-14 sm:pb-16 bg-[#faf8f3] min-h-screen overflow-x-hidden">
       <div className="container-custom">
         {/* Header */}
-        <div className="text-center mb-10 sm:mb-12" ref={ref}>
+        <div
+          className={`text-center mb-10 sm:mb-12 reveal reveal-left ${
+            headerVisible ? "active" : ""
+          }`}
+          ref={headerRef}
+        >
           <span className="text-[#3d7a3d] font-medium text-[11px] uppercase tracking-wider">
             Get in Touch
           </span>
-          <h1
-            className={`font-display text-xl md:text-2xl font-bold text-[#2d3a2d] mt-2 mb-3 ${
-              isVisible ? "" : "opacity-0"
-            }`}
-          >
+          <h1 className="font-display text-xl md:text-2xl font-bold text-[#2d3a2d] mt-2 mb-3">
             Contact Us
           </h1>
           <p
-            className={`text-[#6b7a6b] max-w-2xl mx-auto text-sm ${
-              isVisible ? "" : "opacity-0"
-            }`}
-            style={{ animationDelay: "0.2s" }}
+            className="text-[#6b7a6b] max-w-2xl mx-auto text-sm"
           >
             Have a question or feedback? We would love to hear from you. Reach
             out to us and we will get back to you as soon as possible.
@@ -113,7 +152,12 @@ export function Contact() {
 
         <div className="grid md:grid-cols-3 gap-5 sm:gap-6 lg:gap-7 items-start">
           {/* Contact Info */}
-          <div className="md:col-span-1">
+          <div
+            className={`md:col-span-1 reveal reveal-left ${
+              infoVisible ? "active" : ""
+            }`}
+            ref={infoRef}
+          >
             <div className="bg-white rounded-2xl shadow-lg hover:shadow-2xl p-5 sm:p-6 border border-gray-100 md:sticky md:top-28">
               <h2 className="font-display text-lg font-bold text-[#2d3a2d] mb-5">
                 Contact Information
@@ -144,27 +188,27 @@ export function Contact() {
               </div>
 
               {/* Social Links */}
-              <div className="mt-6 pt-6 border-t">
-                <h3 className="font-medium text-[#2d3a2d] mb-3 text-sm">
-                  Follow Us
-                </h3>
-                <div className="flex gap-2.5">
-                  {["Facebook", "Instagram", "Twitter", "Youtube"].map(
-                    (social) => (
+              {socialLinks.length > 0 && (
+                <div className="mt-6 pt-6 border-t">
+                  <h3 className="font-medium text-[#2d3a2d] mb-3 text-sm">
+                    Follow Us
+                  </h3>
+                  <div className="flex gap-2.5">
+                    {socialLinks.map(({ label, url, Icon }) => (
                       <a
-                        key={social}
-                        href={`https://${social.toLowerCase()}.com`}
+                        key={label}
+                        href={url}
                         target="_blank"
-                        rel="noreferrer"
-                        aria-label={social}
-                        className="w-9 h-9 bg-gray-100 rounded-full flex items-center justify-center hover:bg-[#3d7a3d] hover:text-white"
+                        rel="noopener noreferrer"
+                        aria-label={label}
+                        className="w-9 h-9 bg-gray-100 rounded-full flex items-center justify-center hover:bg-[#3d7a3d] hover:text-white transition-colors"
                       >
-                        <span className="text-xs font-bold">{social[0]}</span>
+                        <Icon className="w-4 h-4" />
                       </a>
-                    ),
-                  )}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="mt-6 rounded-xl border border-[#dbe8db] bg-[#f4faf4] p-4">
                 <p className="text-[13px] text-[#2d3a2d] font-semibold mb-1">
@@ -179,7 +223,12 @@ export function Contact() {
           </div>
 
           {/* Contact Form */}
-          <div className="md:col-span-2">
+          <div
+            className={`md:col-span-2 reveal reveal-right ${
+              formVisible ? "active" : ""
+            }`}
+            ref={formRef}
+          >
             <div className="bg-white rounded-2xl shadow-lg hover:shadow-2xl p-5 sm:p-6 md:p-6 lg:p-7 border border-gray-100">
               <h2 className="font-display text-lg font-bold text-[#2d3a2d] mb-5">
                 Send us a Message
@@ -284,19 +333,24 @@ export function Contact() {
         </div>
 
         {/* Map */}
-        <div className="mt-10 sm:mt-12 lg:mt-14">
+        <div
+          className={`mt-10 sm:mt-12 lg:mt-14 reveal reveal-left ${
+            mapVisible ? "active" : ""
+          }`}
+          ref={mapRef}
+        >
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100">
             <div className="px-5 py-4 md:px-6 md:py-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <h3 className="font-display text-base md:text-lg font-bold text-[#2d3a2d]">
                   Visit Our Store
                 </h3>
-                <p className="text-sm text-[#6b7a6b]">Pakistan, Lahore</p>
+                <p className="text-sm text-[#6b7a6b]">{mapLocationLabel}</p>
               </div>
               <a
                 href={directionsUrl}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#3d7a3d] hover:text-[#2f642f]"
               >
                 Open in Google Maps
@@ -326,5 +380,6 @@ export function Contact() {
         </div>
       </div>
     </main>
+    </>
   );
 }

@@ -15,13 +15,13 @@ const LOCAL_CARD_IMAGES = {
  honey: '/images/products/honey.webp',
  tea: '/images/products/tea.webp',
  oil: '/images/products/oil.webp',
- powder: '/images/products/powder.webp',
- seeds: '/images/products/seeds.webp',
- supplements: '/images/products/supplements.webp',
- aloe: '/images/products/aloe.webp',
- coconut: '/images/products/coconut.webp',
+ powder: '/images/products/ispaghol_2.webp',
+ seeds: '/images/products/ispaghol_1.png',
+ supplements: '/images/products/herbs.webp',
+ aloe: '/images/products/herbs.webp',
+ coconut: '/images/products/coconut-oil.webp',
  herbs: '/images/products/herbs.webp',
- default: '/images/products/powder.webp',
+ default: '/images/products/honey.webp',
 };
 
 function normalizeImageSrc(value) {
@@ -31,7 +31,7 @@ function normalizeImageSrc(value) {
  }
 
  // Use getAbsoluteImageUrl to convert relative URLs to absolute backend URLs
- return getAbsoluteImageUrl(candidate);
+ return getAbsoluteImageUrl(candidate, { defaultFolder: 'products' });
 }
 
 function getProductImageFromPayload(product) {
@@ -85,8 +85,8 @@ function resolveCardImage(product) {
  if (text.includes('tea') || text.includes('chai')) return LOCAL_CARD_IMAGES.tea;
  if (text.includes('coconut')) return LOCAL_CARD_IMAGES.coconut;
  if (text.includes('oil')) return LOCAL_CARD_IMAGES.oil;
- if (text.includes('powder') || text.includes('superfood') || text.includes('greens')) return LOCAL_CARD_IMAGES.powder;
- if (text.includes('seed')) return LOCAL_CARD_IMAGES.seeds;
+if (text.includes('powder') || text.includes('superfood') || text.includes('greens') || text.includes('ispaghol') || text.includes('psyllium')) return LOCAL_CARD_IMAGES.powder;
+  if (text.includes('seed')) return LOCAL_CARD_IMAGES.seeds;
  if (text.includes('supplement') || text.includes('capsule') || text.includes('curcumin') || text.includes('probiotic')) return LOCAL_CARD_IMAGES.supplements;
  if (text.includes('aloe')) return LOCAL_CARD_IMAGES.aloe;
  if (text.includes('herb')) return LOCAL_CARD_IMAGES.herbs;
@@ -173,7 +173,7 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  <OptimizedImage
  src={cardImage}
  alt={product.name}
- className="block w-full h-full max-w-full max-h-full object-contain object-center"
+ imgClassName="block w-full h-full max-w-full max-h-full object-contain object-center"
  wrapperClassName="block w-full h-full"
  />
  </div>
@@ -260,7 +260,7 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  <OptimizedImage
  src={cardImage}
  alt={product.name}
- className="block w-full h-full max-w-full max-h-full object-contain object-center"
+ imgClassName="block w-full h-full max-w-full max-h-full object-contain object-center"
  wrapperClassName="block w-full h-full"
  />
  </div>

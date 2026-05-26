@@ -36,9 +36,9 @@ export function CartDrawer() {
  const getProductId = (item) => item.product_id ?? item.id;
  const getImageSrc = (item) => {
   const imageValue = item.image_url || item.image || '';
-  if (!imageValue) return '/images/products/powder.webp';
+    if (!imageValue) return '/images/products/honey.webp';
   // Use getAbsoluteImageUrl to convert relative URLs to absolute backend URLs
-  return getAbsoluteImageUrl(imageValue);
+  return getAbsoluteImageUrl(imageValue, { defaultFolder: 'products' });
  };
  const getUnitPrice = (item) => item.final_price ?? item.price;
  const getItemName = (item) => item.name || item.product_name || 'Product';
@@ -53,7 +53,7 @@ export function CartDrawer() {
  const normalizedTotalPrice = Number(totalPrice) || 0;
 
  const handleImageError = (event) => {
- event.currentTarget.src = '/images/products/powder.webp';
+ event.currentTarget.src = '/images/products/honey.webp';
  };
 
  const handleContinueShopping = () => {
@@ -94,7 +94,7 @@ export function CartDrawer() {
  role="dialog"
  aria-modal="true"
  aria-label="Shopping cart"
- className="fixed inset-y-0 right-0 z-[60] h-full w-full max-w-[430px] overflow-hidden border-l border-white/40 bg-[radial-gradient(circle_at_top,#f0fdf4_0%,#ffffff_40%,#f8fafc_100%)] shadow-[0_32px_80px_rgba(15,23,42,0.38)] flex flex-col"
+ className="fixed inset-y-0 right-0 z-[60] h-full w-full max-w-[90vw] sm:max-w-[430px] overflow-hidden border-l border-white/40 bg-[radial-gradient(circle_at_top,#f0fdf4_0%,#ffffff_40%,#f8fafc_100%)] shadow-[0_32px_80px_rgba(15,23,42,0.38)] flex flex-col"
  >
  {/* Header */}
  <div className="sticky top-0 z-10 border-b border-slate-200/70 bg-white/85 px-4 pb-3.5 pt-4 backdrop-blur-xl sm:px-6 sm:pb-4 sm:pt-6">

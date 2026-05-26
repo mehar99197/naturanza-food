@@ -5,6 +5,7 @@ const { OAuth2Client } = require("google-auth-library");
 const { db } = require("../config/db");
 const { authenticateToken } = require("../middleware/auth");
 const { uploadProfileImage } = require("../middleware/upload");
+const { restrictBody } = require("../middleware/security");
 const {
   issueAccessToken,
   issueRefreshToken,
@@ -47,10 +48,18 @@ const {
   markTokenAsUsed,
   invalidateAllUserTokens,
 } = require("../utils/passwordResetTokens");
+const {
+  ensurePasswordHistoryTable,
+  addPasswordToHistory,
+  hasReusedPassword,
+} = require("../utils/passwordHistory");
+const {
+  recordFailedLoginAtomic,
+  resetLoginFailuresAtomic,
+  checkAccountLockout,
+} = require("../utils/loginSecurity");
 
 const googleClient = new OAuth2Client();
-const DEV_DEFAULT_GOOGLE_CLIENT_ID =
-  "909610579763-59u67k55ds657snk6h7beqj8badu886r.apps.googleusercontent.com";
 const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
   process.env.IP_LOOKUP_TIMEOUT_MS || "2000",
   10,
@@ -63,6 +72,15 @@ const LOGIN_LOCK_MINUTES =
   Number.parseInt(process.env.LOGIN_LOCK_MINUTES || "15", 10) || 15;
 const JWT_RUNTIME = getJwtRuntimeInfo();
 
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of ipLocationCache.entries()) {
+    if (now - entry.timestamp > LOCATION_CACHE_TTL_MS) {
+      ipLocationCache.delete(key);
+    }
+  }
+}, LOCATION_CACHE_TTL_MS);
+
 const getAllowedGoogleClientIds = () => {
   const configuredIds = [
     process.env.GOOGLE_CLIENT_ID,
@@ -70,10 +88,6 @@ const getAllowedGoogleClientIds = () => {
   ]
     .map((value) => (value || "").trim())
     .filter(Boolean);
-
-  if (process.env.NODE_ENV !== "production") {
-    configuredIds.push(DEV_DEFAULT_GOOGLE_CLIENT_ID);
-  }
 
   return [...new Set(configuredIds)];
 };
@@ -344,7 +358,6 @@ const createSessionSafely = async (
       userAgent: req.headers["user-agent"] || null,
     });
   } catch (error) {
-    console.warn("Could not persist user session:", error.message);
     return null;
   }
 };
@@ -522,6 +535,8 @@ router.post("/register", async (req, res) => {
 
 // Login user
 router.post("/login", async (req, res) => {
+  const connection = await db.promise().getConnection();
+
   try {
     const parsedBody = parsePayload(loginSchema, req.body || {});
     if (!parsedBody.ok) {
@@ -535,15 +550,17 @@ router.post("/login", async (req, res) => {
         failureReason: "Invalid login payload",
       });
 
+      connection.release();
       return res.status(400).json({ error: parsedBody.error });
     }
 
     const { email, password } = parsedBody.data;
     const normalizedEmail = String(email || "").trim().toLowerCase();
 
-    const [users] = await db
-      .promise()
-      .query("SELECT * FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
+    const [users] = await connection.query(
+      "SELECT * FROM users WHERE email = ? LIMIT 1",
+      [normalizedEmail]
+    );
 
     if (!users.length) {
       void recordLoginHistorySafely({
@@ -554,6 +571,7 @@ router.post("/login", async (req, res) => {
         failureReason: "Invalid credentials",
       });
 
+      connection.release();
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
@@ -569,12 +587,15 @@ router.post("/login", async (req, res) => {
         failureReason: "Account disabled",
       });
 
+      connection.release();
       return res
         .status(403)
         .json({ error: "Account is disabled. Please contact support." });
     }
 
-    if (isAccountLocked(user)) {
+    const lockStatus = await checkAccountLockout(connection, user.id);
+    if (lockStatus.locked) {
+      connection.release();
       return res.status(423).json({
         error: "Account temporarily locked due to multiple failed attempts.",
       });
@@ -582,7 +603,9 @@ router.post("/login", async (req, res) => {
 
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
-      await markFailedLoginAttempt(user);
+      await recordFailedLoginAtomic(connection, user.id, user.email, false);
+      const newLockStatus = await checkAccountLockout(connection, user.id);
+
       void recordLoginHistorySafely({
         req,
         userId: user.id,
@@ -592,10 +615,22 @@ router.post("/login", async (req, res) => {
         failureReason: "Invalid credentials",
       });
 
-      return res.status(401).json({ error: "Invalid email or password" });
+      connection.release();
+
+      if (newLockStatus.locked) {
+        return res.status(423).json({
+          error: "Account temporarily locked due to multiple failed attempts.",
+        });
+      }
+
+      return res.status(401).json({
+        error: "Invalid email or password",
+        attemptsLeft: newLockStatus.attemptsLeft,
+      });
     }
 
-    await resetLoginFailures(user.id);
+    await resetLoginFailuresAtomic(connection, user.id);
+    connection.release();
 
     if (String(user.role || "").trim().toLowerCase() === "admin") {
       void recordLoginHistorySafely({
@@ -837,7 +872,7 @@ router.get("/profile", authenticateToken, (req, res) => {
 });
 
 // Update user profile
-router.put("/profile", authenticateToken, (req, res) => {
+router.put("/profile", authenticateToken, restrictBody('name', 'email', 'phone', 'address'), (req, res) => {
   const name = String(req.body?.name || "").trim();
   const email = String(req.body?.email || "")
     .trim()
@@ -892,7 +927,7 @@ router.put("/profile", authenticateToken, (req, res) => {
 });
 
 // Change password
-router.put("/change-password", authenticateToken, async (req, res) => {
+router.put("/change-password", authenticateToken, restrictBody('currentPassword', 'newPassword'), async (req, res) => {
   try {
     const currentPassword = String(req.body?.currentPassword || "");
     const newPassword = String(req.body?.newPassword || "");
@@ -912,59 +947,87 @@ router.put("/change-password", authenticateToken, async (req, res) => {
       });
     }
 
-    // Get user's current password and password policy mode
-    db.query(
-      "SELECT password, password_set_by_user FROM users WHERE id = ?",
-      [req.user.id],
-      async (err, results) => {
-        if (err) {
-          return res.status(500).json({ error: "Database error" });
-        }
+    const connection = await db.promise().getConnection();
 
-        if (!results.length) {
-          return res.status(404).json({ error: "User not found" });
-        }
+    try {
+      await ensurePasswordHistoryTable(connection);
 
-        const requiresCurrentPassword = toBooleanFlag(
-          results[0].password_set_by_user,
-          true,
-        );
-
-        if (requiresCurrentPassword && !currentPassword) {
-          return res
-            .status(400)
-            .json({ error: "Current password is required" });
-        }
-
-        if (requiresCurrentPassword) {
-          const isValidPassword = await bcrypt.compare(
-            currentPassword,
-            results[0].password,
-          );
-          if (!isValidPassword) {
-            return res
-              .status(401)
-              .json({ error: "Current password is incorrect" });
+      db.query(
+        "SELECT password, password_set_by_user FROM users WHERE id = ?",
+        [req.user.id],
+        async (err, results) => {
+          if (err) {
+            connection.release();
+            return res.status(500).json({ error: "Database error" });
           }
-        }
 
-        // Hash new password
-        const hashedPassword = await bcrypt.hash(newPassword, 12);
+          if (!results.length) {
+            connection.release();
+            return res.status(404).json({ error: "User not found" });
+          }
 
-        // Update password
-        db.query(
-          "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
-          [hashedPassword, req.user.id],
-          (err, result) => {
-            if (err) {
-              return res.status(500).json({ error: "Error updating password" });
+          const requiresCurrentPassword = toBooleanFlag(
+            results[0].password_set_by_user,
+            true,
+          );
+
+          if (requiresCurrentPassword && !currentPassword) {
+            connection.release();
+            return res
+              .status(400)
+              .json({ error: "Current password is required" });
+          }
+
+          if (requiresCurrentPassword) {
+            const isValidPassword = await bcrypt.compare(
+              currentPassword,
+              results[0].password,
+            );
+            if (!isValidPassword) {
+              connection.release();
+              return res
+                .status(401)
+                .json({ error: "Current password is incorrect" });
             }
+          }
 
-            res.json({ message: "Password changed successfully" });
-          },
-        );
-      },
-    );
+          const reusedPassword = await hasReusedPassword(
+            connection,
+            req.user.id,
+            newPassword,
+            5
+          );
+
+          if (reusedPassword) {
+            connection.release();
+            return res.status(400).json({
+              error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
+            });
+          }
+
+          const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+          db.query(
+            "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
+            [hashedPassword, req.user.id],
+            async (err, result) => {
+              if (err) {
+                connection.release();
+                return res.status(500).json({ error: "Error updating password" });
+              }
+
+              await addPasswordToHistory(connection, req.user.id, newPassword);
+              connection.release();
+
+              res.json({ message: "Password changed successfully" });
+            },
+          );
+        },
+      );
+    } catch (error) {
+      connection.release();
+      throw error;
+    }
   } catch (error) {
     res.status(500).json({ error: "Server error" });
   }
@@ -987,7 +1050,6 @@ router.post(
       const query = "UPDATE users SET profile_image = ? WHERE id = ?";
       db.query(query, [imageUrl, req.user.id], (err, result) => {
         if (err) {
-          console.error("Database error:", err);
           return res
             .status(500)
             .json({ error: "Error updating profile image" });
@@ -999,7 +1061,6 @@ router.post(
         });
       });
     } catch (error) {
-      console.error("Profile image upload error:", error);
       res.status(500).json({ error: "Server error" });
     }
   },
@@ -1036,7 +1097,7 @@ router.get("/addresses", authenticateToken, (req, res) => {
 });
 
 // Upsert default address from checkout/profile
-router.put("/addresses/default", authenticateToken, (req, res) => {
+router.put("/addresses/default", authenticateToken, restrictBody('recipient_name', 'phone', 'line1', 'address', 'city', 'postal_code', 'state', 'country', 'line2', 'label'), (req, res) => {
   const recipientName = String(req.body?.recipient_name || "").trim();
   const phone = String(req.body?.phone || "").trim();
   const line1 = String(req.body?.line1 || req.body?.address || "").trim();
@@ -1142,7 +1203,7 @@ router.put("/addresses/default", authenticateToken, (req, res) => {
 });
 
 // Add a new address
-router.post("/addresses", authenticateToken, (req, res) => {
+router.post("/addresses", authenticateToken, restrictBody('recipient_name', 'phone', 'line1', 'city', 'state', 'postal_code', 'country', 'label', 'line2'), (req, res) => {
   const recipientName = String(req.body?.recipient_name || "").trim();
   const phone = String(req.body?.phone || "").trim();
   const line1 = String(req.body?.line1 || "").trim();
@@ -1224,7 +1285,7 @@ router.post("/addresses", authenticateToken, (req, res) => {
 });
 
 // Update existing address
-router.put("/addresses/:id", authenticateToken, (req, res) => {
+router.put("/addresses/:id", authenticateToken, restrictBody('recipient_name', 'phone', 'line1', 'city', 'state', 'postal_code', 'country', 'label', 'line2'), (req, res) => {
   const recipientName = String(req.body?.recipient_name || "").trim();
   const phone = String(req.body?.phone || "").trim();
   const line1 = String(req.body?.line1 || "").trim();
@@ -1288,7 +1349,7 @@ router.put("/addresses/:id", authenticateToken, (req, res) => {
 });
 
 // Set default address
-router.patch("/addresses/:id/default", authenticateToken, (req, res) => {
+router.patch("/addresses/:id/default", authenticateToken, restrictBody(), (req, res) => {
   db.query(
     "SELECT id FROM user_addresses WHERE id = ? AND user_id = ? LIMIT 1",
     [req.params.id, req.user.id],
@@ -1357,6 +1418,7 @@ router.get("/notifications", authenticateToken, (req, res) => {
     [req.user.id, limit],
     (err, rows) => {
       if (err) {
+        console.error("[auth] notifications list failed:", err.message);
         return res.status(500).json({ error: "Database error" });
       }
 
@@ -1365,8 +1427,23 @@ router.get("/notifications", authenticateToken, (req, res) => {
   );
 });
 
+// Cheap unread-count endpoint for the navbar bell badge
+router.get("/notifications/unread-count", authenticateToken, (req, res) => {
+  db.query(
+    "SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = FALSE",
+    [req.user.id],
+    (err, rows) => {
+      if (err) {
+        console.error("[auth] notifications unread-count failed:", err.message);
+        return res.status(500).json({ error: "Database error" });
+      }
+      res.json({ count: Number(rows?.[0]?.c) || 0 });
+    },
+  );
+});
+
 // Mark single notification as read
-router.patch("/notifications/:id/read", authenticateToken, (req, res) => {
+router.patch("/notifications/:id/read", authenticateToken, restrictBody(), (req, res) => {
   db.query(
     "UPDATE notifications SET is_read = TRUE, read_at = NOW() WHERE id = ? AND user_id = ?",
     [req.params.id, req.user.id],
@@ -1385,7 +1462,7 @@ router.patch("/notifications/:id/read", authenticateToken, (req, res) => {
 });
 
 // Mark all notifications as read
-router.patch("/notifications/read-all", authenticateToken, (req, res) => {
+router.patch("/notifications/read-all", authenticateToken, restrictBody(), (req, res) => {
   db.query(
     "UPDATE notifications SET is_read = TRUE, read_at = NOW() WHERE user_id = ? AND is_read = FALSE",
     [req.user.id],
@@ -1452,7 +1529,7 @@ router.get("/notifications/settings", authenticateToken, (req, res) => {
 });
 
 // Update notification mute settings
-router.put("/notifications/settings", authenticateToken, (req, res) => {
+router.put("/notifications/settings", authenticateToken, restrictBody('isMuted', 'mutedForMinutes'), (req, res) => {
   const isMuted = Boolean(req.body?.isMuted);
   const rawMutedForMinutes = Number.parseInt(req.body?.mutedForMinutes, 10);
   const mutedForMinutes =
@@ -1512,7 +1589,6 @@ router.post("/forgot-password", async (req, res) => {
 
     // If no user found, return success (security: don't reveal email existence)
     if (!users.length) {
-      console.log(`Password reset requested for non-existent email: ${normalizedEmail}`);
       return res.json(successResponse);
     }
 
@@ -1520,7 +1596,6 @@ router.post("/forgot-password", async (req, res) => {
 
     // Check if user account is active
     if (!user.is_active) {
-      console.log(`Password reset requested for inactive account: ${normalizedEmail}`);
       return res.json(successResponse);
     }
 
@@ -1531,16 +1606,13 @@ router.post("/forgot-password", async (req, res) => {
     const emailResult = await sendPasswordResetEmail(user.email, user.name, tokenData.token);
 
     if (!emailResult.success) {
-      console.error(`Failed to send password reset email to ${user.email}:`, emailResult.error);
       // Still return success to user (don't reveal email sending issues)
       // But log the error for debugging
     } else {
-      console.log(`Password reset email sent to ${user.email}, expires in ${tokenData.expiresInMinutes} minutes`);
     }
 
     return res.json(successResponse);
   } catch (error) {
-    console.error("Forgot password error:", error);
     return res.status(500).json({ error: "Server error. Please try again later." });
   }
 });
@@ -1585,13 +1657,18 @@ router.post("/reset-password", async (req, res) => {
       });
     }
 
-    const [userRows] = await db
-      .promise()
-      .query("SELECT password FROM users WHERE id = ?", [tokenValidation.userId]);
+    const connection = await db.promise().getConnection();
+    await ensurePasswordHistoryTable(connection);
+
+    const [userRows] = await connection.query(
+      "SELECT password FROM users WHERE id = ?",
+      [tokenValidation.userId]
+    );
 
     if (userRows.length && userRows[0].password) {
       const isSamePassword = await bcrypt.compare(newPassword, userRows[0].password);
       if (isSamePassword) {
+        connection.release();
         return res.status(400).json({
           error: "New password must be different from your current password.",
           success: false,
@@ -1599,19 +1676,28 @@ router.post("/reset-password", async (req, res) => {
       }
     }
 
-    // Hash the new password
+    const reusedPassword = await hasReusedPassword(connection, tokenValidation.userId, newPassword, 5);
+    if (reusedPassword) {
+      connection.release();
+      return res.status(400).json({
+        error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
+        success: false,
+      });
+    }
+
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-    // Update user's password
-    await db.promise().query(
+    await connection.query(
       "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
       [hashedPassword, tokenValidation.userId]
     );
 
-    // Mark token as used
+    await addPasswordToHistory(connection, tokenValidation.userId, newPassword);
+
+    connection.release();
+
     await markTokenAsUsed(db.promise(), tokenValidation.tokenId);
 
-    // Invalidate all other reset tokens for this user
     await invalidateAllUserTokens(db.promise(), tokenValidation.userId);
 
     await revokeSessionsByUserId(db.promise(), tokenValidation.userId);
@@ -1621,20 +1707,18 @@ router.post("/reset-password", async (req, res) => {
       "password_reset",
     );
 
-    console.log(`Password successfully reset for user ${tokenValidation.email}`);
 
     return res.json({
       message: "Password reset successfully. You can now log in with your new password.",
       success: true,
     });
   } catch (error) {
-    console.error("Reset password error:", error);
     return res.status(500).json({ error: "Server error. Please try again later." });
   }
 });
 
 // Refresh Access Token
-router.post("/refresh", async (req, res) => {
+router.post("/refresh", restrictBody(), async (req, res) => {
   const refreshToken = req.cookies?.[JWT_RUNTIME.refreshCookieName];
 
   if (!refreshToken) {
@@ -1751,7 +1835,7 @@ router.post("/refresh", async (req, res) => {
 });
 
 // Logout
-router.post("/logout", async (req, res) => {
+router.post("/logout", restrictBody(), async (req, res) => {
   const token = getBearerToken(req);
   const refreshToken = req.cookies?.[JWT_RUNTIME.refreshCookieName];
 

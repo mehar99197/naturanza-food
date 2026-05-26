@@ -1,7 +1,15 @@
 import { Leaf, ShieldCheck, Truck, Award } from 'lucide-react';
 import { useEffect, useRef } from 'react';
+import { useSettings } from '@/context/SettingsContext';
+import { useScrollReveal } from '@/hooks/useScrollReveal';
+import { formatPrice } from '@/lib/utils';
 
-const features = [
+export function Features() {
+ const { settings } = useSettings();
+ const shippingFree = Number.isFinite(Number(settings.shippingFree))
+  ? Number(settings.shippingFree)
+  : 2000;
+ const features = [
  {
  icon: Leaf,
  title: '100% Organic',
@@ -15,18 +23,23 @@ const features = [
  {
  icon: Truck,
  title: 'Fast Delivery',
- description: 'Free shipping on orders over $50 with quick and reliable delivery to your doorstep.',
+ description: `Free shipping on orders over ${formatPrice(shippingFree, settings.currency)} with quick and reliable delivery to your doorstep across Pakistan.`,
  },
  {
  icon: Award,
  title: 'Award Winning',
  description: 'Recognized for excellence in organic food production and sustainable practices.',
  },
-];
-
-export function Features() {
+ ];
  const trackRef = useRef(null);
  const programmaticScrollRef = useRef(false);
+ const { ref: headerRef, isVisible: headerVisible } = useScrollReveal();
+ const { ref: cardsRef, isVisible: cardsVisible } = useScrollReveal({ threshold: 0.15 });
+
+ const setTrackNode = (node) => {
+  trackRef.current = node;
+  cardsRef.current = node;
+ };
 
  useEffect(() => {
  // Keep auto-scroll behavior mobile-only; desktop should stay static and centered.
@@ -78,7 +91,12 @@ export function Features() {
  <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(61,122,61,0.05),transparent_50%),radial-gradient(circle_at_70%_80%,rgba(61,122,61,0.05),transparent_50%)]"></div>
  
  <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-4 relative z-10">
- <div className="text-center mb-5 sm:mb-8 md:mb-10">
+ <div
+ className={`text-center mb-5 sm:mb-8 md:mb-10 reveal reveal-left ${
+ headerVisible ? 'active' : ''
+ }`}
+ ref={headerRef}
+ >
  <span className="inline-block text-white font-bold text-xs uppercase tracking-wider mb-2 sm:mb-3 px-3 sm:px-4 py-1 sm:py-1.5 bg-green-600 rounded-full shadow-md">Our Benefits</span>
  <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3 sm:mb-4">
  <span className="bg-gradient-to-r from-green-700 to-emerald-600 bg-clip-text text-transparent">Why Choose Naturanza?</span>
@@ -90,8 +108,10 @@ export function Features() {
 
  {/* Single horizontal row with controlled scrolling */}
  <div
- ref={trackRef}
- className="flex flex-nowrap overflow-x-auto gap-0 md:grid md:grid-cols-2 lg:grid-cols-4 md:gap-5 lg:gap-6 pb-2 scrollbar-hide snap-x snap-mandatory scroll-smooth md:overflow-visible md:snap-none md:pb-0"
+ ref={setTrackNode}
+ className={`flex flex-nowrap overflow-x-auto gap-0 md:grid md:grid-cols-2 lg:grid-cols-4 md:gap-5 lg:gap-6 pb-2 scrollbar-hide snap-x snap-mandatory scroll-smooth md:overflow-visible md:snap-none md:pb-0 reveal reveal-right ${
+ cardsVisible ? 'active' : ''
+ }`}
  style={{
  scrollbarWidth: 'none',
  msOverflowStyle: 'none',

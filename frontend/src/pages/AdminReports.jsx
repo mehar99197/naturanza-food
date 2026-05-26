@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, FileBarChart2, RefreshCw } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { AdminPageSkeleton } from "@/components/Skeletons/AdminPageSkeleton";
 import { adminAPI } from "@/services/api";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
@@ -141,14 +140,6 @@ export function AdminReports() {
     setShowAllMobileRows(false);
     setShowAllMobileProducts(false);
   }, [daysRange]);
-
-  if (loading) {
-    return (
-      <AdminLayout>
-        <AdminPageSkeleton cards={4} rows={8} showCharts />
-      </AdminLayout>
-    );
-  }
 
   return (
     <AdminLayout>

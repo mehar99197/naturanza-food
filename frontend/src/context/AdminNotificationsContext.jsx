@@ -25,7 +25,7 @@ export const useAdminNotifications = () => {
 };
 
 export const AdminNotificationsProvider = ({ children }) => {
-  const { isAdminAuthenticated } = useAdminAuth();
+  const { isAdminAuthenticated, loading: adminLoading } = useAdminAuth();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -34,7 +34,7 @@ export const AdminNotificationsProvider = ({ children }) => {
 
   const loadNotifications = useCallback(
     async ({ silent = false } = {}) => {
-      if (!isAdminAuthenticated) {
+      if (adminLoading || !isAdminAuthenticated) {
         setNotifications([]);
         setIsMuted(false);
         setMutedUntil(null);
@@ -67,7 +67,7 @@ export const AdminNotificationsProvider = ({ children }) => {
         }
       }
     },
-    [isAdminAuthenticated],
+    [adminLoading, isAdminAuthenticated],
   );
 
   const refreshNotifications = useCallback(async () => {
@@ -128,7 +128,7 @@ export const AdminNotificationsProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (!isAdminAuthenticated) {
+    if (adminLoading || !isAdminAuthenticated) {
       setNotifications([]);
       setIsMuted(false);
       setMutedUntil(null);
@@ -138,10 +138,10 @@ export const AdminNotificationsProvider = ({ children }) => {
     }
 
     void loadNotifications();
-  }, [isAdminAuthenticated, loadNotifications]);
+  }, [adminLoading, isAdminAuthenticated, loadNotifications]);
 
   useEffect(() => {
-    if (!isAdminAuthenticated || typeof window === "undefined") {
+    if (adminLoading || !isAdminAuthenticated || typeof window === "undefined") {
       return undefined;
     }
 
@@ -167,7 +167,7 @@ export const AdminNotificationsProvider = ({ children }) => {
       window.removeEventListener("focus", handleWindowFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [isAdminAuthenticated, loadNotifications]);
+  }, [adminLoading, isAdminAuthenticated, loadNotifications]);
 
   const unreadCount = useMemo(
     () => notifications.filter((item) => !item.is_read).length,

@@ -14,7 +14,7 @@ const dbConfig = {
   port: toNumber(process.env.DB_PORT, 3306),
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASSWORD !== undefined ? process.env.DB_PASSWORD : "",
-  database: process.env.DB_NAME || "naturanza_foods",
+  database: process.env.DB_NAME || "naturanza_food",
   waitForConnections: true,
   connectionLimit: toNumber(process.env.DB_CONNECTION_LIMIT, 10),
   queueLimit: 0,

@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { authenticateToken } = require("../middleware/auth");
+const { restrictBody } = require("../middleware/security");
 const { db } = require("../config/db");
 
 const toProductId = (value) => {
@@ -20,12 +21,30 @@ const getWishlistItems = async (userId) => {
                 p.image_url,
                 p.description,
                 p.stock_quantity,
+                p.is_active,
                 p.discount_percentage,
                 c.name AS category_name,
-                c.id AS category_id
+                c.id AS category_id,
+                COALESCE(rs.average_rating, 0) AS average_rating,
+                COALESCE(rs.review_count, 0) AS review_count,
+                COALESCE(rs.average_rating, 0) AS rating,
+                COALESCE(rs.review_count, 0) AS reviews,
+                CASE
+                    WHEN p.stock_quantity > 0 AND p.is_active = 1 THEN 1
+                    ELSE 0
+                END AS in_stock
          FROM user_wishlist w
          JOIN products p ON w.product_id = p.id
          LEFT JOIN categories c ON p.category_id = c.id
+         LEFT JOIN (
+            SELECT
+                product_id,
+                ROUND(AVG(rating), 1) AS average_rating,
+                COUNT(*) AS review_count
+            FROM reviews
+            WHERE is_approved = 1
+            GROUP BY product_id
+         ) rs ON rs.product_id = p.id
          WHERE w.user_id = ?
          ORDER BY w.added_at DESC`,
         [userId],
@@ -48,7 +67,7 @@ router.get("/", authenticateToken, async (req, res) => {
 });
 
 // POST /api/wishlist/add
-router.post("/add", authenticateToken, async (req, res) => {
+router.post("/add", authenticateToken, restrictBody('product_id'), async (req, res) => {
     try {
         const productId = toProductId(req.body?.product_id);
 

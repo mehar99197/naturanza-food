@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { restrictBody } = require('../middleware/security');
 
 // Get database connection from global
 const getDb = () => global.db;
@@ -18,7 +19,6 @@ router.get('/product/:productId', (req, res) => {
 
     db.query(query, [productId], (err, results) => {
         if (err) {
-            console.error('Error fetching variants:', err);
             return res.status(500).json({ error: 'Failed to fetch variants' });
         }
 
@@ -47,7 +47,6 @@ router.get('/attributes/:productId', (req, res) => {
 
     db.query(query, [productId], (err, results) => {
         if (err) {
-            console.error('Error fetching variant attributes:', err);
             return res.status(500).json({ error: 'Failed to fetch variant attributes' });
         }
 
@@ -64,7 +63,7 @@ router.get('/attributes/:productId', (req, res) => {
 });
 
 // Create a new variant (Admin only)
-router.post('/product/:productId', authenticateToken, isAdmin, (req, res) => {
+router.post('/product/:productId', authenticateToken, isAdmin, restrictBody('variant_name', 'sku', 'price', 'stock_quantity', 'attributes', 'image_url'), (req, res) => {
     const { productId } = req.params;
     const { variant_name, sku, price, stock_quantity, attributes, image_url } = req.body;
 
@@ -89,7 +88,6 @@ router.post('/product/:productId', authenticateToken, isAdmin, (req, res) => {
                 if (err.code === 'ER_DUP_ENTRY') {
                     return res.status(400).json({ error: 'SKU already exists' });
                 }
-                console.error('Error creating variant:', err);
                 return res.status(500).json({ error: 'Failed to create variant' });
             }
 
@@ -102,7 +100,7 @@ router.post('/product/:productId', authenticateToken, isAdmin, (req, res) => {
 });
 
 // Update a variant (Admin only)
-router.put('/:variantId', authenticateToken, isAdmin, (req, res) => {
+router.put('/:variantId', authenticateToken, isAdmin, restrictBody('variant_name', 'sku', 'price', 'stock_quantity', 'attributes', 'image_url', 'is_active'), (req, res) => {
     const { variantId } = req.params;
     const { variant_name, sku, price, stock_quantity, attributes, image_url, is_active } = req.body;
 
@@ -152,7 +150,6 @@ router.put('/:variantId', authenticateToken, isAdmin, (req, res) => {
             if (err.code === 'ER_DUP_ENTRY') {
                 return res.status(400).json({ error: 'SKU already exists' });
             }
-            console.error('Error updating variant:', err);
             return res.status(500).json({ error: 'Failed to update variant' });
         }
 
@@ -173,7 +170,6 @@ router.delete('/:variantId', authenticateToken, isAdmin, (req, res) => {
 
     db.query(query, [variantId], (err, result) => {
         if (err) {
-            console.error('Error deleting variant:', err);
             return res.status(500).json({ error: 'Failed to delete variant' });
         }
 
@@ -186,7 +182,7 @@ router.delete('/:variantId', authenticateToken, isAdmin, (req, res) => {
 });
 
 // Set variant attributes for a product (Admin only)
-router.post('/attributes/:productId', authenticateToken, isAdmin, (req, res) => {
+router.post('/attributes/:productId', authenticateToken, isAdmin, restrictBody('attribute_name', 'attribute_values', 'display_order'), (req, res) => {
     const { productId } = req.params;
     const { attribute_name, attribute_values, display_order } = req.body;
 
@@ -205,7 +201,6 @@ router.post('/attributes/:productId', authenticateToken, isAdmin, (req, res) => 
 
     db.query(query, [productId, attribute_name, valuesJson, display_order || 0], (err, result) => {
         if (err) {
-            console.error('Error creating variant attribute:', err);
             return res.status(500).json({ error: 'Failed to create variant attribute' });
         }
 

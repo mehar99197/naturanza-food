@@ -1,13 +1,13 @@
 -- 001_upgrade_legacy_schema.sql
 -- Purpose: upgrade legacy XAMPP-era schema/data after import into MySQL 8.
 -- Usage:
---   mysql -u root -p naturanza_foods < backend/schema/migrations/001_upgrade_legacy_schema.sql
+--   mysql -u root -p naturanza_food < backend/schema/migrations/001_upgrade_legacy_schema.sql
 
-USE naturanza_foods;
+USE naturanza_food;
 
 SET NAMES utf8mb4;
 
-ALTER DATABASE naturanza_foods
+ALTER DATABASE naturanza_food
   CHARACTER SET = utf8mb4
   COLLATE = utf8mb4_0900_ai_ci;
 

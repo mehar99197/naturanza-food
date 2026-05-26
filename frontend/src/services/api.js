@@ -34,15 +34,60 @@ const axiosInstance = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
   timeout: 10000,
-  headers: {
-    "Content-Type": "application/json",
-  },
 });
+
+const csrfAxios = axios.create({
+  baseURL: API_BASE_URL,
+  withCredentials: true,
+  timeout: 10000,
+});
+
+let csrfToken = null;
+let csrfTokenPromise = null;
+
+const fetchCsrfToken = async () => {
+  const response = await csrfAxios.get("/csrf-token");
+  const nextToken = response?.data?.csrfToken || null;
+  if (nextToken) {
+    csrfToken = String(nextToken);
+  }
+  return csrfToken;
+};
+
+const ensureCsrfToken = async () => {
+  if (csrfToken) {
+    return csrfToken;
+  }
+
+  if (!csrfTokenPromise) {
+    csrfTokenPromise = fetchCsrfToken().finally(() => {
+      csrfTokenPromise = null;
+    });
+  }
+
+  return csrfTokenPromise;
+};
+
+// Add response interceptor to handle timeout and network errors
+axiosInstance.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+      error.isTimeout = true;
+      error.customMessage = 'Request timed out. Please check your connection and try again.';
+    } else if (!error.response) {
+      error.isNetworkError = true;
+      error.customMessage = 'Unable to connect to server. Please check your internet connection.';
+    }
+    return Promise.reject(error);
+  }
+);
 
 export const AUTH_SESSION_SYNC_EVENT = "naturanza:auth-session-sync";
 
 const ADMIN_ACCESS_TOKEN_STORAGE_KEY = "adminAccessToken";
 const USER_ACCESS_TOKEN_STORAGE_KEY = "token";
+const USER_SESSION_STORAGE_KEY = "userSessionActive";
 
 const canUseWebStorage = () =>
   typeof window !== "undefined" &&
@@ -73,8 +118,17 @@ const readStoredUserAccessToken = () => {
   return storedToken || null;
 };
 
+const readStoredUserSessionFlag = () => {
+  if (!canUseWebStorage()) {
+    return false;
+  }
+
+  return window.localStorage.getItem(USER_SESSION_STORAGE_KEY) === "true";
+};
+
 let userAccessToken = readStoredUserAccessToken();
 let adminAccessToken = readStoredAdminAccessToken();
+let userSessionActive = readStoredUserSessionFlag();
 let refreshPromise = null;
 
 const purgeLegacyUserTokenStorage = () => {
@@ -96,28 +150,36 @@ const purgeLegacyAdminTokenStorage = () => {
 
 export const setUserAccessToken = (token) => {
   userAccessToken = token ? String(token) : null;
-  
+
+  userSessionActive = Boolean(userAccessToken);
+
   if (!canUseWebStorage()) {
     return;
   }
 
   if (userAccessToken) {
     window.localStorage.setItem(USER_ACCESS_TOKEN_STORAGE_KEY, userAccessToken);
+    window.localStorage.setItem(USER_SESSION_STORAGE_KEY, "true");
   } else {
     window.localStorage.removeItem(USER_ACCESS_TOKEN_STORAGE_KEY);
+    window.localStorage.removeItem(USER_SESSION_STORAGE_KEY);
   }
 };
 
 export const getUserAccessToken = () => userAccessToken;
 
+export const hasUserSession = () => userSessionActive;
+
 export const clearUserAccessToken = () => {
   userAccessToken = null;
+  userSessionActive = false;
   
   if (!canUseWebStorage()) {
     return;
   }
 
   window.localStorage.removeItem(USER_ACCESS_TOKEN_STORAGE_KEY);
+  window.localStorage.removeItem(USER_SESSION_STORAGE_KEY);
 };
 
 export const setAdminAccessToken = (token) => {
@@ -155,6 +217,7 @@ const clearUserSessionStorage = () => {
   if (canUseWebStorage()) {
     window.localStorage.removeItem("userData");
     window.localStorage.removeItem("profileImage");
+    window.localStorage.removeItem(USER_SESSION_STORAGE_KEY);
   }
 };
 
@@ -180,8 +243,23 @@ const emitAuthSessionSync = (source) => {
   );
 };
 
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+// Export emitAuthSessionSync for use in other modules
+export { emitAuthSessionSync };
+
+const shouldSkipCsrf = (method, url) => {
+  if (SAFE_METHODS.has(method?.toUpperCase())) {
+    return true;
+  }
+  if (url?.includes("/health") || url?.includes("/csrf-token")) {
+    return true;
+  }
+  return false;
+};
+
 // Add token to requests
-axiosInstance.interceptors.request.use((config) => {
+axiosInstance.interceptors.request.use(async (config) => {
   const adminToken = getAdminAccessToken();
   const userToken = getUserAccessToken();
   const requestUrl = String(config.url || "");
@@ -191,22 +269,35 @@ axiosInstance.interceptors.request.use((config) => {
     /^\/wishlist(\/|$)/.test(requestUrl) ||
     /^\/cart(\/|$)/.test(requestUrl) ||
     /^\/orders(\/|$)/.test(requestUrl) ||
-    /^\/reviews(\/|$)/.test(requestUrl);
+    /^\/reviews(\/|$)/.test(requestUrl) ||
+    /^\/payments(\/|$)/.test(requestUrl);
   const isAdminRoute =
+    requestUrl.includes("/admin") ||
+    requestUrl.includes("/admin-") ||
     /^\/admin(\/|$)/.test(requestUrl) ||
-    requestUrl.includes("/admin/") ||
-    /^\/orders\/admin(\/|$)/.test(requestUrl);
+    /\/admin(\/|$)/.test(requestUrl);
   const isAdminPage =
     typeof window !== "undefined" &&
     /^\/admin(\/|$)/.test(String(window.location?.pathname || ""));
 
   let token = null;
+  let authScope = "none";
 
   if (isAdminRoute || isAdminPage) {
     token = adminToken || null;
+    authScope = token ? "admin" : "none";
   } else if (isUserScopedRoute) {
     token = userToken || null;
+    authScope = token ? "user" : "none";
   }
+
+  // For user-scoped routes, fall back to admin token if no user token is available
+  if (!token && isUserScopedRoute && adminToken) {
+    token = adminToken;
+    authScope = "user";
+  }
+
+  config._authScope = authScope;
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -214,71 +305,44 @@ axiosInstance.interceptors.request.use((config) => {
     delete config.headers.Authorization;
   }
 
+  if (!shouldSkipCsrf(config.method, requestUrl)) {
+    try {
+      const resolvedCsrfToken = await ensureCsrfToken();
+      if (resolvedCsrfToken) {
+        config.headers = config.headers || {};
+        config.headers["x-csrf-token"] = resolvedCsrfToken;
+      }
+    } catch (error) {
+      // Allow request to proceed without CSRF header if token fetch fails.
+    }
+  }
+
   return config;
 });
 
 // Handle response errors
-const isAdminRequestUrl = (requestUrl) =>
-  /^\/admin(\/|$)/.test(requestUrl) ||
-  requestUrl.includes("/admin/") ||
-  /^\/orders\/admin(\/|$)/.test(requestUrl);
+const isAdminEndpoint = (url) =>
+  url.includes("/admin-management") || url.includes("/admin/");
 
-const isRefreshBypassRequest = (config) =>
-  Boolean(
-    config?.headers?.["X-Skip-Auth-Refresh"] ||
-      config?.headers?.["x-skip-auth-refresh"],
-  );
+const isAuthEndpoint = (url) =>
+  /^\/auth(\/|$)/.test(url) || url.includes("/auth/");
 
-const isAuthBootstrapRoute = (requestUrl) =>
-  /^\/auth\/(login|register|google|refresh|forgot-password|reset-password)(\/|$)/.test(
-    requestUrl,
-  );
+const isUserRoute = (url) =>
+  /^\/auth(\/|$)/.test(url) ||
+  /^\/profile(\/|$)/.test(url) ||
+  /^\/wishlist(\/|$)/.test(url) ||
+  /^\/cart(\/|$)/.test(url) ||
+  /^\/orders(\/|$)/.test(url) ||
+  /^\/reviews(\/|$)/.test(url) ||
+  /^\/payments(\/|$)/.test(url);
 
-const requestUserTokenRefresh = async () => {
-  const response = await axiosInstance.post(
-    "/auth/refresh",
-    {},
-    {
-      headers: {
-        "X-Skip-Auth-Refresh": "true",
-      },
-    },
-  );
-
-  const payload = response?.data || {};
-  const refreshedToken = payload.accessToken || null;
-  if (!refreshedToken) {
-    throw new Error("Refresh endpoint did not return an access token");
-  }
-
-  setUserAccessToken(refreshedToken);
-  emitAuthSessionSync("user-token-refresh");
-  return payload;
-};
-
-const isUserSessionTerminalError = (error) => {
-  const status = Number(error?.response?.status || 0);
-  return status === 401 || status === 403;
-};
-
-const refreshUserAccessToken = async () => {
-  if (refreshPromise) {
-    return refreshPromise;
-  }
-
-  refreshPromise = requestUserTokenRefresh()
-    .catch((error) => {
-      if (isUserSessionTerminalError(error)) {
-        clearUserSessionStorage();
-        emitAuthSessionSync("user-token-refresh-failed");
-      }
-      throw error;
-    })
-    .finally(() => {
-      refreshPromise = null;
-    });
-
-  return refreshPromise;
+const shouldSkipAuthRefresh = (request) => {
+  const headers = request?.headers || {};
+  const skipHeader =
+    headers["X-Skip-Auth-Refresh"] ??
+    headers["x-skip-auth-refresh"] ??
+    headers["x-skip-auth-refresh".toLowerCase()];
+  return String(skipHeader || "").toLowerCase() === "true";
 };
 
 axiosInstance.interceptors.response.use(
@@ -287,30 +351,98 @@ axiosInstance.interceptors.response.use(
     const originalRequest = error?.config || {};
     const status = Number(error?.response?.status || 0);
     const requestUrl = String(originalRequest.url || "");
-    const shouldAttemptRefresh =
-      status === 401 &&
-      !originalRequest._retry &&
-      !isRefreshBypassRequest(originalRequest) &&
-      !isAdminRequestUrl(requestUrl) &&
-      !isAuthBootstrapRoute(requestUrl);
+    const responseData = error?.response?.data || {};
+    const csrfCode = String(responseData?.code || "").toUpperCase();
+    const isCsrfError =
+      status === 403 &&
+      (csrfCode === "CSRF_TOKEN_MISSING" || csrfCode === "CSRF_TOKEN_INVALID");
 
-    if (!shouldAttemptRefresh) {
+    if (isCsrfError && !originalRequest._csrfRetry) {
+      originalRequest._csrfRetry = true;
+      csrfToken = null;
+
+      try {
+        const refreshedToken = await ensureCsrfToken();
+        if (refreshedToken) {
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers["x-csrf-token"] = refreshedToken;
+        }
+        return axiosInstance(originalRequest);
+      } catch (retryError) {
+        return Promise.reject(error);
+      }
+    }
+
+    // Don't retry auth endpoints (login, register, etc.)
+    if (isAuthEndpoint(requestUrl)) {
       return Promise.reject(error);
     }
 
-    try {
-      originalRequest._retry = true;
-      const refreshPayload = await refreshUserAccessToken();
-      const refreshedToken = refreshPayload?.accessToken || null;
-      if (!refreshedToken) {
-        throw new Error("Refresh endpoint did not return an access token");
+    // For admin endpoints - retry with admin token on 401
+    if (status === 401 && isAdminEndpoint(requestUrl)) {
+      const adminToken = getAdminAccessToken();
+      if (adminToken && !originalRequest._retry) {
+        originalRequest._retry = true;
+        originalRequest.headers = originalRequest.headers || {};
+        originalRequest.headers.Authorization = `Bearer ${adminToken}`;
+        return axiosInstance(originalRequest);
       }
-      originalRequest.headers = originalRequest.headers || {};
-      originalRequest.headers.Authorization = `Bearer ${refreshedToken}`;
-      return axiosInstance(originalRequest);
-    } catch (refreshError) {
-      return Promise.reject(refreshError);
+      clearAdminSessionStorage();
+      emitAuthSessionSync("admin-token-invalid");
+      return Promise.reject(error);
     }
+
+    // For user routes - auto-refresh token on 401/403 if not already retried
+    if ((status === 401 || status === 403) &&
+        isUserRoute(requestUrl) &&
+        !originalRequest._retry &&
+        !originalRequest._refreshRetry &&
+        !shouldSkipAuthRefresh(originalRequest)) {
+      originalRequest._refreshRetry = true;
+
+      try {
+        if (!refreshPromise) {
+          refreshPromise = axiosInstance
+            .post(
+              "/auth/refresh",
+              {},
+              { headers: { "X-Skip-Auth-Refresh": "true" } },
+            )
+            .then((refreshResponse) => {
+              const newToken =
+                refreshResponse.data?.accessToken || refreshResponse.data?.token;
+              if (!newToken) {
+                throw new Error("Refresh token missing");
+              }
+              setUserAccessToken(newToken);
+              emitAuthSessionSync("user-token-refresh");
+              return newToken;
+            })
+            .finally(() => {
+              refreshPromise = null;
+            });
+        }
+
+        const refreshedToken = await refreshPromise;
+        if (refreshedToken) {
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers.Authorization = `Bearer ${refreshedToken}`;
+          return axiosInstance(originalRequest);
+        }
+      } catch (refreshError) {
+        // Refresh failed - clear user session
+        clearUserSessionStorage();
+        emitAuthSessionSync("user-token-refresh-failed");
+        return Promise.reject(error);
+      }
+    }
+
+    if ((status === 401 || status === 403) && originalRequest._authScope === "admin") {
+      clearAdminSessionStorage();
+      emitAuthSessionSync("admin-token-invalid");
+    }
+
+    return Promise.reject(error);
   },
 );
 
@@ -468,9 +600,13 @@ export const userAPI = {
   },
 
   refreshToken: async () => {
-    const payload = await refreshUserAccessToken();
-    emitAuthSessionSync("user-refresh");
-    return payload;
+    const response = await axiosInstance.post("/auth/refresh");
+    const nextToken = response.data.accessToken || response.data.token;
+    if (nextToken) {
+      setUserAccessToken(nextToken);
+      emitAuthSessionSync("user-token-refresh");
+    }
+    return response.data;
   },
 
   logout: async () => {
@@ -516,9 +652,7 @@ export const userAPI = {
   },
 
   uploadProfileImage: async (formData) => {
-    const response = await axiosInstance.post("/auth/profile/image", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
+    const response = await axiosInstance.post("/auth/profile/image", formData);
     return response.data;
   },
 
@@ -569,6 +703,11 @@ export const userAPI = {
     const response = await axiosInstance.get("/auth/notifications", {
       params: { limit },
     });
+    return response.data;
+  },
+
+  getNotificationsUnreadCount: async () => {
+    const response = await axiosInstance.get("/auth/notifications/unread-count");
     return response.data;
   },
 
@@ -634,12 +773,97 @@ export const settingsAPI = {
     const response = await axiosInstance.get("/settings");
     return response.data;
   },
+  getWhatsAppNumber: async () => {
+    const response = await axiosInstance.get("/settings/whatsapp");
+    return response.data;
+  },
+  getExchangeRates: async (currencies = []) => {
+    const params = Array.isArray(currencies) && currencies.length
+      ? { currencies: currencies.join(",") }
+      : undefined;
+    const response = await axiosInstance.get("/settings/rates", { params });
+    return response.data;
+  },
+};
+
+export const announcementAPI = {
+  getActive: async () => {
+    const response = await axiosInstance.get("/announcements/active");
+    return response.data;
+  },
+
+  getAll: async () => {
+    const response = await axiosInstance.get("/announcements");
+    return response.data;
+  },
+
+  create: async (data) => {
+    const response = await axiosInstance.post("/announcements", data);
+    return response.data;
+  },
+
+  update: async (id, data) => {
+    const response = await axiosInstance.put(`/announcements/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id) => {
+    const response = await axiosInstance.delete(`/announcements/${id}`);
+    return response.data;
+  },
+};
+
+export const teamAPI = {
+  getAll: async () => {
+    const response = await axiosInstance.get("/team/all");
+    return response.data;
+  },
+
+  getActive: async () => {
+    const response = await axiosInstance.get("/team");
+    return response.data;
+  },
+
+  create: async (data) => {
+    const response = await axiosInstance.post("/team", data);
+    return response.data;
+  },
+
+  update: async (id, data) => {
+    const response = await axiosInstance.put(`/team/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id) => {
+    const response = await axiosInstance.delete(`/team/${id}`);
+    return response.data;
+  },
+
+  uploadImage: async (file) => {
+    const formData = new FormData();
+    formData.append("profile_image", file);
+    const response = await axiosInstance.post("/team/upload-image", formData);
+    return response.data;
+  },
 };
 
 // Admin APIs
 export const adminAPI = {
+  // Super-admin gate only. Backend rejects accounts whose admin_role !== 'super_admin'.
   login: async (credentials) => {
     const response = await axiosInstance.post("/admin/login", credentials);
+    if (response.data.token) {
+      setAdminAccessToken(response.data.token);
+      emitAuthSessionSync("admin-login");
+    }
+    return response.data;
+  },
+
+  // Staff gate. Backend accepts staff_admin / admin / moderator — rejects super_admin.
+  // Returns the same token shape as super-admin login so the rest of the admin
+  // app (shared dashboard, permissions) keeps working unchanged.
+  staffLogin: async (credentials) => {
+    const response = await axiosInstance.post("/admin/staff-login", credentials);
     if (response.data.token) {
       setAdminAccessToken(response.data.token);
       emitAuthSessionSync("admin-login");
@@ -805,6 +1029,27 @@ export const adminAPI = {
     return response.data;
   },
 
+  // Shipping Cities Management
+  getShippingCities: async () => {
+    const response = await axiosInstance.get("/admin/shipping/city-fees");
+    return response.data;
+  },
+
+  createShippingCity: async (cityData) => {
+    const response = await axiosInstance.post("/admin/shipping/city-fees", cityData);
+    return response.data;
+  },
+
+  updateShippingCity: async (id, cityData) => {
+    const response = await axiosInstance.put(`/admin/shipping/city-fees/${id}`, cityData);
+    return response.data;
+  },
+
+  deleteShippingCity: async (id) => {
+    const response = await axiosInstance.delete(`/admin/shipping/city-fees/${id}`);
+    return response.data;
+  },
+
   getInventoryMovements: async (params = {}) => {
     const response = await axiosInstance.get("/admin/inventory/movements", {
       params,
@@ -865,6 +1110,51 @@ export const adminAPI = {
     return response.data;
   },
 
+  getPaymentAccounts: async () => {
+    const response = await axiosInstance.get("/admin/payments/accounts");
+    return response.data;
+  },
+
+  updatePaymentAccount: async (accountId, payload) => {
+    const response = await axiosInstance.put(
+      `/admin/payments/accounts/${accountId}`,
+      payload,
+    );
+    return response.data;
+  },
+
+  getPaymentVerifications: async (status = "pending", stage = null) => {
+    const params = { status };
+    if (stage) params.stage = stage;
+    const response = await axiosInstance.get(
+      "/admin/payments/verifications",
+      { params },
+    );
+    return response.data;
+  },
+
+  getPaymentAnalytics: async () => {
+    const response = await axiosInstance.get("/admin/payments/analytics");
+    return response.data;
+  },
+
+  approvePaymentVerification: async (verificationId, adminNote = null) => {
+    const body = adminNote ? { admin_note: adminNote } : {};
+    const response = await axiosInstance.put(
+      `/admin/payments/verifications/${verificationId}/approve`,
+      body,
+    );
+    return response.data;
+  },
+
+  rejectPaymentVerification: async (verificationId, reason) => {
+    const response = await axiosInstance.put(
+      `/admin/payments/verifications/${verificationId}/reject`,
+      { reason },
+    );
+    return response.data;
+  },
+
   getReturns: async (params = {}) => {
     const response = await axiosInstance.get("/admin/returns", { params });
     return response.data;
@@ -908,11 +1198,7 @@ export const adminAPI = {
   },
 
   createAdmin: async (formData) => {
-    const response = await axiosInstance.post("/admin-management/admins", formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const response = await axiosInstance.post("/admin-management/admins", formData);
     return response.data;
   },
 
@@ -939,6 +1225,23 @@ export const adminAPI = {
     return response.data;
   },
 
+  updateAdminProfileImage: async (adminId, file) => {
+    const formData = new FormData();
+    formData.append("profile_image", file);
+    const response = await axiosInstance.post(
+      `/admin-management/admins/${adminId}/profile-image`,
+      formData,
+    );
+    return response.data;
+  },
+
+  removeAdminProfileImage: async (adminId) => {
+    const response = await axiosInstance.delete(
+      `/admin-management/admins/${adminId}/profile-image`,
+    );
+    return response.data;
+  },
+
   getAdminLogs: async (adminId, limit = 20) => {
     const response = await axiosInstance.get(
       `/admin-management/admins/${adminId}/logs`,
@@ -959,6 +1262,12 @@ export const adminAPI = {
     const response = await axiosInstance.post(
       `/admin-management/admins/${adminId}/reset-password`
     );
+    return response.data;
+  },
+
+  // Get QR code data for a product
+  getProductQrData: async (productId) => {
+    const response = await axiosInstance.get(`/admin/products/${productId}/qr-data`);
     return response.data;
   },
 
@@ -993,6 +1302,22 @@ export const adminAPI = {
   },
 };
 
+// Payment verification APIs
+export const paymentAPI = {
+  getActiveAccounts: async () => {
+    const response = await axiosInstance.get("/payments/accounts/active");
+    return response.data;
+  },
+
+  submitVerification: async (formData) => {
+    const response = await axiosInstance.post(
+      "/payments/submit-verification",
+      formData,
+    );
+    return response.data;
+  },
+};
+
 // Order APIs
 export const orderAPI = {
   getAll: async () => {
@@ -1021,6 +1346,12 @@ export const orderAPI = {
   },
 
   create: async (orderData) => {
+    const userToken = getUserAccessToken();
+    if (!userToken) {
+      const err = new Error("Please login to place your order");
+      err.status = 401;
+      throw err;
+    }
     const response = await axiosInstance.post("/orders/create", orderData);
     return response.data;
   },
@@ -1195,9 +1526,7 @@ export const categoryAPI = {
   uploadImage: async (file) => {
     const formData = new FormData();
     formData.append("category_image", file);
-    const response = await axiosInstance.post("/categories/upload-image", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
+    const response = await axiosInstance.post("/categories/upload-image", formData);
     return response.data;
   },
 };
@@ -1205,8 +1534,12 @@ export const categoryAPI = {
 // Geolocation APIs
 export const geolocationAPI = {
   getCurrency: async () => {
-    const response = await axiosInstance.get("/geolocation/currency");
-    return response.data;
+    try {
+      const response = await axiosInstance.get("/geolocation/currency");
+      return response.data;
+    } catch {
+      return { country_code: 'PK', currency: 'PKR', source: 'fallback' };
+    }
   },
 
   getInfo: async () => {
@@ -1336,6 +1669,47 @@ export const reviewAPI = {
   },
 };
 
+// Newsletter API — public subscribe + admin-only management
+export const newsletterAPI = {
+  subscribe: async (email, source = "footer") => {
+    const response = await axiosInstance.post("/newsletter/subscribe", {
+      email,
+      source,
+    });
+    return response.data;
+  },
+
+  // Admin endpoints
+  listSubscribers: async (params = {}) => {
+    const response = await axiosInstance.get("/admin/newsletter/subscribers", {
+      params,
+    });
+    return response.data;
+  },
+
+  deleteSubscriber: async (id) => {
+    const response = await axiosInstance.delete(
+      `/admin/newsletter/subscribers/${id}`,
+    );
+    return response.data;
+  },
+
+  broadcast: async ({ subject, message }) => {
+    const response = await axiosInstance.post("/admin/newsletter/broadcast", {
+      subject,
+      message,
+    });
+    return response.data;
+  },
+
+  setWelcomePromo: async (code) => {
+    const response = await axiosInstance.post("/admin/newsletter/welcome-promo", {
+      code,
+    });
+    return response.data;
+  },
+};
+
 export default {
   productAPI,
   userAPI,
@@ -1343,11 +1717,14 @@ export default {
   adminAPI,
   orderAPI,
   categoryAPI,
+  announcementAPI,
   geolocationAPI,
   contactAPI,
   cartAPI,
   wishlistAPI,
   returnAPI,
   reviewAPI,
+  newsletterAPI,
   axiosInstance,
+  emitAuthSessionSync,
 };

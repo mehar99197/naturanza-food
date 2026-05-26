@@ -1,0 +1,27 @@
+{
+  "name": "Naturanza Food",
+  "short_name": "Naturanza",
+  "description": "Premium organic honey, herbal teas, natural supplements, and wellness products delivered across Pakistan.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#22c55e",
+  "lang": "en-PK",
+  "categories": ["shopping", "food", "health", "lifestyle"],
+  "icons": [
+    {
+      "src": "/images/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

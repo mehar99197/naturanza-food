@@ -1,7 +1,7 @@
 -- 005_remove_facebook_oauth_provider.sql
 -- Purpose: remove Facebook OAuth provider references from auth-related data.
 
-USE naturanza_foods;
+USE naturanza_food;
 
 UPDATE users
 SET signup_provider = 'password'

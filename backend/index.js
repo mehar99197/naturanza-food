@@ -11,6 +11,14 @@ const { dbPool, db, testDatabaseConnection } = require("./config/db");
 const { ensureProductionSchema } = require("./utils/schemaCompatibility");
 const { getJwtRuntimeInfo } = require("./utils/jwtTokens");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
+const {
+  csrfMiddleware,
+  generateToken,
+  createSignedToken,
+  verifySignedToken,
+  CSRF_COOKIE_NAME,
+  CSRF_COOKIE_MAX_AGE,
+} = require("./middleware/csrf");
 
 if (!process.env.GOOGLE_CLIENT_ID) {
   console.warn(
@@ -48,7 +56,7 @@ const TRUST_PROXY_ENABLED =
   )
     .trim()
     .toLowerCase() !== "false";
-const ALLOWED_CORS_ORIGINS = (process.env.ALLOWED_CORS_ORIGINS || "")
+const ALLOWED_CORS_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS || process.env.ALLOWED_CORS_ORIGINS || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
@@ -99,8 +107,6 @@ app.use(
 );
 
 // 2. Rate Limiting - General API protection
-const skipInDevelopment = (req) => process.env.NODE_ENV === 'development';
-
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 500,
@@ -110,7 +116,6 @@ const apiLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: skipInDevelopment,
 });
 
 // 3. Strict Rate Limiting for Authentication Routes
@@ -125,7 +130,6 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   skipFailedRequests: false,
   skipSuccessfulRequests: true,
-  skip: skipInDevelopment,
 });
 
 const refreshLimiter = rateLimit({
@@ -138,19 +142,7 @@ const refreshLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  skip: skipInDevelopment,
 });
-
-const chatLimiter = ENABLE_RATE_LIMITS
-  ? rateLimit({
-      windowMs: 60 * 60 * 1000,
-      max: 20,
-      standardHeaders: true,
-      legacyHeaders: false,
-      skip: skipInDevelopment,
-      keyGenerator: (req) => req.body?.sessionId || ipKeyGenerator(req.ip || req.socket.remoteAddress || 'unknown'),
-    })
-  : (req, res, next) => next();
 
 // 4. Prevent parameter pollution
 app.use(hpp());
@@ -189,6 +181,8 @@ const corsOptions = {
     "Authorization",
     "X-Requested-With",
     "X-Skip-Auth-Refresh",
+    "x-csrf-token",
+    "X-CSRF-Token",
   ],
   exposedHeaders: ["Content-Disposition", "Content-Type", "Content-Length"],
 };
@@ -263,10 +257,11 @@ const ensureDefaultAdminAccount = async () => {
       console.log(`Default admin account created: ${DEFAULT_ADMIN_EMAIL}`);
     }
 
-    await dbPool.query(
-      "UPDATE users SET role = 'customer', admin_role = NULL, admin_permissions = NULL, is_active = FALSE WHERE role = 'admin' AND email <> ?",
-      [DEFAULT_ADMIN_EMAIL],
-    );
+    // NOTE: previously this block demoted every non-default admin to customer
+    // on each startup. That silently destroyed any staff_admin accounts created
+    // through the Admin Management UI on every nodemon reload. Staff admin
+    // lifecycle is now owned by /api/admin-management/admins — startup must
+    // not touch existing admin rows beyond the default-admin upsert above.
   } catch (error) {
     console.warn("Could not ensure default admin account:", error.message);
   }
@@ -294,11 +289,41 @@ const {
   sanitizeQueryParams,
   preventSQLInjection,
 } = require("./middleware/security");
+const { ensurePasswordHistoryTable } = require("./utils/passwordHistory");
+
+// Initialize password history table on startup
+const initPasswordHistory = async () => {
+  try {
+    const connection = await dbPool.getConnection();
+    try {
+      await ensurePasswordHistoryTable(connection);
+      console.log("Password history table initialized");
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.warn("Could not initialize password history table:", error.message);
+  }
+};
 
 // Apply security middleware globally
 app.use(sanitizeRequestBody);
 app.use(sanitizeQueryParams);
 app.use(preventSQLInjection);
+
+// Apply CSRF protection (skip in development if explicitly disabled)
+const csrfEnabled = String(process.env.ENABLE_CSRF_PROTECTION || "true").toLowerCase();
+if (csrfEnabled !== "false" && process.env.NODE_ENV !== "development") {
+  app.use(csrfMiddleware({
+    excludePaths: [
+      "/api/health",
+      "/api/products",           // GET requests only
+      "/api/categories",         // GET requests only
+      "/api/geolocation",
+      "/api/announcements/active",
+    ],
+  }));
+}
 
 // Routes
 const { authRouter } = require("./src/modules/auth/auth.routes");
@@ -313,12 +338,19 @@ const contactRoutes = require("./routes/contact");
 const settingsRoutes = require("./routes/settings");
 const adminRoutes = require("./routes/admin");
 const adminManagementRoutes = require("./routes/adminManagement");
+const adminPaymentsRoutes = require("./routes/adminPayments");
+const paymentRoutes = require("./routes/payments");
 const geolocationRoutes = require("./routes/geolocation");
 const variantRoutes = require("./routes/variants");
 const couponRoutes = require("./routes/coupons");
 const returnsRoutes = require("./routes/returns");
 const reviewsRoutes = require("./routes/reviews");
-const chatRoutes = require("./routes/chat");
+const announcementsRoutes = require("./routes/announcements");
+const teamRoutes = require("./routes/team");
+const newsletterRoutes = require("./routes/newsletter");
+const sitemapRoutes = require("./routes/sitemap");
+const shippingRoutes = require("./routes/shipping");
+const adminShippingRoutes = require("./routes/adminShipping");
 
 // Apply rate limiting to auth routes (strict)
 if (ENABLE_RATE_LIMITS) {
@@ -329,8 +361,15 @@ if (ENABLE_RATE_LIMITS) {
   app.use("/api/auth/refresh-token", refreshLimiter);
   app.use("/api/admin/login", authLimiter);
 
-  // Apply general rate limiting to all API routes
-  app.use("/api/", apiLimiter);
+  // Apply general rate limiting to all API routes (except auth which has its own limits)
+  app.use("/api/", (req, res, next) => {
+    const authPath = req.path.match(/^\/auth\/(login|register|google|refresh)/);
+    if (!authPath) {
+      apiLimiter(req, res, next);
+    } else {
+      next();
+    }
+  });
 } else {
   console.warn(
     "Rate limiting is disabled (development mode). Set ENABLE_RATE_LIMITS=true to enable it.",
@@ -349,24 +388,70 @@ app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/payments", paymentRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/admin/payments", adminPaymentsRoutes);
 app.use("/api/admin-management", adminManagementRoutes);
 app.use("/api/geolocation", geolocationRoutes);
+app.use("/api/shipping", shippingRoutes);
 app.use("/api/variants", variantRoutes);
 app.use("/api/coupons", couponRoutes);
 app.use("/api/returns", returnsRoutes);
 app.use("/api/reviews", reviewsRoutes);
-app.use("/api/chat", chatRoutes(chatLimiter));
+app.use("/api/announcements", announcementsRoutes);
+app.use("/api/team", teamRoutes);
+app.use("/api/newsletter", newsletterRoutes);
+app.use("/api", sitemapRoutes);
+app.use("/api/shipping", shippingRoutes);
+app.use("/api/admin/shipping", adminShippingRoutes);
 
 // Health check route
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+// CSRF token endpoint for frontend
+app.get("/api/csrf-token", (req, res) => {
+  const existingToken = req.cookies?.[CSRF_COOKIE_NAME];
+  if (existingToken) {
+    const verification = verifySignedToken(existingToken);
+    if (verification.valid) {
+      return res.json({ csrfToken: existingToken });
+    }
+  }
+
+  const rawToken = req.csrfToken || generateToken();
+  const signedToken = createSignedToken(rawToken);
+
+  res.cookie(CSRF_COOKIE_NAME, signedToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+    maxAge: CSRF_COOKIE_MAX_AGE,
+    path: "/",
+  });
+
+  return res.json({ csrfToken: signedToken });
+});
+
+// Serve React frontend in production
+const frontendDist = path.join(__dirname, "..", "frontend", "dist");
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(frontendDist));
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/api/") || req.path.startsWith("/images/") || req.path.startsWith("/uploads/")) {
+      return next();
+    }
+    res.sendFile(path.join(frontendDist, "index.html"));
+  });
+}
+
 app.use(notFoundHandler);
 app.use(errorHandler);
 
 let server;
+
+const { startReservationSweeper } = require("./utils/stockReservations");
 
 const startServer = () => {
   server = app.listen(PORT, () => {
@@ -374,6 +459,12 @@ const startServer = () => {
       `JWT configured with ${jwtRuntime.signingAlgorithm} (allowed: ${jwtRuntime.allowedAlgorithms.join(", ")}).`,
     );
     console.log(`Server is running on port ${PORT}`);
+
+    // Release expired stock reservations every 5 minutes. The sweeper guards
+    // against orphan reservations (customer abandons screenshot upload, admin
+    // never reaches the queue) permanently blocking inventory.
+    startReservationSweeper({ intervalMs: 5 * 60_000 });
+    console.log("Stock reservation sweeper running (5-minute interval).");
   });
 
   server.on("error", (err) => {
@@ -394,9 +485,18 @@ const bootstrap = async () => {
       `Connected to MySQL ${connectionInfo.mysqlVersion} (database: ${connectionInfo.databaseName})`,
     );
     await ensureDatabaseCompatibility();
+    await initPasswordHistory();
     startServer();
   } catch (error) {
-    console.error("Error connecting to MySQL:", error.message);
+    const details = [error.code, error.errno, error.sqlMessage, error.message]
+      .filter(Boolean)
+      .join(" | ");
+    console.error("Error connecting to MySQL:", details || error);
+    if (error.code === "ECONNREFUSED") {
+      console.error(
+        "Hint: the MySQL/MariaDB server is not reachable. Start it with: sudo systemctl start mariadb",
+      );
+    }
     process.exit(1);
   }
 };

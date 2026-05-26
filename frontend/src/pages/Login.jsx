@@ -3,9 +3,10 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useAuth } from "@/context/AuthContext";
-import { sanitizeEmail, sanitizeInput } from "@/lib/sanitize";
+import { sanitizeEmail } from "@/lib/sanitize";
 import LeftPanel from "@/components/auth/LeftPanel";
 import AuthSocialButtons from "@/components/auth/AuthSocialButtons";
+import { NoIndexSEO } from "@/components/SEO";
 
 const leftPoints = [
   "100% Certified Organic Products",
@@ -60,9 +61,14 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
 
   const from = location.state?.from?.pathname || "/";
+  const allowDevGoogle =
+    String(import.meta.env.VITE_GOOGLE_ALLOW_DEV || "")
+      .trim()
+      .toLowerCase() === "true";
   const isGoogleConfigured = Boolean(
     import.meta.env.VITE_GOOGLE_CLIENT_ID &&
-      import.meta.env.VITE_GOOGLE_CLIENT_ID !== "YOUR_GOOGLE_CLIENT_ID_HERE",
+      import.meta.env.VITE_GOOGLE_CLIENT_ID !== "YOUR_GOOGLE_CLIENT_ID_HERE" &&
+      (!import.meta.env.DEV || allowDevGoogle),
   );
 
   useEffect(() => {
@@ -115,7 +121,7 @@ const Login = () => {
 
     const result = await login(
       sanitizeEmail(values.email),
-      sanitizeInput(values.password),
+      values.password,
     );
 
     if (result.success) {
@@ -137,7 +143,7 @@ const Login = () => {
   };
 
   return (
-    <div className="auth-premium-font min-h-screen bg-green-50 lg:h-screen lg:overflow-hidden">
+    <div className="auth-premium-font min-h-screen bg-green-50 overflow-y-auto lg:h-screen lg:overflow-hidden">
       <div className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:block lg:w-[42%] xl:w-[44%]">
         <LeftPanel
           heading="Continue Your Wellness Journey"
@@ -180,9 +186,10 @@ const Login = () => {
             ) : null}
 
             <form className="mt-6 space-y-4" onSubmit={handleSubmit(onSubmit)} noValidate>
-              <label className="block">
+              <label htmlFor="email" className="block">
                 <span className={labelClassName}>Email address</span>
                 <input
+                  id="email"
                   type="email"
                   autoComplete="email"
                   placeholder="you@example.com"
@@ -204,10 +211,11 @@ const Login = () => {
                 ) : null}
               </label>
 
-              <label className="block">
+              <label htmlFor="password" className="block">
                 <span className={labelClassName}>Password</span>
                 <div className="relative">
                   <input
+                    id="password"
                     type={showPassword ? "text" : "password"}
                     autoComplete="current-password"
                     placeholder="Enter your password"
@@ -284,7 +292,7 @@ const Login = () => {
         </div>
       </main>
     </div>
-  );
-};
+);
+}
 
 export default Login;

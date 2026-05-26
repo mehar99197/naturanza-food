@@ -43,7 +43,7 @@ const authenticateToken = async (req, res, next) => {
 
         const [userRows] = await db
             .promise()
-            .query("SELECT id, email, name, role, admin_role, admin_permissions, is_active FROM users WHERE id = ? LIMIT 1", [userId]);
+            .query("SELECT id, email, name, role, admin_role, admin_permissions, profile_image, is_active FROM users WHERE id = ? LIMIT 1", [userId]);
 
         if (!userRows.length) {
             return res.status(401).json({ error: "User account not found" });
@@ -70,6 +70,7 @@ const authenticateToken = async (req, res, next) => {
             role: userRows[0].role,
             admin_role: userRows[0].admin_role,
             admin_permissions: adminPermissions,
+            profile_image: userRows[0].profile_image,
             jti: payload.jti,
         };
         req.token = token;

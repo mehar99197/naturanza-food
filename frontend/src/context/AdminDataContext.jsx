@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { productAPI, orderAPI, adminAPI, categoryAPI } from "@/services/api";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 
@@ -14,6 +15,8 @@ export const useAdminData = () => {
 
 export const AdminDataProvider = ({ children }) => {
   const { isAdminAuthenticated, loading: adminLoading } = useAdminAuth();
+  const location = useLocation();
+  const isAdminRoute = location.pathname.startsWith("/admin");
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -59,7 +62,7 @@ export const AdminDataProvider = ({ children }) => {
   }, [fetchCategoriesOnly]);
 
   const fetchAllData = useCallback(async () => {
-    if (!isAdminAuthenticated) {
+    if (!isAdminAuthenticated || !isAdminRoute) {
       setProducts([]);
       setOrders([]);
       setCustomers([]);
@@ -107,7 +110,7 @@ export const AdminDataProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  }, [isAdminAuthenticated]);
+  }, [isAdminAuthenticated, isAdminRoute]);
 
   useEffect(() => {
     if (adminLoading) {
@@ -115,7 +118,7 @@ export const AdminDataProvider = ({ children }) => {
       return;
     }
 
-    if (!isAdminAuthenticated) {
+    if (!isAdminAuthenticated || !isAdminRoute) {
       setProducts([]);
       setOrders([]);
       setCustomers([]);
@@ -127,7 +130,7 @@ export const AdminDataProvider = ({ children }) => {
     }
 
     void fetchAllData();
-  }, [adminLoading, fetchAllData, isAdminAuthenticated]);
+  }, [adminLoading, fetchAllData, isAdminAuthenticated, isAdminRoute]);
 
   // ===== PRODUCTS CRUD =====
   const addProduct = async (productData) => {

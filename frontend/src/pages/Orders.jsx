@@ -7,6 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/context/SettingsContext';
 import { orderAPI } from '@/services/api';
 import { formatPrice } from '@/lib/utils';
+import { NoIndexSEO } from '@/components/SEO';
 
 export function Orders() {
  const { settings } = useSettings();
@@ -173,9 +174,11 @@ export function Orders() {
  }
  };
 
- if (selectedOrder) {
- return (
- <main className="pt-20 sm:pt-24 md:pt-28 pb-12 sm:pb-16 min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 px-4 sm:px-6">
+if (selectedOrder) {
+    return (
+      <>
+        <NoIndexSEO title="Order Details" />
+      <main className="pt-20 sm:pt-24 md:pt-28 pb-12 sm:pb-16 min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 px-4 sm:px-6">
  <div className="container-custom max-w-4xl">
  {/* Back Button */}
  <button
@@ -272,7 +275,7 @@ export function Orders() {
  alt={item.product_name || item.name}
  className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-lg flex-shrink-0"
  onError={(e) => {
- e.target.src = '/images/products/powder.webp';
+                          e.target.src = '/images/products/honey.webp';
  }}
  />
  <div className="flex-1 min-w-0">
@@ -323,13 +326,16 @@ export function Orders() {
  </p>
  </div>
  </div>
- </div>
- </main>
- );
- }
+</div>
+  </main>
+  </>
+  );
+  }
 
- return (
- <main className="pt-20 sm:pt-24 md:pt-28 pb-12 sm:pb-16 min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 px-4 sm:px-6">
+  return (
+    <>
+      <NoIndexSEO title="My Orders" />
+  <main className="pt-20 sm:pt-24 md:pt-28 pb-12 sm:pb-16 min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 px-4 sm:px-6">
  <div className="container-custom max-w-6xl">
  {/* Header */}
  <div className="mb-6 sm:mb-8">
@@ -452,8 +458,9 @@ export function Orders() {
  </div>
  ))}
  </div>
- )}
- </div>
- </main>
- );
+)}
+  </div>
+  </main>
+  </>
+  );
 }

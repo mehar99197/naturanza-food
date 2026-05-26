@@ -2,10 +2,11 @@ import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import {
- AUTH_SESSION_SYNC_EVENT,
- setUserAccessToken,
- userAPI,
+  AUTH_SESSION_SYNC_EVENT,
+  setUserAccessToken,
+  userAPI,
 } from '@/services/api';
+import { NoIndexSEO } from '@/components/SEO';
 
 /**
  * OAuth Callback Handler
@@ -96,15 +97,18 @@ const OAuthCallback = () => {
  handleCallback();
  }, [navigate, searchParams]);
 
- return (
- <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-emerald-100">
- <div className="text-center">
- <Loader2 className="w-12 h-12 text-green-600 mx-auto mb-4" />
- <p className="text-lg text-gray-700">Completing authentication...</p>
- <p className="text-sm text-gray-500 mt-2">Please wait while we log you in</p>
- </div>
- </div>
- );
+return (
+    <>
+      <NoIndexSEO title="Authentication" />
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-emerald-100">
+    <div className="text-center">
+    <Loader2 className="w-12 h-12 text-green-600 mx-auto mb-4" />
+    <p className="text-lg text-gray-700">Completing authentication...</p>
+    <p className="text-sm text-gray-500 mt-2">Please wait while we log you in</p>
+    </div>
+    </div>
+    </>
+  );
 };
 
 export default OAuthCallback;

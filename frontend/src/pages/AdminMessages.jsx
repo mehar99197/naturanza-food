@@ -8,7 +8,6 @@ import {
   Trash2,
 } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { AdminPageSkeleton } from "@/components/Skeletons/AdminPageSkeleton";
 import { contactAPI } from "@/services/api";
 
 const statusClasses = {
@@ -167,14 +166,6 @@ export function AdminMessages() {
   );
 
   const unreadCount = statusCounts.new;
-
-  if (loading) {
-    return (
-      <AdminLayout>
-        <AdminPageSkeleton cards={0} rows={8} showSidebar />
-      </AdminLayout>
-    );
-  }
 
   return (
     <AdminLayout>

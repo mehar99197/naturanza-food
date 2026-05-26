@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { MessageSquare, Star } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import reviewEvents from "@/utils/reviewEvents";
+import { reviewAPI } from "@/services/api";
+import { reviewEvents, REVIEW_EVENTS } from "@/utils/reviewEvents";
 
 const renderStars = (rating) => {
   const normalized = Math.max(0, Math.min(5, Number(rating) || 0));
@@ -33,59 +34,63 @@ export function ProfileReviews() {
   const [myReviews, setMyReviews] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetch user's reviews from API in real-time
-  const fetchMyReviews = async () => {
+  const fetchMyReviews = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
-      const token = localStorage.getItem('token');
-      
-      if (!token) {
+      if (!silent) {
+        setLoading(true);
+      }
+
+      if (!user) {
         setMyReviews([]);
-        setLoading(false);
         return;
       }
 
-      const response = await fetch('http://localhost:5000/api/reviews/my-reviews', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setMyReviews(data);
-      } else {
-        setMyReviews([]);
-      }
+      const data = await reviewAPI.getMyReviews();
+      setMyReviews(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching my reviews:', error);
       setMyReviews([]);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
-  };
+  }, [user]);
 
   // Initial fetch on mount
   useEffect(() => {
-    fetchMyReviews();
-  }, []);
+    void fetchMyReviews();
+  }, [fetchMyReviews]);
 
   // Listen for review submission events
   useEffect(() => {
-    const handleReviewSubmitted = (data) => {
-      console.log('Review submitted event received:', data);
-      // Refresh reviews when a new review is submitted
-      fetchMyReviews();
+    const refreshMyReviews = () => {
+      void fetchMyReviews({ silent: true });
     };
 
-    // Subscribe to review submitted events
-    const unsubscribe = reviewEvents.onReviewSubmitted(handleReviewSubmitted);
+    const intervalId = window.setInterval(refreshMyReviews, 15000);
+    const handleWindowFocus = () => refreshMyReviews();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshMyReviews();
+      }
+    };
+    const unsubscribeSubmitted = reviewEvents.on(REVIEW_EVENTS.REVIEW_SUBMITTED, refreshMyReviews);
+    const unsubscribeUpdated = reviewEvents.on(REVIEW_EVENTS.REVIEW_UPDATED, refreshMyReviews);
+    const unsubscribeDeleted = reviewEvents.on(REVIEW_EVENTS.REVIEW_DELETED, refreshMyReviews);
 
-    // Cleanup on unmount
+    window.addEventListener("focus", handleWindowFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
-      unsubscribe();
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleWindowFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      unsubscribeSubmitted();
+      unsubscribeUpdated();
+      unsubscribeDeleted();
     };
-  }, []);
+  }, [fetchMyReviews]);
 
   if (loading) {
     return (

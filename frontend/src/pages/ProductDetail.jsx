@@ -28,17 +28,54 @@ import { useReviews } from '@/context/ReviewContext';
 import { reviewAPI } from '@/services/api';
 import { useWishlist } from '@/context/WishlistContext';
 import { formatPrice } from '@/lib/utils';
+import { convertFromPkr, hasExchangeRate } from '@/lib/exchangeRates';
 import { getAbsoluteImageUrl, getApiBaseUrl } from '@/lib/imageUtils';
+import { getProductContentDefaults, getProductContentText } from '@/lib/productContentDefaults';
 import { ProductCard } from '@/components/ProductCard';
 import { ProductDetailSkeleton } from '@/components/Skeletons/ProductDetailSkeleton';
 import ProductReviews from '@/components/ProductReviews';
 import { SEO } from '@/components/SEO';
+import reviewEvents from '@/utils/reviewEvents';
 import {
   ProductStructuredData,
   BreadcrumbStructuredData,
+  OrganizationStructuredData,
 } from '@/components/StructuredData';
 
 const FALLBACK_IMAGE = '/images/products/herbs.webp';
+
+const PRODUCT_FALLBACK_IMAGES = {
+  honey: '/images/products/honey.webp',
+  tea: '/images/products/tea.webp',
+  oil: '/images/products/oil.webp',
+  coconut: '/images/products/coconut-oil.webp',
+  powder: '/images/products/ispaghol_2.webp',
+  ispaghol: '/images/products/ispaghol_2.webp',
+  psyllium: '/images/products/ispaghol_2.webp',
+  seeds: '/images/products/ispaghol_1.png',
+  supplements: '/images/products/herbs.webp',
+  aloe: '/images/products/herbs.webp',
+  herbs: '/images/products/herbs.webp',
+  default: '/images/products/herbs.webp',
+};
+
+const getProductFallbackImage = (product) => {
+  if (!product || !product.name) return FALLBACK_IMAGE;
+  const text = `${product.name || ''} ${product.category_name || ''} ${product.category || ''}`.toLowerCase();
+  
+  if (text.includes('honey')) return PRODUCT_FALLBACK_IMAGES.honey;
+  if (text.includes('tea') || text.includes('chai')) return PRODUCT_FALLBACK_IMAGES.tea;
+  if (text.includes('coconut')) return PRODUCT_FALLBACK_IMAGES.coconut;
+  if (text.includes('oil')) return PRODUCT_FALLBACK_IMAGES.oil;
+  if (text.includes('powder') || text.includes('superfood') || text.includes('greens')) return PRODUCT_FALLBACK_IMAGES.powder;
+  if (text.includes('ispaghol') || text.includes('psyllium')) return PRODUCT_FALLBACK_IMAGES.ispaghol;
+  if (text.includes('seed')) return PRODUCT_FALLBACK_IMAGES.seeds;
+  if (text.includes('supplement') || text.includes('capsule')) return PRODUCT_FALLBACK_IMAGES.supplements;
+  if (text.includes('aloe')) return PRODUCT_FALLBACK_IMAGES.aloe;
+  if (text.includes('herb')) return PRODUCT_FALLBACK_IMAGES.herbs;
+  
+  return PRODUCT_FALLBACK_IMAGES.default;
+};
 
 const DETAIL_SECTIONS = [
   { key: 'description', label: 'Description' },
@@ -123,11 +160,12 @@ const normalizeImageSource = (value) => {
   if (!imageValue) return null;
 
   // Use getAbsoluteImageUrl to convert relative URLs to absolute backend URLs
-  return getAbsoluteImageUrl(imageValue);
+  return getAbsoluteImageUrl(imageValue, { defaultFolder: 'products' });
 };
 
 const getGalleryImages = (product) => {
-  if (!product) return [FALLBACK_IMAGE];
+  const fallback = product ? getProductFallbackImage(product) : FALLBACK_IMAGE;
+  if (!product) return [fallback];
 
   const candidates = [
     product.image_url,
@@ -142,7 +180,7 @@ const getGalleryImages = (product) => {
     .filter(Boolean);
 
   const unique = [...new Set(normalized)];
-  return unique.length > 0 ? unique : [FALLBACK_IMAGE];
+  return unique.length > 0 ? unique : [fallback];
 };
 
 const clampQuantity = (value, maxAllowedQty) => {
@@ -176,6 +214,11 @@ export function ProductDetail() {
   const [activeMobileSection, setActiveMobileSection] = useState('description');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+
+  const defaultProductContent = useMemo(
+    () => getProductContentDefaults(product),
+    [product],
+  );
 
   // Clear mock reviews from localStorage on component mount
   useEffect(() => {
@@ -242,10 +285,42 @@ export function ProductDetail() {
     }
   }, [activeImage, productImages.length]);
 
-  const ingredientsArray = useMemo(() => toArray(product?.ingredients), [product]);
-  const benefitsArray = useMemo(() => toArray(product?.benefits), [product]);
-  const usageArray = useMemo(() => toArray(product?.usage), [product]);
-  const descriptionParagraphs = useMemo(() => toParagraphs(product?.description), [product]);
+  const resolvedDescription = useMemo(
+    () => String(product?.description || defaultProductContent?.description || '').trim(),
+    [defaultProductContent, product],
+  );
+  const resolvedIngredients = useMemo(
+    () =>
+      String(
+        product?.ingredients ||
+          getProductContentText(defaultProductContent?.ingredients) ||
+          '',
+      ).trim(),
+    [defaultProductContent, product],
+  );
+  const resolvedBenefits = useMemo(
+    () =>
+      String(
+        product?.benefits ||
+          getProductContentText(defaultProductContent?.benefits) ||
+          '',
+      ).trim(),
+    [defaultProductContent, product],
+  );
+  const resolvedUsage = useMemo(
+    () =>
+      String(
+        product?.usage ||
+          getProductContentText(defaultProductContent?.usage) ||
+          '',
+      ).trim(),
+    [defaultProductContent, product],
+  );
+
+  const ingredientsArray = useMemo(() => toArray(resolvedIngredients), [resolvedIngredients]);
+  const benefitsArray = useMemo(() => toArray(resolvedBenefits), [resolvedBenefits]);
+  const usageArray = useMemo(() => toArray(resolvedUsage), [resolvedUsage]);
+  const descriptionParagraphs = useMemo(() => toParagraphs(resolvedDescription), [resolvedDescription]);
 
   // Fetch reviews from API instead of localStorage
   const [productReviews, setProductReviews] = useState([]);
@@ -294,10 +369,24 @@ export function ProductDetail() {
   const originalPrice = Number(product?.originalPrice || product?.original_price || 0);
   const hasDiscount = originalPrice > currentPrice;
   const savedAmount = hasDiscount ? originalPrice - currentPrice : 0;
+  const currencyCode = String(settings.currency || 'PKR').toUpperCase();
+  const hasRate = hasExchangeRate(currencyCode);
+  const seoCurrency = hasRate ? currencyCode : 'PKR';
+  const seoPriceValue = hasRate
+    ? convertFromPkr(currentPrice, seoCurrency) ?? currentPrice
+    : currentPrice;
 
-  const productId = product?.id ?? id;
-  const isWishlisted = isInWishlist(productId);
-  const isWishlistUpdating = isUpdating(productId);
+  const getMetaDescription = (paragraphs, productName) => {
+    if (paragraphs[0]) {
+      const desc = paragraphs[0].trim();
+      return desc.length > 155 ? desc.substring(0, 152) + '...' : desc;
+    }
+    return `Buy ${productName} at Naturanza Food. Premium organic and natural product. Order online with Cash on Delivery in Pakistan.`;
+  };
+
+  const productMetaDescription = getMetaDescription(descriptionParagraphs, product?.name || 'Product');
+  const isWishlisted = isInWishlist(id);
+  const isWishlistUpdating = isUpdating(id);
 
   const breadcrumbItems = useMemo(() => {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -306,10 +395,10 @@ export function ProductDetail() {
       { name: 'Shop', url: `${origin}/shop` },
       {
         name: product?.name || 'Product',
-        url: origin && productId ? `${origin}/product/${productId}` : '',
+        url: origin ? `${origin}/product/${id}` : '',
       },
     ];
-  }, [product?.name, productId]);
+  }, [product?.name, id]);
 
   const showFeedback = (message) => {
     setToastMessage(message);
@@ -430,8 +519,24 @@ export function ProductDetail() {
       
       // Add to local state for instant UI update
       setProductReviews((prev) => [newReviewWithImage, ...prev]);
+      addReview(id, {
+        id: data.review.id,
+        rating: data.review.rating,
+        comment: data.review.comment || '',
+        date: data.review.created_at,
+        userName: data.review.customer_name || user?.name || 'You',
+        userAvatar:
+          getAbsoluteImageUrl(data.review.customer_image) ||
+          user?.profileImage ||
+          user?.profile_image ||
+          '',
+      });
+      reviewEvents.reviewSubmitted({
+        productId: id,
+        review: data.review,
+      });
       
-      showFeedback('Review submitted! It will appear after admin approval.');
+      showFeedback('Review submitted successfully.');
 
     } catch (error) {
       console.error('Error submitting review:', error);
@@ -603,23 +708,26 @@ export function ProductDetail() {
     <>
       <SEO
         title={product.name}
-        description={descriptionParagraphs[0] || `Buy ${product.name} at Naturanza Foods.`}
+        description={productMetaDescription}
         image={productImages[0]}
         type="product"
-        price={String(currentPrice || '')}
-        currency={settings.currency || 'PKR'}
+        price={Number.isFinite(seoPriceValue) ? String(seoPriceValue) : ''}
+        currency={seoCurrency}
         availability={hasStock ? 'in stock' : 'out of stock'}
+        url={`${typeof window !== 'undefined' ? window.location.origin : ''}/product/${id}`}
       />
 
       <ProductStructuredData
         product={{
           ...product,
           image_url: productImages[0],
-          averageRating: displayedRating,
-          reviewCount: liveReviewCount,
+          averageRating: liveReviewCount > 0 ? displayedRating : undefined,
+          reviewCount: liveReviewCount > 0 ? liveReviewCount : undefined,
           stock_quantity: hasStock ? maxAllowedQty || 1 : 0,
         }}
       />
+
+      <OrganizationStructuredData />
 
       <BreadcrumbStructuredData items={breadcrumbItems} />
 
@@ -693,7 +801,7 @@ export function ProductDetail() {
             </div>
 
             <div className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
-              <h1 className="text-[1.85rem] font-bold leading-tight text-[#233023]">{product.name}</h1>
+              <p className="text-[1.85rem] font-bold leading-tight text-[#233023]">{product.name}</p>
 
               <div className="mt-2 flex items-center gap-2 text-sm">
                 <div className="flex items-center gap-0.5 text-amber-500">

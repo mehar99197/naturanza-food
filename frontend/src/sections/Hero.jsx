@@ -1,97 +1,223 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ShoppingBag, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ShoppingBag, Sparkles, Star, Leaf, Package, Tag } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { fadeIn, slideUp, staggerContainer, buttonTap } from '@/lib/animations';
-
-// Carousel slides data
-const slides = [
- {
- id: 1,
- badge:"Pure & Natural",
- headline:"Experience the Power of Pure Organic Honey",
- description:"Raw, unfiltered honey sourced from sustainable bee farms. Rich in antioxidants and natural enzymes for optimal health.",
- ctaPrimary:"Shop Honey",
- ctaSecondary:"Learn More",
- linkPrimary:"/shop?category=honey",
- linkSecondary:"/about",
- image:"/images/products/honey.webp",
- bgGradient:"from-green-50 via-emerald-50 to-green-100",
- accentColor:"from-green-600 to-emerald-600",
- },
- {
- id: 2,
- badge:"Coconut Care",
- headline:"Nourish Skin & Hair with Coconut Oil",
- description:"Cold-pressed coconut oil for hair care, skin hydration, massage, and daily wellness support.",
- ctaPrimary:"Shop Coconut Oil",
- ctaSecondary:"View Benefits",
- linkPrimary:"/shop?category=herbal-oils",
- linkSecondary:"/about",
- image:"/images/products/coconut%20oil.webp",
- imageSizeClass:"max-h-[170px] sm:max-h-[220px] md:max-h-none",
- bgGradient:"from-emerald-50 via-green-50 to-teal-50",
- accentColor:"from-emerald-600 to-green-700",
- },
- {
- id: 3,
- badge:"Digestive Balance",
- headline:"Support Digestion with Natural Ispaghol",
- description:"Natural ispaghol husk fiber for digestive comfort and daily gut wellness support.",
- ctaPrimary:"Shop Ispaghol",
- ctaSecondary:"Learn Usage",
- linkPrimary:"/shop?category=organic-powders",
- linkSecondary:"/faq",
- image:"/images/products/ispaghol_1.png",
- imageSizeClass:"max-h-[165px] sm:max-h-[210px] md:max-h-[430px] lg:max-h-[470px]",
- bgGradient:"from-green-100 via-emerald-50 to-green-50",
- accentColor:"from-green-700 to-emerald-600",
- },
-];
+import { productAPI } from '@/services/api';
+import { getAbsoluteImageUrl } from '@/lib/imageUtils';
+import { formatPrice } from '@/lib/utils';
+import { useSettings } from '@/context/SettingsContext';
 
 const highlightedHeadlineWords = new Set([
- 'nourish',
- 'natural',
- 'pure',
- 'organic',
- 'herbal',
- 'wellness',
- 'coconut',
- 'digestion',
- 'ispaghol',
+  'nourish',
+  'natural',
+  'pure',
+  'organic',
+  'herbal',
+  'wellness',
+  'coconut',
+  'digestion',
+  'ispaghol',
 ]);
 
-export function Hero() {
- const [currentSlide, setCurrentSlide] = useState(0);
- const [isHovered, setIsHovered] = useState(false);
- const [isAnimating, setIsAnimating] = useState(false);
- const [textKey, setTextKey] = useState(0);
+// Generic brand placeholder — used only when a slide truly has no image.
+// We deliberately do NOT fall back to a product-specific image (e.g. honey jar)
+// because that misleads the customer when a non-honey product is shown.
+const fallbackHeroImage = '/images/logo.png';
 
- // Auto-slide every 6 seconds for better readability
- useEffect(() => {
- if (!isHovered && !isAnimating) {
- const interval = setInterval(() => {
- nextSlide();
- }, 6000);
- return () => clearInterval(interval);
- }
- }, [currentSlide, isHovered, isAnimating]);
+// Best-effort: if a product has no uploaded image, infer one from its name
+// using the bundled assets in /images/products/. Keeps the carousel visually
+// coherent until an admin uploads a real image.
+const NAME_KEYWORD_TO_IMAGE = [
+  { keyword: 'honey', path: '/images/products/honey.webp' },
+  { keyword: 'ispagh', path: '/images/products/ispaghol_2.webp' },
+  { keyword: 'coconut', path: '/images/products/coconut-oil.webp' },
+  { keyword: 'oil', path: '/images/products/oil.webp' },
+  { keyword: 'herb', path: '/images/products/herbs.webp' },
+  { keyword: 'tea', path: '/images/products/tea.webp' },
+];
+
+const guessImageFromName = (name) => {
+  const lower = String(name || '').toLowerCase();
+  const hit = NAME_KEYWORD_TO_IMAGE.find(({ keyword }) => lower.includes(keyword));
+  return hit ? hit.path : null;
+};
+
+const resolveSlideImage = (image, productName) => {
+  if (typeof image === 'string' && image.trim()) {
+    return getAbsoluteImageUrl(image.trim(), { defaultFolder: 'products' });
+  }
+
+  const guessed = guessImageFromName(productName);
+  return guessed || fallbackHeroImage;
+};
+
+const normalizeProductList = (payload) => {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+
+  return [];
+};
+
+const isHoneyProduct = (product) => {
+  const text = `${product?.name || ''} ${product?.slug || ''}`.toLowerCase();
+  return text.includes('honey');
+};
+
+const buildSlideChips = (slide, currency) => {
+  const chips = [];
+
+  if (Number.isFinite(slide.price) && slide.price > 0) {
+    chips.push({
+      key: 'price',
+      label: `From ${formatPrice(slide.price, currency)}`,
+      classes: 'border-emerald-200 bg-white/80 text-emerald-800',
+      Icon: Tag,
+    });
+  }
+
+  if (Number.isFinite(slide.rating) && slide.rating > 0) {
+    const reviewLabel = slide.reviewCount > 0 ? ` (${slide.reviewCount})` : '';
+    chips.push({
+      key: 'rating',
+      label: `${slide.rating.toFixed(1)}${reviewLabel}`,
+      classes: 'border-amber-200 bg-amber-50/80 text-amber-800',
+      Icon: Star,
+    });
+  }
+
+  if (slide.category) {
+    chips.push({
+      key: 'category',
+      label: slide.category,
+      classes: 'border-slate-200 bg-white/70 text-slate-700',
+    });
+  }
+
+  if (slide.isOrganic) {
+    chips.push({
+      key: 'organic',
+      label: 'Organic',
+      classes: 'border-emerald-200 bg-emerald-50/80 text-emerald-700',
+      Icon: Leaf,
+    });
+  }
+
+  if (Number.isFinite(slide.stockQty) && slide.stockQty > 0) {
+    chips.push({
+      key: 'stock',
+      label: 'In stock',
+      classes: 'border-emerald-200 bg-emerald-50/80 text-emerald-700',
+      Icon: Package,
+    });
+  }
+
+  return chips.slice(0, 3);
+};
+
+export function Hero() {
+  const { settings } = useSettings();
+  const [slides, setSlides] = useState([]);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [textKey, setTextKey] = useState(0);
+
+  useEffect(() => {
+    const fetchSlides = async () => {
+      try {
+        const response = await productAPI.getAll();
+        const list = normalizeProductList(response)
+          .map((item, index) => ({ item, index }))
+          .sort((a, b) => {
+            const honeyDiff = Number(isHoneyProduct(b.item)) - Number(isHoneyProduct(a.item));
+            if (honeyDiff !== 0) {
+              return honeyDiff;
+            }
+            return a.index - b.index;
+          })
+          .map(({ item }) => item);
+
+        if (list.length > 0) {
+          const gradients = [
+            "from-green-50 via-emerald-50 to-green-100",
+            "from-emerald-50 via-green-50 to-teal-50",
+            "from-green-100 via-emerald-50 to-green-50",
+          ];
+          const accents = [
+            "from-green-600 to-emerald-600",
+            "from-emerald-600 to-green-700",
+            "from-green-700 to-emerald-600",
+          ];
+
+          const mapped = list.map((p, idx) => {
+            const numericPrice = Number(p?.price);
+            const ratingValue = Number(p?.average_rating || p?.rating || 0);
+            const reviewCount = Number(p?.review_count || p?.reviews_count || p?.reviewCount || 0);
+            const categoryLabel = String(p?.category_name || p?.category || '').trim();
+            const stockQty = Number(p?.stock_quantity ?? p?.stock ?? NaN);
+
+            return {
+            id: p.id,
+            badge: "Featured",
+            headline: p.name,
+            description: p.description?.substring(0, 100) || "Discover our premium organic products.",
+            ctaPrimary: "Shop Now",
+            ctaSecondary: "Learn More",
+            linkPrimary: `/product/${p.id ?? p.product_id ?? p.slug}`,
+            linkSecondary: "/about",
+            image: p.image || p.image_url || "",
+            bgGradient: gradients[idx % gradients.length],
+            accentColor: accents[idx % accents.length],
+            imageSizeClass: "max-h-[200px] sm:max-h-[220px] md:max-h-none",
+              price: Number.isFinite(numericPrice) ? numericPrice : null,
+              rating: Number.isFinite(ratingValue) ? ratingValue : 0,
+              reviewCount: Number.isFinite(reviewCount) ? reviewCount : 0,
+              category: categoryLabel,
+              isOrganic: p?.is_organic === true || p?.is_organic === 1,
+              stockQty: Number.isFinite(stockQty) ? stockQty : null,
+            };
+          });
+          setSlides(mapped);
+          setCurrentSlide(0);
+        }
+      } catch (err) {
+        console.error("Failed to fetch hero slides:", err);
+      }
+    };
+    fetchSlides();
+}, []);
+
+  // Auto-slide every 3 seconds
+  useEffect(() => {
+    if (!isHovered && !isAnimating && slides.length > 1) {
+      const interval = setInterval(() => {
+        nextSlide();
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [currentSlide, isHovered, isAnimating, slides.length]);
 
  const nextSlide = useCallback(() => {
- if (isAnimating) return;
+ if (isAnimating || slides.length === 0) return;
  setIsAnimating(true);
  setTextKey(k => k + 1);
  setCurrentSlide((prev) => (prev + 1) % slides.length);
  setTimeout(() => setIsAnimating(false), 700);
- }, [isAnimating]);
+ }, [isAnimating, slides.length]);
 
  const prevSlide = useCallback(() => {
- if (isAnimating) return;
+ if (isAnimating || slides.length === 0) return;
  setIsAnimating(true);
  setTextKey(k => k + 1);
  setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
  setTimeout(() => setIsAnimating(false), 700);
- }, [isAnimating]);
+ }, [isAnimating, slides.length]);
 
  const goToSlide = (index) => {
  if (isAnimating || index === currentSlide) return;
@@ -101,7 +227,13 @@ export function Hero() {
  setTimeout(() => setIsAnimating(false), 700);
  };
 
- const currentSlideData = slides[currentSlide];
+  const hasSlides = slides.length > 0;
+  const shouldShowNav = slides.length > 1;
+  const currentSlideData = hasSlides ? slides[currentSlide] : null;
+  const slideChips = useMemo(
+    () => buildSlideChips(currentSlideData || {}, settings?.currency || 'PKR'),
+    [currentSlideData, settings?.currency],
+  );
 
  return (
  <section
@@ -113,7 +245,10 @@ export function Hero() {
  >
  {/* Slides Container */}
  <div className="relative w-full h-full">
- {slides.map((slide, index) => (
+ {hasSlides ? (
+ slides.map((slide, index) => {
+ const slideImage = resolveSlideImage(slide.image, slide.headline);
+ return (
  <div
  key={slide.id}
  className={`absolute inset-0 transition-all duration-700 ease-in-out ${
@@ -159,7 +294,7 @@ export function Hero() {
  <div className="relative w-full max-w-[180px] sm:max-w-xs md:max-w-md lg:max-w-lg mx-auto pt-1">
  <div className={`absolute inset-0 bg-gradient-to-r ${slide.accentColor} opacity-10 blur-3xl rounded-full`} />
  <img
- src={slide.image}
+ src={slideImage}
  alt={slide.headline}
  className={`relative z-10 w-full h-auto object-contain drop-shadow-2xl ${slide.imageSizeClass || 'max-h-[200px] sm:max-h-[220px] md:max-h-none'}`}
  loading={index === 0 ? 'eager' : 'lazy'}
@@ -216,6 +351,26 @@ export function Hero() {
                 {slide.description}
               </motion.p>
 
+              {slideChips.length > 0 ? (
+                <motion.div
+                  variants={fadeIn}
+                  className="flex flex-wrap items-center justify-center gap-2 lg:justify-start"
+                >
+                  {slideChips.map((chip) => {
+                    const ChipIcon = chip.Icon;
+                    return (
+                      <span
+                        key={chip.key}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold sm:text-xs ${chip.classes}`}
+                      >
+                        {ChipIcon ? <ChipIcon className="h-3.5 w-3.5" /> : null}
+                        <span className="truncate">{chip.label}</span>
+                      </span>
+                    );
+                  })}
+                </motion.div>
+              ) : null}
+
               {/* CTA Buttons â€” fade in last */}
               <motion.div
                 variants={slideUp}
@@ -239,9 +394,18 @@ export function Hero() {
           </div>
         </div>
         </div>
-        ))}
-        </div>
+         );
+         })
+       ) : (
+       <div
+       className="absolute inset-0 bg-gradient-to-br from-green-50 via-emerald-50 to-green-100"
+       aria-hidden="true"
+       />
+       )}
+       </div>
 
+ {shouldShowNav ? (
+ <>
  {/* Navigation Arrows â€” compact on mobile, full-size on desktop */}
  <button
  onClick={prevSlide}
@@ -280,6 +444,8 @@ export function Hero() {
  />
  ))}
  </div>
+ </>
+ ) : null}
 
 
  </section>

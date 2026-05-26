@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Leaf, Heart, Globe, Shield, Award } from 'lucide-react';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
+import { teamAPI } from '@/services/api';
+import { AboutSEO } from '@/components/SEO';
+import { OrganizationStructuredData } from '@/components/StructuredData';
+import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 
 const values = [
  {
@@ -32,10 +36,28 @@ const stats = [
  { target: 25, suffix: '+', label: 'Partner Farms' }
 ];
 
+const getMemberImageSrc = (imageUrl) =>
+  getAbsoluteImageUrl(imageUrl, { defaultFolder: 'avatars' });
+
 export function About() {
- const { ref: heroRef, isVisible: heroVisible } = useScrollReveal();
- const { ref: storyRef, isVisible: storyVisible } = useScrollReveal();
- const { ref: valuesRef, isVisible: valuesVisible } = useScrollReveal();
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [teamLoading, setTeamLoading] = useState(true);
+  const { ref: heroRef, isVisible: heroVisible } = useScrollReveal();
+  const { ref: storyRef, isVisible: storyVisible } = useScrollReveal();
+  const { ref: valuesRef, isVisible: valuesVisible } = useScrollReveal();
+  const { ref: teamRef, isVisible: teamVisible } = useScrollReveal({ threshold: 0.2 });
+  const { ref: certRef, isVisible: certVisible } = useScrollReveal({ threshold: 0.2 });
+
+  useEffect(() => {
+    teamAPI.getActive()
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setTeamMembers(data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setTeamLoading(false));
+  }, []);
  const valuesTrackRef = useRef(null);
  const valuesProgrammaticScrollRef = useRef(false);
  const teamTrackRef = useRef(null);
@@ -44,11 +66,7 @@ export function About() {
  const [animatedStats, setAnimatedStats] = useState(() => stats.map(() => 0));
  const [statsAnimationStarted, setStatsAnimationStarted] = useState(false);
 
- const teamMembers = [
- { name: 'Dr. Sarah Chen', role: 'Founder & CEO', image: '/images/avatars/avatar1.jpg' },
- { name: 'Michael Roberts', role: 'Head of Operations', image: '/images/avatars/avatar2.jpg' },
- { name: 'Emma Wilson', role: 'Product Specialist', image: '/images/avatars/avatar3.jpg' }
- ];
+
 
  useEffect(() => {
  // Keep auto-scroll behavior mobile-only.
@@ -199,24 +217,28 @@ export function About() {
  };
  }, []);
 
- return (
- <main className="pt-14 sm:pt-[68px] pb-0 overflow-x-hidden">
+return (
+    <>
+    <AboutSEO />
+    <OrganizationStructuredData />
+    <main className="pt-14 sm:pt-[68px] pb-0 overflow-x-hidden">
  {/* Hero */}
- <section className="section-padding pt-0 bg-gradient-to-br from-[#e8f0e8] to-[#faf8f3]" ref={heroRef}>
- <div className="container-custom text-center">
+ <section className="section-padding pt-0 bg-gradient-to-br from-[#e8f0e8] to-[#faf8f3]">
+ <div
+ className={`container-custom text-center reveal reveal-left ${
+  heroVisible ? 'active' : ''
+ }`}
+ ref={heroRef}
+ >
  <span className="inline-block mt-4 sm:mt-5 text-[#3d7a3d] font-medium text-[10px] sm:text-sm uppercase tracking-wider">
  About Naturanza
  </span>
- <h1 className={`font-display text-[2rem] leading-tight sm:text-3xl md:text-[2.25rem] lg:text-4xl xl:text-5xl font-bold text-[#2d3a2d] mt-3 md:mt-4 mb-4 md:mb-6 ${
- heroVisible ? '' : 'opacity-100 md:opacity-0'
- }`}>
+ <h1 className="font-display text-[2rem] leading-tight sm:text-3xl md:text-[2.25rem] lg:text-4xl xl:text-5xl font-bold text-[#2d3a2d] mt-3 md:mt-4 mb-4 md:mb-6">
  Our Journey Towards
  <br />
  <span className="text-[#3d7a3d]">Natural Wellness</span>
  </h1>
- <p className={`text-[13px] sm:text-sm md:text-base text-[#6b7a6b] max-w-2xl mx-auto px-4 ${
- heroVisible ? '' : 'opacity-100 md:opacity-0'
- }`} style={{ animationDelay: '0.2s' }}>
+ <p className="text-[13px] sm:text-sm md:text-base text-[#6b7a6b] max-w-2xl mx-auto px-4">
  Since 2010, we have been on a mission to bring the healing power of nature 
  to every home, one organic product at a time.
  </p>
@@ -227,14 +249,14 @@ export function About() {
  <section className="section-padding bg-white" ref={storyRef}>
  <div className="container-custom">
  <div className="grid md:grid-cols-2 gap-5 sm:gap-8 md:gap-10 lg:gap-12 items-center">
- <div className={`${storyVisible ? '' : 'opacity-100 md:opacity-0'}`}>
+ <div className={`reveal reveal-left ${storyVisible ? 'active' : ''}`}>
  <img
  src="/images/about-herbs.jpg"
  alt="Our story"
  className="rounded-3xl shadow-2xl w-full h-[260px] sm:h-[320px] md:h-[420px] lg:h-[440px] xl:h-[500px] object-cover"
  />
  </div>
- <div className={`${storyVisible ? '' : 'opacity-100 md:opacity-0'} mt-1 sm:mt-2 lg:mt-0`} style={{ animationDelay: '0.2s' }}>
+ <div className={`mt-1 sm:mt-2 lg:mt-0 reveal reveal-right ${storyVisible ? 'active' : ''}`}>
  <h2 className="font-display text-xl md:text-2xl font-bold text-[#2d3a2d] mb-4 md:mb-6">
  From Farm to Family
  </h2>
@@ -284,7 +306,9 @@ export function About() {
  {/* Values */}
  <section className="section-padding bg-[#faf8f3] relative" ref={valuesRef}>
  <div className="container-custom">
- <div className="text-center mb-8 sm:mb-12 md:mb-16">
+ <div className={`text-center mb-8 sm:mb-12 md:mb-16 reveal reveal-left ${
+ valuesVisible ? 'active' : ''
+ }`}>
  <span className="text-[#3d7a3d] font-medium text-sm uppercase tracking-wider">
  Our Values
  </span>
@@ -305,8 +329,8 @@ export function About() {
  {values.map((value, index) => (
  <div
  key={value.title}
- className={`bg-white rounded-2xl p-5 sm:p-6 md:p-8 text-center shadow-lg hover:shadow-2xl [1.02] border border-gray-100 hover:border-green-200 relative ${
- valuesVisible ? '' : 'opacity-100 md:opacity-0'
+ className={`bg-white rounded-2xl p-5 sm:p-6 md:p-8 text-center shadow-lg hover:shadow-2xl [1.02] border border-gray-100 hover:border-green-200 relative reveal reveal-right ${
+ valuesVisible ? 'active' : ''
  } snap-center flex-shrink-0 w-full min-w-full md:w-auto md:min-w-0 md:max-w-none`}
  style={{ animationDelay: `${index * 0.1}s` }}
  >
@@ -325,50 +349,80 @@ export function About() {
  </div>
  </section>
 
- {/* Team */}
- <section className="section-padding bg-white relative z-10">
- <div className="container-custom">
- <div className="text-center mb-8 sm:mb-12 md:mb-16">
- <span className="text-[#3d7a3d] font-medium text-sm uppercase tracking-wider">
- Our Team
- </span>
- <h2 className="font-display text-2xl md:text-3xl font-bold text-[#2d3a2d] mt-2 mb-3">
- Meet the People Behind Naturanza
- </h2>
- </div>
+{/* Team */}
+  <section className="section-padding bg-white relative z-10">
+    <div className="container-custom">
+      <div
+        className={`text-center mb-8 sm:mb-12 md:mb-16 reveal reveal-left ${
+          teamVisible ? 'active' : ''
+        }`}
+        ref={teamRef}
+      >
+        <span className="text-[#3d7a3d] font-medium text-sm uppercase tracking-wider">
+          Our Team
+        </span>
+        <h2 className="font-display text-2xl md:text-3xl font-bold text-[#2d3a2d] mt-2 mb-3">
+          Meet the People Behind Naturanza
+        </h2>
+      </div>
 
- <div
- ref={teamTrackRef}
- className="flex flex-nowrap items-stretch overflow-x-auto gap-0 md:px-0 md:grid md:grid-cols-3 md:gap-10 max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto scrollbar-hide snap-x snap-mandatory scroll-smooth md:overflow-visible md:snap-none"
- style={{
- scrollbarWidth: 'none',
- msOverflowStyle: 'none',
- WebkitOverflowScrolling: 'touch',
- }}
- >
- {teamMembers.map((member, index) => (
- <div
- key={member.name}
- className="text-center snap-center flex-shrink-0 w-full min-w-full md:w-auto md:min-w-0 md:max-w-none min-h-[200px] sm:min-h-[220px] md:min-h-0 flex flex-col items-center"
- style={{ animationDelay: `${index * 0.1}s` }}
- >
- <img
- src={member.image}
- alt={member.name}
- className="w-24 h-24 sm:w-28 sm:h-28 md:w-32 md:h-32 rounded-full mx-auto mb-3 sm:mb-4 object-cover shadow-lg"
- />
- <h3 className="font-display font-semibold text-[15px] sm:text-base md:text-lg mb-1 min-h-[42px] sm:min-h-[48px] flex items-end justify-center">{member.name}</h3>
- <p className="text-[#6b7a6b] text-sm min-h-[20px]">{member.role}</p>
- </div>
- ))}
- </div>
- </div>
- </section>
+      <div className={`reveal reveal-right ${teamVisible ? 'active' : ''}`}>
+        {teamLoading ? (
+          <div className="flex justify-center py-12">
+            <div className="w-8 h-8 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        ) : teamMembers.length === 0 ? (
+          <div className="text-center py-12 text-gray-500">
+            No team members added yet.
+          </div>
+        ) : (
+          <div
+            ref={teamTrackRef}
+            className="flex flex-nowrap items-stretch overflow-x-auto gap-0 md:px-0 md:grid md:grid-cols-3 md:gap-10 max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto scrollbar-hide snap-x snap-mandatory scroll-smooth md:overflow-visible md:snap-none"
+            style={{
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+              WebkitOverflowScrolling: 'touch',
+            }}
+          >
+            {teamMembers.map((member, index) => (
+              <div
+                key={member.id || member.name}
+                className="text-center snap-center flex-shrink-0 w-full min-w-full md:w-auto md:min-w-0 md:max-w-none min-h-[200px] sm:min-h-[220px] md:min-h-0 flex flex-col items-center"
+                style={{ animationDelay: `${index * 0.1}s` }}
+              >
+                {member.image && member.image.trim() ? (
+                  <img
+                    src={getMemberImageSrc(member.image)}
+                    alt={member.name}
+                    className="w-24 h-24 sm:w-28 sm:h-28 md:w-32 md:h-32 rounded-full mx-auto mb-3 sm:mb-4 object-cover shadow-lg"
+                  />
+                ) : (
+                  <div className="w-24 h-24 sm:w-28 sm:h-28 md:w-32 md:h-32 rounded-full mx-auto mb-3 sm:mb-4 object-cover shadow-lg bg-green-100 flex items-center justify-center">
+                    <span className="text-green-700 font-semibold text-xl">
+                      {String(member.name).split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                <h3 className="font-display font-semibold text-[15px] sm:text-base md:text-lg mb-1 min-h-[42px] sm:min-h-[48px] flex items-end justify-center">{member.name}</h3>
+                <p className="text-[#6b7a6b] text-sm min-h-[20px]">{member.role}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  </section>
 
- {/* Certifications */}
+  {/* Certifications */}
  <section className="pt-10 sm:pt-12 lg:pt-12 xl:pt-14 pb-6 sm:pb-6 lg:pb-6 xl:pb-6 bg-[#faf8f3]">
  <div className="container-custom">
- <div className="text-center mb-7 sm:mb-10 md:mb-12">
+ <div
+ className={`text-center mb-7 sm:mb-10 md:mb-12 reveal reveal-left ${
+  certVisible ? 'active' : ''
+ }`}
+ ref={certRef}
+ >
  <h2 className="font-display text-xl md:text-2xl font-bold text-[#2d3a2d] mb-2">
  Our Certifications
  </h2>
@@ -377,7 +431,9 @@ export function About() {
  </p>
  </div>
 
- <div className="grid grid-cols-2 sm:flex sm:flex-wrap justify-center gap-2.5 sm:gap-3 md:gap-6 lg:gap-8">
+ <div className={`grid grid-cols-2 sm:flex sm:flex-wrap justify-center gap-2.5 sm:gap-3 md:gap-6 lg:gap-8 reveal reveal-right ${
+  certVisible ? 'active' : ''
+ }`}>
  {['USDA Organic', 'Non-GMO Project', 'Fair Trade', 'GMP Certified'].map((cert) => (
  <div
  key={cert}
@@ -390,6 +446,7 @@ export function About() {
  </div>
  </div>
  </section>
- </main>
- );
+</main>
+    </>
+  );
 }

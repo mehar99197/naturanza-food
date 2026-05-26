@@ -15,15 +15,19 @@
     "preview": "npm --prefix frontend run preview"
   },
   "dependencies": {
+    "express-session": "^1.19.0",
+    "mysql2": "^3.22.3",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
     "qrcode": "^1.5.4",
     "qrcode.react": "^4.2.0",
     "speakeasy": "^2.0.0"
   },
   "devDependencies": {
-    "cypress": "^15.11.0",
     "@eslint/js": "^9.39.1",
     "@vitejs/plugin-react": "^5.1.1",
     "autoprefixer": "^10.4.23",
+    "cypress": "^15.11.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",

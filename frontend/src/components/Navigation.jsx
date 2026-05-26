@@ -22,10 +22,12 @@ import {
   ChevronRight,
   Settings,
   Package,
+  Bell,
 } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { useWishlist } from "@/context/WishlistContext";
+import { userAPI } from "@/services/api";
 
 const resolveUserImage = (user, fallbackImage) => {
   return (
@@ -50,6 +52,7 @@ export function Navigation() {
   const [isWishlistIconBumping, setIsWishlistIconBumping] = useState(false);
   const [isAuthResolvedVisible, setIsAuthResolvedVisible] = useState(true);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [notifUnreadCount, setNotifUnreadCount] = useState(0);
   const [activeNavIndicator, setActiveNavIndicator] = useState({
     left: 0,
     width: 0,
@@ -116,17 +119,22 @@ export function Navigation() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Close search modal on escape key
+  // Close search modal and mobile menu on escape key
   useEffect(() => {
     const handleEscape = (e) => {
-      if (e.key === "Escape" && isSearchOpen) {
-        setIsSearchOpen(false);
+      if (e.key === "Escape") {
+        if (isSearchOpen) {
+          setIsSearchOpen(false);
+        }
+        if (isMobileMenuOpen) {
+          setIsMobileMenuOpen(false);
+        }
       }
     };
 
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [isSearchOpen]);
+  }, [isSearchOpen, isMobileMenuOpen]);
 
   // Prevent body scroll when mobile menu is open
   useEffect(() => {
@@ -146,6 +154,30 @@ export function Navigation() {
       document.body.style.width = "";
     };
   }, [isMobileMenuOpen]);
+
+  // Fetch unread-notifications count for the bell badge.
+  // Refresh on login + on route change so the badge stays in sync after
+  // visiting /notifications (which marks items as read).
+  useEffect(() => {
+    if (!user?.id) {
+      setNotifUnreadCount(0);
+      return;
+    }
+    let cancelled = false;
+    userAPI
+      .getNotificationsUnreadCount()
+      .then((data) => {
+        if (!cancelled) {
+          setNotifUnreadCount(Number(data?.count) || 0);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setNotifUnreadCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, location.pathname]);
 
   // Load and sync profile image from user object and localStorage
   useEffect(() => {
@@ -466,6 +498,7 @@ export function Navigation() {
             ? "bg-white/95 shadow-lg shadow-green-100/50 py-2 md:py-2.5 backdrop-blur-xl border-b border-[#E5E7EB]"
             : "bg-white/90 backdrop-blur-sm border-b border-[#E5E7EB] py-2.5 md:py-3"
         }`}
+        style={{ top: "var(--announcement-bar-height, 0px)" }}
       >
         <div className="container-custom">
           <div className="flex items-center justify-between gap-2 md:gap-0">
@@ -599,6 +632,27 @@ export function Navigation() {
                   </span>
                 )}
               </button>
+
+              {/* Notifications Bell (only for logged-in users) */}
+              {user && (
+                <button
+                  onClick={() => navigate("/notifications")}
+                  aria-label="Open notifications"
+                  className={`relative md:hover:bg-green-50/80 shadow-sm md:hover:shadow-md group flex-shrink-0 active:scale-95 transition-all duration-300 ${
+                    isScrolled
+                      ? "p-1 sm:p-1.5 md:p-1.5 rounded-md md:rounded-lg"
+                      : "p-1.5 sm:p-2 md:p-2 rounded-md md:rounded-lg"
+                  }`}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-green-400/20 to-emerald-400/20 opacity-0 md:group-hover:opacity-100 rounded-2xl overflow-hidden"></div>
+                  <Bell className="w-4 h-4 sm:w-5 sm:h-5 md:w-4 md:h-4 text-gray-700 md:group-hover:text-green-600 md:group-hover:scale-110 transition-all duration-300 relative z-10 origin-center" />
+                  {notifUnreadCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 sm:-top-1 sm:-right-1 md:-top-1 md:-right-1 bg-gradient-to-r from-emerald-500 to-green-600 text-white text-[10px] font-semibold rounded-full min-w-[16px] h-4 sm:min-w-[18px] sm:h-[18px] px-1 flex items-center justify-center leading-none shadow-md ring-2 ring-white/95 z-20">
+                      {notifUnreadCount > 9 ? "9+" : notifUnreadCount}
+                    </span>
+                  )}
+                </button>
+              )}
 
               {/* User Menu */}
               <div className="hidden md:block">

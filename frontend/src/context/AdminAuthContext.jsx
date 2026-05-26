@@ -5,6 +5,7 @@ import {
   clearAdminAccessToken,
   getAdminAccessToken,
 } from "@/services/api";
+import { FEATURE_PERMISSIONS } from "@/config/adminPermissions";
 
 const safeLocalStorage = {
   getItem(key) {
@@ -36,6 +37,10 @@ export const AdminAuthProvider = ({ children }) => {
     clearAdminAccessToken();
     safeLocalStorage.removeItem("adminData");
     setAdmin(null);
+    // Wipe the admin SWR cache too — on shared machines, the next admin user
+    // would otherwise see the previous user's cached dashboard/reviews/etc.
+    // Dynamic import to keep the auth context decoupled from the cache module.
+    import("@/hooks/useSWRCache").then(({ clearSWRCache }) => clearSWRCache()).catch(() => {});
   };
 
   const verifyAdminToken = async () => {
@@ -140,7 +145,7 @@ export const AdminAuthProvider = ({ children }) => {
     }
   }, []);
 
-  // Admin login function
+  // Super-admin login: hits /admin/login, rejected if admin_role !== 'super_admin'.
   const adminLogin = async (email, password) => {
     try {
       const response = await adminAPI.login({ email, password });
@@ -161,6 +166,33 @@ export const AdminAuthProvider = ({ children }) => {
         message:
           error?.response?.data?.error ||
           "Admin login failed. Please check your credentials.",
+      };
+    }
+  };
+
+  // Staff login: hits /admin/staff-login. Rejected if admin_role is 'super_admin'
+  // or NULL. The success path produces the same session shape as adminLogin —
+  // downstream permission checks discriminate via admin_role on the record.
+  const staffLogin = async (email, password) => {
+    try {
+      const response = await adminAPI.staffLogin({ email, password });
+
+      if (response?.success && response?.token && response?.admin) {
+        safeLocalStorage.setItem("adminData", JSON.stringify(response.admin));
+        setAdmin(response.admin);
+        return { success: true };
+      }
+
+      return {
+        success: false,
+        message: response?.error || "Invalid staff credentials.",
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message:
+          error?.response?.data?.error ||
+          "Staff login failed. Please check your credentials.",
       };
     }
   };
@@ -190,30 +222,24 @@ export const AdminAuthProvider = ({ children }) => {
     return permissions.includes(permission);
   };
 
-  // Check if admin can access a specific feature
+  // Check if admin can access a specific feature.
+  // Lookup rules in FEATURE_PERMISSIONS:
+  //   key missing OR value undefined → visible to every admin
+  //   value null                     → super_admin only
+  //   value string                   → required permission key
   const canAccess = (feature) => {
-    const featurePermissionMap = {
-      'orders': 'manage_orders',
-      'products': 'manage_products',
-      'reports': 'view_reports',
-      'customers': 'manage_customers',
-      'shipping': 'manage_shipping',
-      'admins': null, // Only super admin
-      'settings': null, // Only super admin
-    };
-
-    const requiredPermission = featurePermissionMap[feature];
-    
-    // If feature requires super admin only
-    if (requiredPermission === null) return isSuperAdmin;
-    
-    return hasPermission(requiredPermission);
+    if (!(feature in FEATURE_PERMISSIONS)) return true;
+    const required = FEATURE_PERMISSIONS[feature];
+    if (required === undefined) return true;
+    if (required === null) return isSuperAdmin;
+    return hasPermission(required);
   };
 
   const value = {
     admin,
     loading,
     adminLogin,
+    staffLogin,
     adminLogout,
     isAdminAuthenticated: !!admin,
     isSuperAdmin,

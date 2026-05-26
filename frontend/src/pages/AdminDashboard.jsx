@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   AlertCircle,
@@ -28,10 +28,12 @@ import {
   YAxis,
 } from "recharts";
 import { AdminLayout } from "@/components/AdminLayout";
-import { DashboardSkeleton } from "@/components/Skeletons/DashboardSkeleton";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
 import { adminAPI } from "@/services/api";
+import { useSWRCache } from "@/hooks/useSWRCache";
+
+const DASHBOARD_CACHE_KEY = "admin:dashboard";
 
 const ORDER_THEME = {
   pending: {
@@ -139,56 +141,75 @@ const OrderStatusBadge = ({ status }) => {
 export function AdminDashboard() {
   const { settings } = useSettings();
 
-  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [statsData, setStatsData] = useState({});
   const [recentOrders, setRecentOrders] = useState([]);
   const [productSales, setProductSales] = useState([]);
   const [salesReport, setSalesReport] = useState([]);
+  const [paymentAnalytics, setPaymentAnalytics] = useState(null);
   const [mobileChartView, setMobileChartView] = useState("revenue");
 
-  const loadDashboardData = useCallback(async ({ silent = false } = {}) => {
-    try {
-      if (!silent) {
-        setIsLoading(true);
-      }
+  // SWR cache fans out four dashboard endpoints in parallel. On re-visit, the
+  // cards/charts render immediately from cache while a background refresh
+  // brings them up to date — the perceived spinner duration drops from
+  // (network + render) to just (render).
+  const {
+    data: dashData,
+    error: dashError,
+    refresh: refreshDashboard,
+  } = useSWRCache(DASHBOARD_CACHE_KEY, async () => {
+    const [
+      statsResponse,
+      recentOrdersResponse,
+      salesResponse,
+      productSalesResponse,
+      paymentAnalyticsResponse,
+    ] =
+      await Promise.all([
+        adminAPI.getDashboardStats(),
+        adminAPI.getRecentOrders(8),
+        adminAPI.getSalesReport(),
+        adminAPI.getProductSalesReport(),
+        adminAPI.getPaymentAnalytics().catch(() => null),
+      ]);
+    return {
+      statsResponse,
+      recentOrdersResponse,
+      salesResponse,
+      productSalesResponse,
+      paymentAnalyticsResponse,
+    };
+  });
 
-      setError("");
+  useEffect(() => {
+    if (!dashData) return;
+    setStatsData(dashData.statsResponse || {});
+    setRecentOrders(Array.isArray(dashData.recentOrdersResponse) ? dashData.recentOrdersResponse : []);
+    setSalesReport(Array.isArray(dashData.salesResponse) ? dashData.salesResponse : []);
+    setProductSales(Array.isArray(dashData.productSalesResponse) ? dashData.productSalesResponse : []);
+    setPaymentAnalytics(dashData.paymentAnalyticsResponse || null);
+  }, [dashData]);
 
-      const [statsResponse, recentOrdersResponse, salesResponse, productSalesResponse] =
-        await Promise.all([
-          adminAPI.getDashboardStats(),
-          adminAPI.getRecentOrders(8),
-          adminAPI.getSalesReport(),
-          adminAPI.getProductSalesReport(),
-        ]);
-
-      setStatsData(statsResponse || {});
-      setRecentOrders(Array.isArray(recentOrdersResponse) ? recentOrdersResponse : []);
-      setSalesReport(Array.isArray(salesResponse) ? salesResponse : []);
-      setProductSales(Array.isArray(productSalesResponse) ? productSalesResponse : []);
-    } catch (requestError) {
+  useEffect(() => {
+    if (dashError) {
       setError(
-        requestError?.response?.data?.error ||
-          requestError?.message ||
+        dashError?.response?.data?.error ||
+          dashError?.message ||
           "Failed to load dashboard data",
       );
-    } finally {
-      setIsLoading(false);
+    } else {
+      setError("");
     }
-  }, []);
+  }, [dashError]);
 
-  useEffect(() => {
-    void loadDashboardData();
-  }, [loadDashboardData]);
-
+  // Silent background refresh every 60s — uses the same SWR path so cached
+  // data stays visible while the request is in flight.
   useEffect(() => {
     const refreshTimer = window.setInterval(() => {
-      void loadDashboardData({ silent: true });
+      void refreshDashboard();
     }, 60000);
-
     return () => window.clearInterval(refreshTimer);
-  }, [loadDashboardData]);
+  }, [refreshDashboard]);
 
   const salesRows = useMemo(() => {
     if (!salesReport.length) {
@@ -256,6 +277,9 @@ export function AdminDashboard() {
   const totalUsers = Number(statsData.totalUsers || 0);
   const lowStockProducts = Number(statsData.lowStockProducts || 0);
   const activeUsers = Number(statsData.activeUsers || 0);
+  const pendingPaymentsCount = Number(
+    paymentAnalytics?.pending_count ?? paymentAnalytics?.pendingCount ?? 0,
+  );
 
   const statCards = [
     {
@@ -289,6 +313,14 @@ export function AdminDashboard() {
       icon: Users,
       tone: "bg-[#d1fae5] text-[#166534]",
       trendValue: totalUsers > 0 ? (activeUsers / totalUsers) * 100 : 0,
+    },
+    {
+      title: "Pending Payments",
+      value: pendingPaymentsCount.toLocaleString(),
+      subtitle: "Awaiting approval",
+      icon: Clock3,
+      tone: "bg-amber-50 text-amber-700",
+      trendValue: 0,
     },
   ];
 
@@ -336,14 +368,6 @@ export function AdminDashboard() {
     () => Math.max(...topProducts.map((item) => Number(item.total_sold || 0)), 1),
     [topProducts],
   );
-
-  if (isLoading) {
-    return (
-      <AdminLayout>
-        <DashboardSkeleton />
-      </AdminLayout>
-    );
-  }
 
   return (
     <AdminLayout>

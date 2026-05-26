@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminLayout } from "@/components/AdminLayout";
 import { adminAPI } from "@/services/api";
 import { AlertCircle, RefreshCw } from "lucide-react";
+import { useSWRCache, invalidateSWRKey } from "@/hooks/useSWRCache";
 
 const STATUS_OPTIONS = ["requested", "approved", "rejected", "received", "refunded"];
 const MOBILE_INITIAL_RETURNS = 5;
@@ -15,33 +16,37 @@ const statusBadgeClass = {
 };
 
 export function AdminReturns() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [returns, setReturns] = useState([]);
   const [statusFilter, setStatusFilter] = useState("all");
   const [drafts, setDrafts] = useState({});
   const [selectedReturnId, setSelectedReturnId] = useState(null);
   const [mobileView, setMobileView] = useState("queue");
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
+  const [mutationError, setMutationError] = useState("");
+
+  // SWR keyed by filter — each filter gets its own cache slot so switching
+  // tabs returns instantly the second time.
+  const cacheKey = `admin:returns:${statusFilter}`;
+  const {
+    data,
+    loading,
+    revalidating,
+    error: swrError,
+    refresh,
+  } = useSWRCache(cacheKey, () =>
+    adminAPI.getReturns(statusFilter === "all" ? {} : { status: statusFilter }),
+  );
+
+  const returns = Array.isArray(data) ? data : [];
+  const fetchError = swrError
+    ? swrError?.response?.data?.error || swrError?.message || "Failed to load returns"
+    : "";
+  const error = mutationError || fetchError;
+  const setError = setMutationError;
 
   const loadReturns = async () => {
-    try {
-      setLoading(true);
-      setError("");
-      const params = statusFilter === "all" ? {} : { status: statusFilter };
-      const response = await adminAPI.getReturns(params);
-      const list = Array.isArray(response) ? response : [];
-      setReturns(list);
-    } catch (requestError) {
-      setError(requestError?.response?.data?.error || "Failed to load returns");
-    } finally {
-      setLoading(false);
-    }
+    invalidateSWRKey(cacheKey);
+    await refresh();
   };
-
-  useEffect(() => {
-    void loadReturns();
-  }, [statusFilter]);
 
   useEffect(() => {
     setShowAllMobileRows(false);
@@ -144,7 +149,7 @@ export function AdminReturns() {
             onClick={() => void loadReturns()}
             className="inline-flex h-10 self-end items-center gap-1.5 rounded-xl border border-emerald-200/90 bg-white px-3 text-[13px] font-semibold text-emerald-800 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 sm:h-11 sm:self-auto sm:gap-2 sm:rounded-2xl sm:px-4 sm:text-sm"
           >
-            <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading || revalidating ? "animate-spin" : ""}`} />
             Refresh
           </button>
         </div>

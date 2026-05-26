@@ -10,8 +10,8 @@ import {
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useAuth } from "@/context/AuthContext";
-import { sanitizeInput } from "@/lib/sanitize";
 import LeftPanel from "@/components/auth/LeftPanel";
+import { NoIndexSEO } from "@/components/SEO";
 
 const leftPoints = [
   "At least 12 characters required",
@@ -100,7 +100,7 @@ const ResetPassword = () => {
 
     setGeneralError("");
 
-    const result = await resetPassword(token, sanitizeInput(values.password));
+    const result = await resetPassword(token, values.password);
     if (result.success) {
       setSuccess(true);
       return;
@@ -110,7 +110,9 @@ const ResetPassword = () => {
   };
 
   return (
-    <div className="auth-premium-font min-h-screen bg-green-50 lg:h-screen lg:overflow-hidden">
+    <>
+      <NoIndexSEO title="Reset Password" />
+    <div className="auth-premium-font min-h-screen bg-green-50 overflow-y-auto lg:h-screen lg:overflow-hidden">
       <div className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:block lg:w-[42%] xl:w-[44%]">
         <LeftPanel
           heading="Set a Fresh Secure Password"
@@ -313,6 +315,7 @@ const ResetPassword = () => {
         </div>
       </main>
     </div>
+    </>
   );
 };
 

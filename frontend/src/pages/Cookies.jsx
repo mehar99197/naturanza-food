@@ -1,7 +1,12 @@
 import { Cookie, Settings, Shield } from 'lucide-react';
 import { BUSINESS_INFO } from '@/config/legal';
+import { CookiesSEO } from '@/components/SEO';
+import { useSettings } from '@/context/SettingsContext';
 
 export function Cookies() {
+ const { settings } = useSettings();
+ const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
+ const privacyEmail = settings.storeEmail || BUSINESS_INFO.contacts.privacyEmail;
  const sections = [
  {
  title: 'What Are Cookies',
@@ -25,8 +30,10 @@ export function Cookies() {
  },
  ];
 
- return (
- <main className="pt-24 pb-16 min-h-screen bg-[#faf8f3]">
+return (
+    <>
+      <CookiesSEO />
+    <main className="pt-24 pb-16 min-h-screen bg-[#faf8f3]">
  <div className="container-custom">
  <header className="text-center mb-10">
  <span className="inline-flex items-center gap-2 text-[#3d7a3d] font-semibold text-xs uppercase tracking-wider">
@@ -53,19 +60,20 @@ export function Cookies() {
  <div className="flex items-start gap-3">
  <Settings className="w-5 h-5 text-[#3d7a3d] mt-0.5" />
  <p className="text-sm text-[#4f5f4f] leading-relaxed">
- Adjust your browser cookie settings at any time to control tracking and stored preferences. For help, email {BUSINESS_INFO.contacts.supportEmail}.
+ Adjust your browser cookie settings at any time to control tracking and stored preferences. For help, email {supportEmail}.
  </p>
  </div>
  <div className="flex items-start gap-3 mt-3">
  <Shield className="w-5 h-5 text-[#3d7a3d] mt-0.5" />
  <p className="text-sm text-[#4f5f4f] leading-relaxed">
- Essential cookies are required for core operations such as cart, login state, and secure checkout. For policy requests, contact {BUSINESS_INFO.contacts.privacyEmail}.
+ Essential cookies are required for core operations such as cart, login state, and secure checkout. For policy requests, contact {privacyEmail}.
  </p>
  </div>
  </section>
- </div>
- </main>
- );
+</div>
+  </main>
+  </>
+  );
 }
 
 export default Cookies;

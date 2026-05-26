@@ -16,7 +16,7 @@ const config = {
     port: Number.parseInt(process.env.DB_PORT || "3306", 10),
     user: process.env.DB_USER || "root",
     password: process.env.DB_PASSWORD !== undefined ? process.env.DB_PASSWORD : "",
-    database: process.env.DB_NAME || "naturanza_foods",
+    database: process.env.DB_NAME || "naturanza_food",
 };
 
 const shouldSeed = process.argv.includes("--with-seed") || process.argv.length <= 2;
@@ -56,7 +56,7 @@ const runSqlFile = async (connection, filePath, options = {}) => {
 
 const logConfiguration = () => {
     console.log("===========================================================");
-    console.log(" Naturanza Foods Database Setup (MySQL 8)");
+    console.log(" Naturanza Food Database Setup (MySQL 8)");
     console.log("===========================================================");
     console.log(`Host: ${config.host}`);
     console.log(`Port: ${config.port}`);

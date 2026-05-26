@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Tag } from 'lucide-react';
 import { categoryAPI } from '@/services/api';
+import { useScrollReveal } from '@/hooks/useScrollReveal';
 
 const normalizeImageUrl = (value) => {
   const trimmed = String(value || '').trim();
@@ -39,6 +40,13 @@ const mapCategoryCard = (category) => {
 export function Categories() {
   const trackRef = useRef(null);
   const [categoryCards, setCategoryCards] = useState([]);
+  const { ref: headerRef, isVisible: headerVisible } = useScrollReveal();
+  const { ref: cardsRef, isVisible: cardsVisible } = useScrollReveal({ threshold: 0.15 });
+
+  const setTrackNode = (node) => {
+    trackRef.current = node;
+    cardsRef.current = node;
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -131,7 +139,12 @@ export function Categories() {
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_30%,rgba(61,122,61,0.05),transparent_50%)]"></div>
 
       <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-4 relative z-10">
-        <div className="text-center mb-6 sm:mb-10 md:mb-14 lg:mb-20">
+        <div
+          className={`text-center mb-6 sm:mb-10 md:mb-14 lg:mb-20 reveal reveal-left ${
+            headerVisible ? 'active' : ''
+          }`}
+          ref={headerRef}
+        >
           <span className="inline-block text-white font-bold text-xs uppercase tracking-wider mb-3 md:mb-4 px-4 py-1.5 md:px-6 md:py-2 bg-green-600 rounded-full shadow-md animate-fade-in-up opacity-0 [animation-fill-mode:forwards]">
             Categories
           </span>
@@ -147,8 +160,10 @@ export function Categories() {
 
         {/* Single horizontal row with controlled auto-scroll */}
         <div
-          ref={trackRef}
-          className="flex flex-nowrap overflow-x-auto gap-0 md:grid md:grid-cols-2 lg:grid-cols-4 md:gap-5 lg:gap-4 pb-2 scrollbar-hide snap-x snap-mandatory scroll-smooth md:overflow-x-visible md:snap-none md:pb-0"
+          ref={setTrackNode}
+          className={`flex flex-nowrap overflow-x-auto gap-0 md:grid md:grid-cols-2 lg:grid-cols-4 md:gap-5 lg:gap-4 pb-2 scrollbar-hide snap-x snap-mandatory scroll-smooth md:overflow-x-visible md:snap-none md:pb-0 reveal reveal-right ${
+            cardsVisible ? 'active' : ''
+          }`}
           style={{
             scrollbarWidth: 'none',
             msOverflowStyle: 'none',
@@ -163,12 +178,12 @@ export function Categories() {
                 style={{ animationDelay: `${index * 100}ms` }}
                 className="group snap-center flex-shrink-0 w-full min-w-full md:w-auto md:min-w-0 relative overflow-hidden rounded-lg md:rounded-xl bg-white border-2 border-green-100 shadow-md md:hover:shadow-2xl md:hover:-translate-y-2 md:hover:border-green-300 transition-all duration-500 ease-out animate-fade-in-up opacity-0 [animation-fill-mode:forwards]"
               >
-                <div className="aspect-[16/10] overflow-hidden bg-gradient-to-br from-green-100 to-emerald-100 relative">
+                <div className="aspect-[16/9] bg-white relative flex items-center justify-center p-3 sm:p-4 md:p-5">
                   {category.image ? (
                     <img
                       src={category.image}
                       alt={category.name}
-                      className="w-full h-full object-contain p-3 transition-transform duration-700 ease-out md:group-hover:scale-110 md:group-hover:rotate-3"
+                      className="max-h-[85%] max-w-[85%] h-auto w-auto object-contain transition-transform duration-500 ease-out md:max-h-[88%] md:max-w-[88%] md:group-hover:scale-[1.03]"
                     />
                   ) : (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-emerald-700/75">
@@ -178,8 +193,6 @@ export function Categories() {
                       </span>
                     </div>
                   )}
-                  {/* Overlay Gradient */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 md:group-hover:opacity-100"></div>
                 </div>
                 <div className="p-2.5 md:p-3.5 lg:p-3">
                   <h3 className="text-sm md:text-base font-bold text-gray-900 mb-1 md:mb-1.5 line-clamp-1">

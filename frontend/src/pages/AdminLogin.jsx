@@ -44,7 +44,7 @@ export function AdminLogin() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [failedAttempts, setFailedAttempts] = useState(0);
-  const { adminLogin, isAdminAuthenticated } = useAdminAuth();
+  const { adminLogin, isAdminAuthenticated, isSuperAdmin } = useAdminAuth();
   const navigate = useNavigate();
 
   const passwordStrength = getPasswordStrength(password);
@@ -63,8 +63,10 @@ export function AdminLogin() {
     }
   }, [location.state?.email]);
 
-  // If already authenticated, redirect to dashboard
-  if (isAdminAuthenticated) {
+  // Only auto-redirect if a SUPER-ADMIN session is active. A staff session on
+  // this URL shouldn't bounce away — the user may be deliberately switching
+  // to a super-admin account.
+  if (isAdminAuthenticated && isSuperAdmin) {
     return <Navigate to="/admin/dashboard" replace />;
   }
 
@@ -277,7 +279,7 @@ export function AdminLogin() {
               </div>
             </div>
 
-            <div className="mt-4 border-t border-slate-100 pt-3 text-center">
+            <div className="mt-3 border-t border-slate-100 pt-3 text-center">
               <Link
                 to="/"
                 className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700 transition hover:text-green-700"

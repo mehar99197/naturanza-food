@@ -1,9 +1,8 @@
-import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAdminAuth } from '../context/AdminAuthContext';
 import { Loader } from '../components/Loader';
 
-const AdminProtectedRoute = ({ children }) => {
+const AdminProtectedRoute = ({ children, requireSuper }) => {
  const { admin, loading } = useAdminAuth();
  const location = useLocation();
 
@@ -12,7 +11,12 @@ const AdminProtectedRoute = ({ children }) => {
  }
 
  if (!admin) {
- return <Navigate to="/admin/login" state={{ from: location }} replace />;
+   const isStaffLogin = location.pathname === '/admin/staff-login';
+   return <Navigate to={isStaffLogin ? '/admin/staff-login' : '/admin/login'} state={{ from: location }} replace />;
+ }
+
+ if (requireSuper && admin.admin_role !== 'super_admin') {
+   return <Navigate to="/admin/dashboard" replace />;
  }
 
  return children;

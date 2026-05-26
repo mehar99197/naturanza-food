@@ -1,14 +1,22 @@
 import { Link } from 'react-router-dom';
 import { Leaf, Heart, Users } from 'lucide-react';
+import { useScrollReveal } from '@/hooks/useScrollReveal';
 
 export function About() {
+ const { ref: imageRef, isVisible: imageVisible } = useScrollReveal();
+ const { ref: contentRef, isVisible: contentVisible } = useScrollReveal({ threshold: 0.2 });
 
  return (
  <section className="py-8 sm:py-10 lg:py-14 bg-white">
  <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-10">
  <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] gap-6 sm:gap-8 md:gap-10 lg:gap-12 xl:gap-16 items-start lg:items-center">
  {/* Image Side */}
- <div className="relative order-2 lg:order-1">
+ <div
+ className={`relative order-2 lg:order-1 reveal reveal-left ${
+  imageVisible ? 'active' : ''
+ }`}
+ ref={imageRef}
+ >
  <div className="relative h-[220px] sm:h-[320px] md:h-[390px] lg:h-[460px] rounded-2xl md:rounded-3xl overflow-hidden shadow-xl md:shadow-2xl bg-[#eef7ef]">
  <img
  src="/images/products/about-honey-process.jpg"
@@ -22,7 +30,12 @@ export function About() {
  </div>
 
  {/* Content Side */}
- <div className="order-1 lg:order-2 space-y-4 sm:space-y-5 md:space-y-6 min-w-0">
+ <div
+ className={`order-1 lg:order-2 space-y-4 sm:space-y-5 md:space-y-6 min-w-0 reveal reveal-right ${
+  contentVisible ? 'active' : ''
+ }`}
+ ref={contentRef}
+ >
  <div>
  <span className="text-green-700 font-semibold text-sm md:text-sm uppercase tracking-wider">
  About Us

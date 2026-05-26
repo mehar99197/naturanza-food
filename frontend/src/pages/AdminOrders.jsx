@@ -11,7 +11,6 @@ import {
   Truck,
 } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { AdminPageSkeleton } from "@/components/Skeletons/AdminPageSkeleton";
 import { useOrders } from "@/context/OrderContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
@@ -48,7 +47,6 @@ const formatDateTime = (value) => {
 export function AdminOrders() {
   const {
     orders,
-    loading,
     fetchOrders,
     updateOrderStatus,
     deleteOrder,
@@ -193,14 +191,6 @@ export function AdminOrders() {
       setError(requestError?.response?.data?.error || "Failed to delete order");
     }
   };
-
-  if (loading) {
-    return (
-      <AdminLayout>
-        <AdminPageSkeleton cards={4} rows={8} showSidebar />
-      </AdminLayout>
-    );
-  }
 
   return (
     <AdminLayout>

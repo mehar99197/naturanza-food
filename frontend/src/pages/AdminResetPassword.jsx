@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff, Lock } from "lucide-react";
+import { AlertCircle, CheckCircle2, Eye, EyeOff, Lock } from "lucide-react";
 import { useForm } from "react-hook-form";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
@@ -14,6 +14,10 @@ const AdminResetPassword = () => {
   const [isSuccess, setIsSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  // Server tells us where to send the user after success. Default to the
+  // staff login because that's the more common case and never exposes the
+  // super admin URL when the server response is unexpectedly missing the field.
+  const [redirectTo, setRedirectTo] = useState("/admin/staff-login");
 
   const {
     register,
@@ -86,9 +90,14 @@ const AdminResetPassword = () => {
       const data = await response.json();
 
       if (data.success) {
+        const nextPath =
+          typeof data.redirect_to === "string" && data.redirect_to.startsWith("/admin/")
+            ? data.redirect_to
+            : "/admin/staff-login";
+        setRedirectTo(nextPath);
         setIsSuccess(true);
         setTimeout(() => {
-          navigate("/admin/login");
+          navigate(nextPath);
         }, 3000);
         return;
       }
@@ -136,15 +145,7 @@ const AdminResetPassword = () => {
           <div className="pointer-events-none absolute -left-14 bottom-4 h-40 w-40 rounded-full bg-green-100/70 blur-2xl" />
 
           <div className="relative">
-            <div className="mb-2.5 flex items-center justify-between">
-              <Link
-                to="/admin/login"
-                aria-label="Back to admin login"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-green-100 bg-white text-emerald-600 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50"
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </Link>
-
+            <div className="mb-2.5 flex items-center justify-end">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-800 shadow-sm">
                 <span className="text-[10px]">🔒</span>
                 New Password
@@ -170,10 +171,10 @@ const AdminResetPassword = () => {
 
                 <div className="mt-4">
                   <Link
-                    to="/admin/login"
+                    to={redirectTo}
                     className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-600 transition hover:text-emerald-700"
                   >
-                    Go to Admin Login
+                    Go to login
                   </Link>
                 </div>
               </div>
@@ -314,7 +315,7 @@ const AdminResetPassword = () => {
 
         {/* Footer */}
         <p className="mt-5 text-center text-xs text-slate-500">
-          © {new Date().getFullYear()} Naturanza Foods. Admin Portal.
+          © {new Date().getFullYear()} Naturanza Food. Admin Portal.
         </p>
       </div>
     </div>

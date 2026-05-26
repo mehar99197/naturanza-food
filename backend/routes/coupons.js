@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
 
 const VALID_DISCOUNT_TYPES = new Set(['percentage', 'fixed']);
@@ -9,6 +10,25 @@ const VALID_DISCOUNT_TYPES = new Set(['percentage', 'fixed']);
 router.get('/', authenticateToken, isAdmin, (req, res) => {
     const query = 'SELECT * FROM coupons ORDER BY created_at DESC';
     
+    db.query(query, (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error' });
+        }
+        res.json(results);
+    });
+});
+
+// Get active coupons (Public - used during checkout)
+router.get('/active', (req, res) => {
+    const query = `
+        SELECT id, code, description, discount_type, discount_value, min_order_amount, max_discount, expiry_date
+        FROM coupons
+        WHERE is_active = TRUE
+        AND (expiry_date IS NULL OR expiry_date > NOW())
+        AND (usage_limit IS NULL OR used_count < usage_limit)
+        ORDER BY created_at DESC
+    `;
+
     db.query(query, (err, results) => {
         if (err) {
             return res.status(500).json({ error: 'Database error' });
@@ -33,7 +53,7 @@ router.get('/:id', authenticateToken, isAdmin, (req, res) => {
 });
 
 // Validate coupon (Public - used during checkout)
-router.post('/validate', (req, res) => {
+router.post('/validate', restrictBody('code', 'orderAmount'), (req, res) => {
     const { code, orderAmount } = req.body;
     
     if (!code || !orderAmount) {
@@ -96,7 +116,7 @@ router.post('/validate', (req, res) => {
 });
 
 // Create coupon (Admin only)
-router.post('/', authenticateToken, isAdmin, (req, res) => {
+router.post('/', authenticateToken, isAdmin, restrictBody('code', 'description', 'discount_type', 'discount_value', 'min_order_amount', 'max_discount', 'usage_limit', 'expiry_date'), (req, res) => {
     const { 
         code, description, discount_type, discount_value, 
         min_order_amount, max_discount, usage_limit, expiry_date 
@@ -155,7 +175,7 @@ router.post('/', authenticateToken, isAdmin, (req, res) => {
 });
 
 // Update coupon (Admin only)
-router.put('/:id', authenticateToken, isAdmin, (req, res) => {
+router.put('/:id', authenticateToken, isAdmin, restrictBody('code', 'description', 'discount_type', 'discount_value', 'min_order_amount', 'max_discount', 'usage_limit', 'expiry_date', 'is_active'), (req, res) => {
     const { 
         code, description, discount_type, discount_value, 
         min_order_amount, max_discount, usage_limit, expiry_date, is_active 

@@ -1,23 +1,25 @@
 import { Radar } from 'react-chartjs-2';
 import {
- Chart as ChartJS,
- RadarController,
- RadialLinearScale,
- PointElement,
- LineElement,
- Title,
- Tooltip,
- Legend,
+  Chart as ChartJS,
+  RadarController,
+  RadialLinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler,
 } from 'chart.js';
 
 ChartJS.register(
- RadarController,
- RadialLinearScale,
- PointElement,
- LineElement,
- Title,
- Tooltip,
- Legend
+  RadarController,
+  RadialLinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
 );
 
 const RadarChart = ({ 

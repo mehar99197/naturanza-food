@@ -12,9 +12,8 @@
     "hpp": "^0.2.3",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
-    "nodemailer": "^8.0.7",
     "mysql2": "^3.22.0",
-    "openai": "^6.36.0",
+    "nodemailer": "^8.0.7",
     "pdfkit": "^0.18.0",
     "sharp": "^0.34.5",
     "zod": "^4.3.6"
@@ -25,7 +24,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "predev": "kill-port 5000 || echo Port 5000 is already free",
+    "predev": "lsof -ti:5000 | xargs kill -9 2>/dev/null || echo Port 5000 is already free",
     "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

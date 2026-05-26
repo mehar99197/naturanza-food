@@ -1,89 +1,200 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
+        xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">
+
   <!-- Homepage -->
   <url>
     <loc>https://naturanzafood.com/</loc>
-    <lastmod>2024-01-01</lastmod>
+    <lastmod>2026-05-18</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
+    <image:image>
+      <image:loc>https://naturanzafood.com/images/logo.png</image:loc>
+      <image:title>Naturanza Food Logo</image:title>
+    </image:image>
   </url>
-  
-  <!-- Shop -->
+
+  <!-- Shop - All Products -->
   <url>
     <loc>https://naturanzafood.com/shop</loc>
-    <lastmod>2024-01-01</lastmod>
+    <lastmod>2026-05-18</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
-  
-  <!-- About -->
+
+  <!-- Shop Categories -->
+  <url>
+    <loc>https://naturanzafood.com/shop/honey</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://naturanzafood.com/images/categories/honey.jpg</image:loc>
+      <image:title>Organic Honey Category</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://naturanzafood.com/shop/herbal-teas</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://naturanzafood.com/images/categories/herbal-teas.jpg</image:loc>
+      <image:title>Herbal Teas Category</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://naturanzafood.com/shop/supplements</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://naturanzafood.com/images/categories/supplements.jpg</image:loc>
+      <image:title>Natural Supplements Category</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://naturanzafood.com/shop/oils</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://naturanzafood.com/images/categories/oils.jpg</image:loc>
+      <image:title>Natural Oils Category</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://naturanzafood.com/shop/seeds</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://naturanzafood.com/images/categories/seeds.jpg</image:loc>
+      <image:title>Organic Seeds Category</image:title>
+    </image:image>
+  </url>
+
+  <!-- About Us -->
   <url>
     <loc>https://naturanzafood.com/about</loc>
-    <lastmod>2024-01-01</lastmod>
+    <lastmod>2026-05-18</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
+    <priority>0.6</priority>
   </url>
-  
+
   <!-- Contact -->
   <url>
     <loc>https://naturanzafood.com/contact</loc>
-    <lastmod>2024-01-01</lastmod>
+    <lastmod>2026-05-18</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
-  
-  <!-- Legal Pages -->
+
+  <!-- FAQ -->
   <url>
-    <loc>https://naturanzafood.com/privacy</loc>
-    <lastmod>2024-01-01</lastmod>
-    <changefreq>yearly</changefreq>
-    <priority>0.5</priority>
+    <loc>https://naturanzafood.com/faq</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
   </url>
-  
-  <url>
-    <loc>https://naturanzafood.com/terms</loc>
-    <lastmod>2024-01-01</lastmod>
-    <changefreq>yearly</changefreq>
-    <priority>0.5</priority>
-  </url>
-  
+
+  <!-- Shipping -->
   <url>
     <loc>https://naturanzafood.com/shipping</loc>
-    <lastmod>2024-01-01</lastmod>
+    <lastmod>2026-05-18</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.5</priority>
   </url>
-  
+
+  <!-- Returns -->
   <url>
     <loc>https://naturanzafood.com/returns</loc>
-    <lastmod>2024-01-01</lastmod>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+
+  <!-- Terms -->
+  <url>
+    <loc>https://naturanzafood.com/terms</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+
+  <!-- Privacy Policy -->
+  <url>
+    <loc>https://naturanzafood.com/privacy</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+
+  <!-- Cookies Policy -->
+  <url>
+    <loc>https://naturanzafood.com/cookies</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+
+  <!-- Blog -->
+  <url>
+    <loc>https://naturanzafood.com/blog</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://naturanzafood.com/blog/complete-guide-organic-honey-pakistan</loc>
+    <lastmod>2026-06-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
-  
-  <!-- Category Pages -->
   <url>
-    <loc>https://naturanzafood.com/shop?category=honey</loc>
-    <lastmod>2024-01-01</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
+    <loc>https://naturanzafood.com/blog/how-to-identify-pure-honey-home-tests</loc>
+    <lastmod>2026-06-08</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
   </url>
-  
   <url>
-    <loc>https://naturanzafood.com/shop?category=herbal-teas</loc>
-    <lastmod>2024-01-01</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
+    <loc>https://naturanzafood.com/blog/top-10-health-benefits-raw-honey</loc>
+    <lastmod>2026-06-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
   </url>
-  
   <url>
-    <loc>https://naturanzafood.com/shop?category=supplements</loc>
-    <lastmod>2024-01-01</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
+    <loc>https://naturanzafood.com/blog/organic-food-culture-pakistan-trends</loc>
+    <lastmod>2026-06-22</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
   </url>
-  
-  <!-- Add product URLs dynamically in production -->
-  
+
+  <!--
+    IMPORTANT: Product detail pages should be dynamically generated.
+    Create backend endpoints:
+
+    1. GET /api/sitemap/products - Returns XML sitemap with all product URLs
+    2. GET /api/sitemap/categories - Returns XML sitemap with category pages
+
+    Example product URL entry:
+    <url>
+      <loc>https://naturanzafood.com/product/123</loc>
+      <lastmod>2026-05-18</lastmod>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+      <image:image>
+        <image:loc>https://naturanzafood.com/images/products/product-123.jpg</image:loc>
+        <image:title>Product Name</image:title>
+      </image:image>
+    </url>
+
+    Submit dynamic sitemaps to Google Search Console:
+    - https://naturanzafood.com/api/sitemap/products
+    - https://naturanzafood.com/api/sitemap/categories
+  -->
+
 </urlset>

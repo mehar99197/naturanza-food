@@ -1,15 +1,8 @@
 import { useState } from "react";
-import { UserPlus, Upload, X } from "lucide-react";
+import { UserPlus } from "lucide-react";
 import { adminAPI } from "@/services/api";
 import { toast } from "sonner";
-
-const PERMISSIONS = [
-  { id: "manage_orders", label: "Manage Orders" },
-  { id: "manage_products", label: "Manage Products" },
-  { id: "view_reports", label: "View Reports" },
-  { id: "manage_customers", label: "Manage Customers" },
-  { id: "manage_shipping", label: "Manage Shipping & Returns" },
-];
+import { PERMISSION_LIST, PERMISSION_GROUPS } from "@/config/adminPermissions";
 
 export function AddAdminForm({ onSuccess }) {
   const [loading, setLoading] = useState(false);
@@ -20,21 +13,6 @@ export function AddAdminForm({ onSuccess }) {
     role: "staff_admin",
     permissions: [],
   });
-  const [profilePicture, setProfilePicture] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState(null);
-
-  const handleImageChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setProfilePicture(file);
-      setPreviewUrl(URL.createObjectURL(file));
-    }
-  };
-
-  const removeImage = () => {
-    setProfilePicture(null);
-    setPreviewUrl(null);
-  };
 
   const togglePermission = (permId) => {
     setFormData((prev) => ({
@@ -56,11 +34,14 @@ export function AddAdminForm({ onSuccess }) {
       if (formData.phone) data.append("phone", formData.phone);
       data.append("role", formData.role);
       data.append("permissions", JSON.stringify(formData.permissions));
-      if (profilePicture) data.append("profile_picture", profilePicture);
 
-      await adminAPI.createAdmin(data);
-      
-      toast.success("Admin created successfully! Welcome email sent.");
+      const response = await adminAPI.createAdmin(data);
+
+      if (response?.emailStatus === "failed") {
+        toast.error(response?.message || "Admin created, but reset email failed to send.");
+      } else {
+        toast.success(response?.message || "Admin created successfully! Reset email sent.");
+      }
       
       setFormData({
         full_name: "",
@@ -69,9 +50,7 @@ export function AddAdminForm({ onSuccess }) {
         role: "staff_admin",
         permissions: [],
       });
-      setProfilePicture(null);
-      setPreviewUrl(null);
-      
+
       if (onSuccess) onSuccess();
     } catch (error) {
       toast.error(error?.response?.data?.error || "Failed to create admin");
@@ -125,55 +104,60 @@ export function AddAdminForm({ onSuccess }) {
 
         {formData.role === "staff_admin" && (
           <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
-            <p className="mb-2 text-xs font-semibold text-slate-600">Permissions</p>
-            <div className="space-y-2">
-              {PERMISSIONS.map((perm) => (
-                <label key={perm.id} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.permissions.includes(perm.id)}
-                    onChange={() => togglePermission(perm.id)}
-                    className="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-2 focus:ring-emerald-500"
-                  />
-                  <span className="text-sm text-slate-700">{perm.label}</span>
-                </label>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold text-slate-600">Permissions</p>
+                <p className="text-[11px] text-slate-500">
+                  Only ticked sections will be visible in this staff admin's sidebar.
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      permissions: PERMISSION_LIST.map((p) => p.id),
+                    }))
+                  }
+                  className="rounded-md border border-emerald-200 bg-white px-2 py-1 text-[10px] font-semibold text-emerald-700 transition hover:bg-emerald-50"
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData((prev) => ({ ...prev, permissions: [] }))}
+                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 transition hover:bg-slate-50"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
+              {PERMISSION_GROUPS.map((group) => (
+                <div key={group.name} className="rounded-lg border border-emerald-100 bg-white/70 p-2">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                    {group.name}
+                  </p>
+                  <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                    {group.items.map((perm) => (
+                      <label key={perm.id} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData.permissions.includes(perm.id)}
+                          onChange={() => togglePermission(perm.id)}
+                          className="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-2 focus:ring-emerald-500"
+                        />
+                        <span className="text-sm text-slate-700">{perm.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
         )}
-
-        <div>
-          <label className="mb-2 block text-xs font-semibold text-slate-600">
-            Profile Picture (optional)
-          </label>
-          {previewUrl ? (
-            <div className="relative inline-block">
-              <img
-                src={previewUrl}
-                alt="Preview"
-                className="h-24 w-24 rounded-full object-cover border-2 border-emerald-200"
-              />
-              <button
-                type="button"
-                onClick={removeImage}
-                className="absolute -top-2 -right-2 rounded-full bg-red-500 p-1 text-white hover:bg-red-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ) : (
-            <label className="flex cursor-pointer items-center gap-2 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/50 px-4 py-3 transition-colors hover:border-emerald-300 hover:bg-emerald-50">
-              <Upload className="h-5 w-5 text-emerald-600" />
-              <span className="text-sm text-slate-600">Click to upload image</span>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleImageChange}
-                className="hidden"
-              />
-            </label>
-          )}
-        </div>
 
         <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
           <p className="text-xs text-blue-800">

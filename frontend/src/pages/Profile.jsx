@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
+import { NoIndexSEO } from "@/components/SEO";
 import {
   User,
   Mail,
@@ -73,16 +74,21 @@ const Profile = () => {
 
   if (authLoading) {
     return (
+      <>
+        <NoIndexSEO title="My Profile" />
       <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg p-8 border border-gray-100 flex items-center justify-center min-h-[320px]">
         <div className="flex items-center gap-2 text-green-700 font-medium">
           <Loader2 className="h-5 w-5 animate-spin" />
           Loading profile...
         </div>
       </div>
+      </>
     );
   }
 
   return (
+    <>
+      <NoIndexSEO title="My Profile" />
     <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg p-3.5 sm:p-8 border border-gray-100">
       {successMessage && (
         <div className="mb-4 sm:mb-6 bg-green-50 border border-green-200 text-green-700 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm">
@@ -252,6 +258,7 @@ const Profile = () => {
       </div>
 
     </div>
+    </>
   );
 };
 

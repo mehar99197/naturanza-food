@@ -10,7 +10,7 @@ const resolveProductId = (product) => {
 };
 
 export function CartProvider({ children }) {
- const { isAuthenticated } = useAuth();
+ const { isAuthenticated, loading: authLoading } = useAuth();
  const [items, setItems] = useState([]);
  const [isCartOpen, setIsCartOpen] = useState(false);
  const [loading, setLoading] = useState(false);
@@ -33,12 +33,17 @@ export function CartProvider({ children }) {
 
  // Fetch cart from API when authenticated
  useEffect(() => {
+ // Don't fetch while auth is loading
+ if (authLoading) {
+ return;
+ }
+ 
  if (isAuthenticated) {
  fetchCart();
  } else {
  setItems([]);
  }
- }, [isAuthenticated, fetchCart]);
+ }, [isAuthenticated, authLoading, fetchCart]);
 
  const addToCart = useCallback(async (product, quantity = 1) => {
  if (!isAuthenticated) {
@@ -56,12 +61,53 @@ export function CartProvider({ children }) {
 
  const safeQuantity = Math.max(1, Number(quantity) || 1);
 
- try {
+ const price = Number(product?.price ?? 0);
+ const discount = Number(product?.discount_percentage ?? 0);
+ const finalPrice = price - (price * discount) / 100;
+
+ let previousItems;
+ setItems((current) => {
+ previousItems = current;
+ const existingIndex = current.findIndex(
+ (item) => String(item.product_id) === String(productId)
+ );
+ if (existingIndex !== -1) {
+ const next = current.slice();
+ const existing = next[existingIndex];
+ const newQty = (Number(existing.quantity) || 0) + safeQuantity;
+ const unit = Number(existing.final_price ?? existing.price ?? 0);
+ next[existingIndex] = {
+ ...existing,
+ quantity: newQty,
+ subtotal: (unit * newQty).toFixed(2),
+ };
+ return next;
+ }
+ return [
+ ...current,
+ {
+ product_id: productId,
+ name: product?.name,
+ price,
+ image_url: product?.image_url ?? product?.image ?? null,
+ stock_quantity: product?.stock_quantity,
+ discount_percentage: discount,
+ final_price: finalPrice,
+ quantity: safeQuantity,
+ subtotal: (finalPrice * safeQuantity).toFixed(2),
+ _optimistic: true,
+ },
+ ];
+ });
+
  setError(null);
+
+ try {
  await cartAPI.add(productId, safeQuantity);
- await fetchCart();
+ fetchCart();
  return { success: true };
  } catch (err) {
+ setItems(previousItems);
  const message = err.response?.data?.error || 'Failed to add to cart';
  setError(message);
  return { success: false, error: message };

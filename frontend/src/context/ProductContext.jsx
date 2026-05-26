@@ -23,6 +23,18 @@ const STARTUP_PRODUCT_GROUPS = [
 
 const normalizeText = (value = "") => String(value).toLowerCase().trim();
 
+const isTruthyFlag = (value) => {
+  if (value === true || value === 1) {
+    return true;
+  }
+
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+};
+
 const buildProductSearchText = (product) => {
   return [
     product?.slug,
@@ -175,15 +187,20 @@ export const ProductProvider = ({ children }) => {
 
   // Get featured products (only products marked as featured)
   const getFeaturedProducts = () => {
-    return products.filter((p) => 
-      (p.is_active === true || p.is_active === 1) && 
-      (p.is_featured === true || p.is_featured === 1)
+    const featured = products.filter(
+      (p) => isTruthyFlag(p.is_active) && isTruthyFlag(p.is_featured),
     );
+
+    if (featured.length > 0) {
+      return featured;
+    }
+
+    return products.filter((p) => isTruthyFlag(p.is_active));
   };
 
   // Get active products only
   const getActiveProducts = () => {
-    return products.filter((p) => p.is_active === true || p.is_active === 1);
+    return products.filter((p) => isTruthyFlag(p.is_active));
   };
 
   // Startup catalog (only Honey, Coconut Oil, Ispaghol)

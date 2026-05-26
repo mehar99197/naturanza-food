@@ -1,13 +1,24 @@
 import { Link } from 'react-router-dom';
 import { Mail, Phone, MapPin, Facebook, Instagram, Twitter, Youtube, ArrowRight, ChevronDown } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { categoryAPI } from '@/services/api';
+import { categoryAPI, newsletterAPI } from '@/services/api';
+import { useSettings } from '@/context/SettingsContext';
+
+const normalizePhoneLink = (value) => String(value || '').replace(/[^\d+]/g, '');
 
 export function Footer({ variant = 'full' }) {
+ const { settings } = useSettings();
  const [email, setEmail] = useState('');
  const [isSubscribed, setIsSubscribed] = useState(false);
+ const [subscribeMessage, setSubscribeMessage] = useState('');
+ const [subscribeError, setSubscribeError] = useState('');
+ const [isSubscribing, setIsSubscribing] = useState(false);
  const [openSection, setOpenSection] = useState(null);
  const [categories, setCategories] = useState([]);
+
+ const supportEmail = settings.storeEmail || 'support@naturanzafood.com';
+ const supportPhone = settings.storePhone || '+92340 9502646';
+ const phoneLink = normalizePhoneLink(supportPhone);
  
  // Slim version - compact footer for non-home pages
  const isSlim = variant === 'slim';
@@ -40,12 +51,29 @@ export function Footer({ variant = 'full' }) {
   return () => clearInterval(intervalId);
  }, []);
 
- const handleSubscribe = (e) => {
+ const handleSubscribe = async (e) => {
  e.preventDefault();
- if (email) {
+ const trimmedEmail = email.trim();
+ if (!trimmedEmail || isSubscribing) {
+ return;
+ }
+ setIsSubscribing(true);
+ setSubscribeError('');
+ try {
+ const response = await newsletterAPI.subscribe(trimmedEmail, 'footer');
  setIsSubscribed(true);
+ setSubscribeMessage(response?.message || 'Thank you for subscribing!');
  setEmail('');
- setTimeout(() => setIsSubscribed(false), 3000);
+ setTimeout(() => {
+ setIsSubscribed(false);
+ setSubscribeMessage('');
+ }, 5000);
+ } catch (error) {
+ const apiError = error?.response?.data?.error;
+ setSubscribeError(apiError || 'Could not subscribe. Please try again.');
+ setTimeout(() => setSubscribeError(''), 5000);
+ } finally {
+ setIsSubscribing(false);
  }
  };
 
@@ -69,11 +97,13 @@ export function Footer({ variant = 'full' }) {
  };
 
  const socialLinks = [
- { label: 'Facebook', href: 'https://www.facebook.com', icon: Facebook },
- { label: 'Instagram', href: 'https://www.instagram.com', icon: Instagram },
- { label: 'Twitter', href: 'https://www.twitter.com', icon: Twitter },
- { label: 'YouTube', href: 'https://www.youtube.com', icon: Youtube }
- ];
+ { label: 'Facebook', href: settings.facebookUrl, icon: Facebook },
+ { label: 'Instagram', href: settings.instagramUrl, icon: Instagram },
+ { label: 'Twitter', href: settings.twitterUrl, icon: Twitter },
+ { label: 'YouTube', href: settings.youtubeUrl, icon: Youtube }
+ ].filter((item) => item.href);
+
+ const locationLabel = settings.mapLocationLabel || 'Pakistan, Lahore';
 
  // Slim Footer Version - Minimal design for non-home pages
  if (isSlim) {
@@ -188,13 +218,16 @@ export function Footer({ variant = 'full' }) {
  value={email}
  onChange={(e) => setEmail(e.target.value)}
  placeholder="Enter your email"
- className="px-3 md:px-4 py-1.5 md:py-2 rounded-lg bg-white/10 backdrop-blur-md border border-white/20 text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-green-500 w-full sm:w-64 md:w-72 text-xs font-medium"
+ required
+ disabled={isSubscribing}
+ className="px-3 md:px-4 py-1.5 md:py-2 rounded-lg bg-white/10 backdrop-blur-md border border-white/20 text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-green-500 w-full sm:w-64 md:w-72 text-xs font-medium disabled:opacity-60 disabled:cursor-not-allowed"
  />
  <button
  type="submit"
- className="btn-3d px-4 md:px-5 py-1.5 md:py-2 bg-gradient-to-r from-green-500 via-green-600 to-emerald-600 md:hover:from-green-600 md:hover:to-emerald-700 rounded-lg font-semibold text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shadow-2xl shadow-green-900/50 md:hover:shadow-green-900/70 active:scale-95 transition-all duration-300 md:hover:-translate-y-0.5 md:hover:ring-1 md:hover:ring-emerald-200/70"
+ disabled={isSubscribing || !email.trim()}
+ className="btn-3d px-4 md:px-5 py-1.5 md:py-2 bg-gradient-to-r from-green-500 via-green-600 to-emerald-600 md:hover:from-green-600 md:hover:to-emerald-700 rounded-lg font-semibold text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shadow-2xl shadow-green-900/50 md:hover:shadow-green-900/70 active:scale-95 transition-all duration-300 md:hover:-translate-y-0.5 md:hover:ring-1 md:hover:ring-emerald-200/70 disabled:opacity-60 disabled:cursor-not-allowed"
  >
- Subscribe
+ {isSubscribing ? 'Subscribing...' : 'Subscribe'}
  <ArrowRight className="w-3.5 h-3.5" />
  </button>
  </form>
@@ -209,7 +242,14 @@ export function Footer({ variant = 'full' }) {
  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
  </svg>
  </div>
- <span className="text-green-300 font-bold text-sm">Thank you for subscribing!</span>
+ <span className="text-green-300 font-bold text-sm">{subscribeMessage || 'Thank you for subscribing!'}</span>
+ </div>
+ </div>
+ )}
+ {subscribeError && (
+ <div className="mt-6 text-center">
+ <div className="inline-flex items-center gap-2.5 glass-effect px-6 py-3 rounded-2xl border border-red-500/40 shadow-xl">
+ <span className="text-red-200 font-semibold text-sm">{subscribeError}</span>
  </div>
  </div>
  )}
@@ -345,27 +385,27 @@ export function Footer({ variant = 'full' }) {
  <MapPin className="w-4 h-4 text-white" />
  </div>
  <span className="text-white/90 text-sm font-medium leading-relaxed break-words min-w-0">
- Pakistan, Lahore
+ {locationLabel}
  </span>
  </div>
  </li>
                 <li>
-                  <a href="tel:+923474147400" className="flex items-start gap-3 min-w-0">
+                  <a href={`tel:${phoneLink}`} className="flex items-start gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center flex-shrink-0">
                       <Phone className="w-4 h-4 text-white" />
                     </div>
                     <span className="text-white/90 active:text-white text-sm font-medium break-words min-w-0">
-                      +92 347 4147400
+                      {supportPhone}
                     </span>
                   </a>
                 </li>
  <li>
- <a href="mailto:support@naturanzafoods.com" className="flex items-start gap-3 min-w-0">
+ <a href={`mailto:${supportEmail}`} className="flex items-start gap-3 min-w-0">
  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center flex-shrink-0">
  <Mail className="w-4 h-4 text-white" />
  </div>
  <span className="text-white/90 active:text-white text-sm font-medium break-all min-w-0">
- support@naturanzafoods.com
+ {supportEmail}
  </span>
  </a>
  </li>
@@ -471,27 +511,27 @@ export function Footer({ variant = 'full' }) {
  <MapPin className="w-4 h-4 text-white" />
  </div>
  <span className="text-white/90 text-sm font-medium leading-snug break-words min-w-0">
- Pakistan, Lahore
+ {locationLabel}
  </span>
  </div>
  </li>
  <li className="group">
- <a href="tel:+923474147400" className="flex items-center gap-3 p-3 rounded-2xl border border-white/10 bg-white/[0.03] md:hover:bg-white/[0.08] transition-colors duration-300 min-w-0 min-h-[74px]">
+ <a href={`tel:${phoneLink}`} className="flex items-center gap-3 p-3 rounded-2xl border border-white/10 bg-white/[0.03] md:hover:bg-white/[0.08] transition-colors duration-300 min-w-0 min-h-[74px]">
  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center flex-shrink-0 shadow-lg">
  <Phone className="w-4 h-4 text-white" />
  </div>
  <span className="text-white/90 md:hover:text-white text-sm font-medium leading-snug break-words min-w-0">
- +92 347 4147400
+ {supportPhone}
  </span>
  </a>
  </li>
  <li className="group">
- <a href="mailto:support@naturanzafoods.com" className="flex items-center gap-3 p-3 rounded-2xl border border-white/10 bg-white/[0.03] md:hover:bg-white/[0.08] transition-colors duration-300 min-w-0 min-h-[74px]">
+ <a href={`mailto:${supportEmail}`} className="flex items-center gap-3 p-3 rounded-2xl border border-white/10 bg-white/[0.03] md:hover:bg-white/[0.08] transition-colors duration-300 min-w-0 min-h-[74px]">
  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center flex-shrink-0 shadow-lg">
  <Mail className="w-4 h-4 text-white" />
  </div>
  <span className="text-white/90 md:hover:text-white text-sm font-medium leading-snug break-all min-w-0">
- support@naturanzafoods.com
+ {supportEmail}
  </span>
  </a>
  </li>
@@ -504,10 +544,10 @@ export function Footer({ variant = 'full' }) {
  <div className="border-t border-white/10 relative z-10">
  <div className="container-custom py-3 md:py-5">
  <div className="flex flex-col md:flex-row items-center justify-between gap-3 md:gap-4">
- <p className="text-white/80 text-xs md:text-sm font-medium">
- © 2026 Naturanza Food. All rights reserved.
- </p>
- <div className="flex flex-wrap justify-center gap-3 md:gap-6">
+  <p className="text-white/80 text-xs md:text-sm font-medium">
+  © 2026 Naturanza Food. All rights reserved.
+  </p>
+  <div className="flex flex-wrap justify-center gap-3 md:gap-6">
  <Link to="/terms" className="text-white/80 md:hover:text-white text-xs md:text-sm font-medium md:hover:translate-x-1 inline-block">
  Terms of Service
  </Link>

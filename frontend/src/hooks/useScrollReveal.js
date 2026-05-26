@@ -1,11 +1,53 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-// Disabled for performance - all elements are immediately visible
 export function useScrollReveal(options = {}) {
- const ref = useRef(null);
- const [isVisible] = useState(true); // Always true - no animations
+	const {
+		threshold = 0.2,
+		rootMargin = '0px 0px -10% 0px',
+		once = true,
+	} = options;
+	const ref = useRef(null);
+	const [isVisible, setIsVisible] = useState(false);
 
- // No IntersectionObserver - instant visibility for performance
- 
- return { ref, isVisible };
+	useEffect(() => {
+		if (typeof window === 'undefined') {
+			setIsVisible(true);
+			return;
+		}
+
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			setIsVisible(true);
+			return;
+		}
+
+		const node = ref.current;
+		if (!node) {
+			return;
+		}
+
+		const observer = new IntersectionObserver(
+			([entry]) => {
+				if (entry.isIntersecting) {
+					setIsVisible(true);
+					if (once) {
+						observer.unobserve(entry.target);
+					}
+					return;
+				}
+
+				if (!once) {
+					setIsVisible(false);
+				}
+			},
+			{ threshold, rootMargin },
+		);
+
+		observer.observe(node);
+
+		return () => {
+			observer.disconnect();
+		};
+	}, [once, rootMargin, threshold]);
+
+	return { ref, isVisible };
 }

@@ -24,7 +24,7 @@ const registerSchema = z.object({
     .min(2, "Name must be at least 2 characters")
     .max(120, "Name must be at most 120 characters")
     .optional(),
-});
+}).strict();
 
 const loginSchema = z.object({
   email: emailSchema,
@@ -32,7 +32,7 @@ const loginSchema = z.object({
     .string({ required_error: "Password is required" })
     .min(1, "Password is required")
     .max(128, "Password is too long"),
-});
+}).strict();
 
 // Refresh endpoint uses HttpOnly cookie, so body must be empty.
 const refreshTokenSchema = z.object({}).strict();

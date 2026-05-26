@@ -73,15 +73,7 @@ const AdminForgotPassword = () => {
           <div className="pointer-events-none absolute -left-14 bottom-4 h-40 w-40 rounded-full bg-green-100/70 blur-2xl" />
 
           <div className="relative">
-            <div className="mb-2.5 flex items-center justify-between">
-              <Link
-                to="/admin/login"
-                aria-label="Back to admin login"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-green-100 bg-white text-emerald-600 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50"
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </Link>
-
+            <div className="mb-2.5 flex items-center justify-end">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-800 shadow-sm">
                 <span className="text-[10px]">🔒</span>
                 Password Reset
@@ -95,7 +87,7 @@ const AdminForgotPassword = () => {
                     Forgot Password?
                   </h1>
                   <p className="mt-1.5 text-sm text-slate-600 sm:text-[0.95rem]">
-                    Enter the super admin email and we'll send a reset link
+                    Enter your admin email and we'll send a reset link
                   </p>
                 </header>
 
@@ -116,7 +108,7 @@ const AdminForgotPassword = () => {
                       <input
                         type="email"
                         autoComplete="email"
-                        placeholder="admin@naturanzafoods.com"
+                        placeholder="admin@naturanzafood.com"
                         {...register("email", {
                           required: "Email is required",
                           pattern: {
@@ -149,11 +141,11 @@ const AdminForgotPassword = () => {
 
                 <div className="mt-4 text-center">
                   <Link
-                    to="/admin/login"
+                    to="/admin/staff-login"
                     className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-600 transition hover:text-emerald-700"
                   >
                     <ArrowLeft className="h-4 w-4" />
-                    Back to Admin Login
+                    Back to login
                   </Link>
                 </div>
               </>
@@ -190,11 +182,11 @@ const AdminForgotPassword = () => {
 
                 <div className="mt-3">
                   <Link
-                    to="/admin/login"
+                    to="/admin/staff-login"
                     className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 transition hover:text-emerald-600"
                   >
                     <ArrowLeft className="h-4 w-4" />
-                    Back to Admin Login
+                    Back to login
                   </Link>
                 </div>
               </div>
@@ -204,7 +196,7 @@ const AdminForgotPassword = () => {
 
         {/* Footer */}
         <p className="mt-5 text-center text-xs text-slate-500">
-          © {new Date().getFullYear()} Naturanza Foods. Admin Portal.
+          © {new Date().getFullYear()} Naturanza Food. Admin Portal.
         </p>
       </div>
     </div>

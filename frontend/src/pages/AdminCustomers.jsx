@@ -13,7 +13,6 @@ import {
   X,
 } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { AdminPageSkeleton } from "@/components/Skeletons/AdminPageSkeleton";
 import { useAdminData } from "@/context/AdminDataContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
@@ -42,7 +41,6 @@ const MOBILE_INITIAL_CUSTOMERS = 6;
 export function AdminCustomers() {
   const {
     customers,
-    loading,
     addCustomer,
     updateCustomer,
     deleteCustomer,
@@ -228,14 +226,6 @@ export function AdminCustomers() {
       setError(requestError?.response?.data?.error || "Failed to update customer status");
     }
   };
-
-  if (loading) {
-    return (
-      <AdminLayout>
-        <AdminPageSkeleton cards={4} rows={8} showSidebar />
-      </AdminLayout>
-    );
-  }
 
   return (
     <AdminLayout>

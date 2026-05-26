@@ -1,12 +1,32 @@
-# Naturanza Food - Robots.txt
-# Allow all crawlers
+# Naturanza Food - robots.txt
+# Organic & Natural Food E-commerce in Pakistan
 
 User-agent: *
 Allow: /
 
-# Disallow admin and API routes
+# Block admin and private routes
 Disallow: /admin/
+Disallow: /profile/
+Disallow: /orders
+Disallow: /checkout
+Disallow: /login
+Disallow: /register
+Disallow: /signup
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /auth/
 Disallow: /api/
+Disallow: /images/uploads/
+Disallow: /uploads/
 
-# Sitemap location
+# Block search and filter parameters (allow crawling, don't waste crawl budget)
+Disallow: /shop?search=
+Disallow: /shop?category=
+Disallow: /shop?sort=
+Disallow: /shop?min=
+Disallow: /shop?max=
+Disallow: /shop?page=
+
+# Sitemap location — dynamic index lists DB-driven product + category sitemaps
+Sitemap: https://naturanzafood.com/api/sitemap-index.xml
 Sitemap: https://naturanzafood.com/sitemap.xml

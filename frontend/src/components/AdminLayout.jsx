@@ -9,6 +9,7 @@ import {
   Grid3X3,
   LayoutGrid,
   LogOut,
+  Mail,
   Menu,
   MessageSquare,
   PanelLeftClose,
@@ -21,12 +22,19 @@ import {
   Star,
   Ticket,
   Truck,
+  MapPin,
   Users,
+  UserRound,
   Wallet,
+  Megaphone,
   X,
 } from "lucide-react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useAdminNotifications } from "@/context/AdminNotificationsContext";
+import { NoIndexSEO } from "@/components/SEO";
+import { prefetchAdminRoute } from "@/utils/adminPrefetch";
+import { getAbsoluteImageUrl } from "@/lib/imageUtils";
+import { featureFromPath } from "@/config/adminPermissions";
 
 const MOBILE_MEDIA_QUERY = "(max-width: 1023px)";
 const COLLAPSED_MENU_ICON_CLASS = "h-4 w-4";
@@ -43,11 +51,15 @@ const navItems = [
   { path: "/admin/customers", label: "Customers", icon: Users },
   { path: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { path: "/admin/coupons", label: "Coupons", icon: Ticket },
+  { path: "/admin/announcements", label: "Announcements", icon: Megaphone },
+  { path: "/admin/team", label: "Team", icon: UserRound },
   { path: "/admin/payments", label: "Payments", icon: Wallet },
   { path: "/admin/messages", label: "Messages", icon: MessageSquare },
+  { path: "/admin/subscribers", label: "Subscribers", icon: Mail },
   { path: "/admin/notifications", label: "Notifications", icon: Bell },
   { path: "/admin/reviews", label: "Reviews", icon: Star },
   { path: "/admin/shipping", label: "Shipping", icon: Truck },
+  { path: "/admin/shipping-cities", label: "Shipping Cities", icon: MapPin },
   { path: "/admin/returns", label: "Returns", icon: RotateCcw },
   { path: "/admin/reports", label: "Reports", icon: Grid3X3 },
   { path: "/admin/settings", label: "Settings", icon: Settings },
@@ -76,6 +88,14 @@ const isMobileViewport = () => {
   return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
 };
 
+const isAdminPathActive = (pathname, itemPath) => {
+  if (itemPath === "/admin/dashboard") {
+    return pathname === itemPath;
+  }
+
+  return pathname === itemPath || pathname.startsWith(`${itemPath}/`);
+};
+
 export function AdminLayout({ children }) {
   const hasParentLayout = useContext(AdminLayoutContext);
 
@@ -89,10 +109,11 @@ export function AdminLayout({ children }) {
 function AdminLayoutShell({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { admin, adminLogout } = useAdminAuth();
+  const { admin, adminLogout, canAccess } = useAdminAuth();
   const { unreadCount, isMuted } = useAdminNotifications();
   const [isMobile, setIsMobile] = useState(isMobileViewport);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [adminImageError, setAdminImageError] = useState(false);
   const navScrollRef = useRef(null);
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") {
@@ -114,15 +135,26 @@ function AdminLayoutShell({ children }) {
   const activeNavItem = useMemo(() => {
     const sortedItems = [...navItems].sort((a, b) => b.path.length - a.path.length);
     return (
-      sortedItems.find((item) =>
-        item.path === "/admin/dashboard"
-          ? location.pathname === item.path
-          : location.pathname.startsWith(item.path),
-      ) || sortedItems[0]
+      sortedItems.find((item) => isAdminPathActive(location.pathname, item.path)) ||
+      sortedItems[0]
     );
   }, [location.pathname]);
 
   const adminInitials = getAdminInitials(admin);
+  const adminImageUrl = useMemo(() => {
+    const trimmed = String(admin?.profile_image || "").trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const lowered = trimmed.toLowerCase();
+    if (lowered === "null" || lowered === "undefined" || lowered === "none") {
+      return null;
+    }
+
+    return getAbsoluteImageUrl(trimmed);
+  }, [admin?.profile_image]);
+  const showAdminImage = Boolean(adminImageUrl) && !adminImageError;
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -152,6 +184,10 @@ function AdminLayoutShell({ children }) {
       mediaQuery.removeListener(handleViewportChange);
     };
   }, []);
+
+  useEffect(() => {
+    setAdminImageError(false);
+  }, [adminImageUrl]);
 
   useEffect(() => {
     if (isMobile) {
@@ -227,6 +263,7 @@ function AdminLayoutShell({ children }) {
 
   return (
     <div className="min-h-screen bg-[#f5f8f6] text-[#1f2937]">
+      <NoIndexSEO title="Admin" />
       <aside
         className={`fixed inset-y-0 left-0 z-50 h-screen w-[252px] max-w-[86vw] transform border-r border-[#0f172a]/10 bg-[#0f172a] text-[#e2e8f0] shadow-[0_18px_44px_rgba(2,6,23,0.3)] transition-[transform,width] duration-300 ${
           isSidebarCollapsed ? "overflow-visible" : "overflow-hidden"
@@ -285,12 +322,9 @@ function AdminLayoutShell({ children }) {
             }`}
           >
             <div className={isSidebarCollapsed ? "space-y-1 pb-0.5 pt-1" : "space-y-1.5 pb-1 pt-1"}>
-              {navItems.map((item) => {
+              {navItems.filter((item) => canAccess(featureFromPath(item.path))).map((item) => {
                 const Icon = item.icon;
-                const isActive =
-                  item.path === "/admin/dashboard"
-                    ? location.pathname === item.path
-                    : location.pathname.startsWith(item.path);
+                const isActive = isAdminPathActive(location.pathname, item.path);
 
                 const activeClasses = isSidebarCollapsed
                   ? "border-emerald-300/55 bg-emerald-500/22 text-[#f5f5ef] shadow-[0_4px_10px_rgba(16,185,129,0.18)]"
@@ -319,6 +353,12 @@ function AdminLayoutShell({ children }) {
                         persistSidebarScrollTop(navScrollRef.current.scrollTop);
                       }
                     }}
+                    // Warm the lazy chunk on hover/focus — by the time the user
+                    // clicks, the JS bundle is already cached, so the only
+                    // remaining latency is the page's own data fetch.
+                    onMouseEnter={() => prefetchAdminRoute(item.path)}
+                    onFocus={() => prefetchAdminRoute(item.path)}
+                    onTouchStart={() => prefetchAdminRoute(item.path)}
                     className={linkClasses}
                     aria-label={item.label}
                     aria-current={isActive ? "page" : undefined}
@@ -358,9 +398,18 @@ function AdminLayoutShell({ children }) {
             {!isSidebarCollapsed ? (
               <div className="rounded-xl border border-white/10 bg-white/5 p-2.5">
                 <div className="flex items-center gap-2.5">
-                  <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/20 text-xs font-bold text-emerald-200 ring-1 ring-emerald-400/45">
-                    {adminInitials}
-                  </div>
+                  {showAdminImage ? (
+                    <img
+                      src={adminImageUrl}
+                      alt={admin?.name || "Admin"}
+                      onError={() => setAdminImageError(true)}
+                      className="h-9 w-9 rounded-full object-cover ring-1 ring-emerald-400/45"
+                    />
+                  ) : (
+                    <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/20 text-xs font-bold text-emerald-200 ring-1 ring-emerald-400/45">
+                      {adminInitials}
+                    </div>
+                  )}
 
                   <div className="min-w-0">
                     <p className="truncate text-[13px] font-semibold leading-tight text-white">
@@ -449,9 +498,18 @@ function AdminLayoutShell({ children }) {
               </button>
 
               <div className="inline-flex items-center gap-2.5 rounded-full border border-[#bbf7d0] bg-white px-2.5 py-1.5 shadow-sm">
-                <div className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#16a34a] text-xs font-bold text-white">
-                  {adminInitials}
-                </div>
+                {showAdminImage ? (
+                  <img
+                    src={adminImageUrl}
+                    alt={admin?.name || "Admin"}
+                    onError={() => setAdminImageError(true)}
+                    className="h-8 w-8 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#16a34a] text-xs font-bold text-white">
+                    {adminInitials}
+                  </div>
+                )}
                 <p className="hidden max-w-[120px] truncate text-sm font-semibold text-[#1f2937] sm:block">
                   {admin?.name || "Admin User"}
                 </p>

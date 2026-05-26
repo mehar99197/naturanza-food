@@ -1,6 +1,6 @@
 -- 002_remove_user_wellness_profiles.sql
 -- Purpose: remove deprecated wellness profile table.
 
-USE naturanza_foods;
+USE naturanza_food;
 
 DROP TABLE IF EXISTS user_wellness_profiles;

@@ -12,6 +12,7 @@ import { useAuth } from "@/context/AuthContext";
 import { sanitizeEmail, sanitizeInput } from "@/lib/sanitize";
 import LeftPanel from "@/components/auth/LeftPanel";
 import AuthSocialButtons from "@/components/auth/AuthSocialButtons";
+import { NoIndexSEO } from "@/components/SEO";
 
 const leftPoints = [
   "Exclusive Member Discounts",
@@ -79,9 +80,14 @@ const Register = () => {
   const confirmPasswordValue = watch("confirmPassword", "");
   const strengthScore = getPasswordStrength(passwordValue);
 
+  const allowDevGoogle =
+    String(import.meta.env.VITE_GOOGLE_ALLOW_DEV || "")
+      .trim()
+      .toLowerCase() === "true";
   const isGoogleConfigured = Boolean(
     import.meta.env.VITE_GOOGLE_CLIENT_ID &&
-      import.meta.env.VITE_GOOGLE_CLIENT_ID !== "YOUR_GOOGLE_CLIENT_ID_HERE",
+      import.meta.env.VITE_GOOGLE_CLIENT_ID !== "YOUR_GOOGLE_CLIENT_ID_HERE" &&
+      (!import.meta.env.DEV || allowDevGoogle),
   );
 
   const handleGoogleSuccess = async (credentialResponse) => {
@@ -115,7 +121,7 @@ const Register = () => {
     const payload = {
       name: sanitizeInput(values.fullName.trim()),
       email: sanitizeEmail(values.email),
-      password: sanitizeInput(values.password),
+      password: values.password,
     };
 
     const result = await registerUser(payload);
@@ -128,7 +134,9 @@ const Register = () => {
   };
 
   return (
-    <div className="auth-premium-font min-h-screen bg-green-50 lg:h-screen lg:overflow-hidden">
+    <>
+      <NoIndexSEO title="Create Account" />
+    <div className="auth-premium-font min-h-screen bg-green-50 overflow-y-auto lg:h-screen lg:overflow-hidden">
       <div className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:block lg:w-[42%] xl:w-[44%]">
         <LeftPanel
           heading="Start Your Natural Wellness Journey"
@@ -171,9 +179,10 @@ const Register = () => {
             ) : null}
 
             <form className="mt-6 space-y-4" onSubmit={handleSubmit(onSubmit)} noValidate>
-              <label className="block">
+              <label htmlFor="fullName" className="block">
                 <span className={labelClassName}>Full name</span>
                 <input
+                  id="fullName"
                   type="text"
                   autoComplete="name"
                   placeholder="John Doe"
@@ -195,9 +204,10 @@ const Register = () => {
                 ) : null}
               </label>
 
-              <label className="block">
+              <label htmlFor="email" className="block">
                 <span className={labelClassName}>Email address</span>
                 <input
+                  id="email"
                   type="email"
                   autoComplete="email"
                   placeholder="you@example.com"
@@ -219,10 +229,11 @@ const Register = () => {
                 ) : null}
               </label>
 
-              <label className="block">
+              <label htmlFor="password" className="block">
                 <span className={labelClassName}>Password</span>
                 <div className="relative">
                   <input
+                    id="password"
                     type={showPassword ? "text" : "password"}
                     autoComplete="new-password"
                     placeholder="At least 12 characters"
@@ -274,10 +285,11 @@ const Register = () => {
                 ) : null}
               </label>
 
-              <label className="block">
+              <label htmlFor="confirmPassword" className="block">
                 <span className={labelClassName}>Confirm password</span>
                 <div className="relative">
                   <input
+                    id="confirmPassword"
                     type={showConfirmPassword ? "text" : "password"}
                     autoComplete="new-password"
                     placeholder="Re-enter password"
@@ -379,6 +391,7 @@ const Register = () => {
         </div>
       </main>
     </div>
+    </>
   );
 };
 

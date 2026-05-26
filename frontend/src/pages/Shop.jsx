@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from"react";
+import { useState, useMemo, useEffect, useRef } from"react";
 import { useSearchParams } from"react-router-dom";
 import { 
  Grid3X3, 
@@ -19,26 +19,39 @@ import { ProductCardSkeleton } from"@/components/Skeletons/ProductCardSkeleton";
 import { SearchBar } from"@/components/SearchBar";
 import { useSettings } from"@/context/SettingsContext";
 import { useProducts } from"@/context/ProductContext";
-import { formatPrice } from"@/lib/utils";
+import { formatCurrency, formatPrice } from"@/lib/utils";
+import { convertFromPkr, hasExchangeRate } from"@/lib/exchangeRates";
 import { categoryAPI } from"@/services/api";
-import { ShopSEO } from"@/components/SEO";
+import { ShopSEO } from "@/components/SEO";
+import { ShopBreadcrumbStructuredData } from "@/components/StructuredData";
+import { Helmet } from "react-helmet-async";
+import { useScrollReveal } from "@/hooks/useScrollReveal";
 
 export function Shop() {
- const { settings } = useSettings();
+ const { settings, exchangeRates } = useSettings();
  const { getActiveProducts } = useProducts();
  const [searchParams, setSearchParams] = useSearchParams();
  const [viewMode, setViewMode] = useState("grid");
  const [sortBy, setSortBy] = useState("featured");
  const [isLoading, setIsLoading] = useState(true);
+ const { ref: headerRef, isVisible: headerVisible } = useScrollReveal();
+ const { ref: toolbarRef, isVisible: toolbarVisible } = useScrollReveal({ threshold: 0.12 });
+ const { ref: gridRef, isVisible: gridVisible } = useScrollReveal({ threshold: 0.12 });
  
  // Sidebar state
  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
- // Dynamic max price based on currency
- const maxPrice =
- settings.currency ==="PKR" || settings.currency ==="INR" ? 10000 : 100;
+ const currencyCode = String(settings.currency || "PKR").toUpperCase();
+ const hasRate = hasExchangeRate(currencyCode);
+ const baseMaxPrice = 10000;
+ const computedMaxPrice = hasRate
+ ? Math.round(convertFromPkr(baseMaxPrice, currencyCode) || baseMaxPrice)
+ : baseMaxPrice;
+ const maxPrice = Math.max(1, computedMaxPrice);
+ const priceRangeCurrency = hasRate ? currencyCode : "PKR";
  const [priceRange, setPriceRange] = useState([0, maxPrice]);
+ const currencyRef = useRef(currencyCode);
  const [searchQuery, setSearchQuery] = useState("");
 
  const selectedCategory = searchParams.get("category") ||"all";
@@ -101,6 +114,18 @@ export function Shop() {
  }, []);
 
  const products = useMemo(() => getActiveProducts(), [getActiveProducts]);
+
+ useEffect(() => {
+ if (currencyRef.current !== currencyCode) {
+ setPriceRange([0, maxPrice]);
+ currencyRef.current = currencyCode;
+ return;
+ }
+
+ if (priceRange[1] > maxPrice) {
+ setPriceRange([priceRange[0], maxPrice]);
+ }
+ }, [currencyCode, maxPrice, priceRange]);
  const selectedCategoryName = useMemo(() => {
  return (
  categories.find((cat) => String(cat.id) === String(selectedCategory))?.name ||
@@ -208,10 +233,14 @@ export function Shop() {
  }
 
  // Filter by price
- result = result.filter(
- (p) =>
- Number(p.price) >= priceRange[0] && Number(p.price) <= priceRange[1],
- );
+ result = result.filter((p) => {
+ const basePrice = Number(p.price);
+ const convertedPrice = hasRate
+ ? convertFromPkr(basePrice, currencyCode)
+ : basePrice;
+ const priceValue = Number.isFinite(convertedPrice) ? convertedPrice : basePrice;
+ return priceValue >= priceRange[0] && priceValue <= priceRange[1];
+ });
 
  // Sort
  switch (sortBy) {
@@ -243,6 +272,9 @@ export function Shop() {
  searchQuery,
  products,
  settings.currency,
+ exchangeRates.updatedAt,
+ hasRate,
+ currencyCode,
  ]);
 
  const handleCategoryChange = (category) => {
@@ -257,9 +289,10 @@ export function Shop() {
  };
 
  return (
- <>
- <ShopSEO category={selectedCategory !== 'all' ? selectedCategory : null} />
- <main className="shop-mobile-shell pt-24 pb-12 sm:pb-16 min-h-screen bg-green-50 overflow-x-hidden">
+<>
+  <ShopSEO category={selectedCategory !== 'all' ? selectedCategory : null} />
+  <ShopBreadcrumbStructuredData category={selectedCategory !== 'all' ? selectedCategory : null} />
+  <main className="shop-mobile-shell pt-24 pb-12 sm:pb-16 min-h-screen bg-green-50 overflow-x-hidden">
  {/* Mobile Overlay */}
  {mobileDrawerOpen && (
  <div
@@ -385,10 +418,10 @@ export function Shop() {
  />
  <div className="flex justify-between items-center">
  <span className="text-sm font-medium text-[#2d3a2d]">
- {formatPrice(priceRange[0], settings.currency)}
+ {formatCurrency(priceRange[0], priceRangeCurrency)}
  </span>
  <span className="text-sm font-medium text-[#3d7a3d]">
- {formatPrice(priceRange[1], settings.currency)}
+ {formatCurrency(priceRange[1], priceRangeCurrency)}
  </span>
  </div>
  </div>
@@ -401,7 +434,12 @@ export function Shop() {
  <div className={`flex-1 min-w-0 ${sidebarCollapsed ? 'lg:ml-0' : 'lg:ml-0'}`}>
  <div className="container-custom">
  {/* Header */}
- <div className="mb-5 sm:mb-6">
+ <div
+ className={`mb-5 sm:mb-6 reveal reveal-left ${
+ headerVisible ? 'active' : ''
+ }`}
+ ref={headerRef}
+ >
  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
  <div>
  <h1 className="shop-mobile-title font-display text-2xl sm:text-3xl md:text-4xl leading-tight font-semibold text-[#2d3a2d] mb-1">
@@ -460,7 +498,7 @@ export function Shop() {
  )}
  {priceRange[1] !== maxPrice && (
  <span className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-500 text-white text-sm rounded-full shadow-sm whitespace-nowrap">
- Up to {formatPrice(priceRange[1], settings.currency)}
+ Up to {formatCurrency(priceRange[1], priceRangeCurrency)}
  <button
  onClick={() => setPriceRange([0, maxPrice])}
  className="hover:bg-white/20 rounded-full p-0.5"
@@ -484,7 +522,12 @@ export function Shop() {
  </div>
 
  {/* Toolbar */}
- <div className="shop-toolbar-compact bg-white border border-[#e8ece6] rounded-2xl p-2.5 sm:p-3.5 md:p-3.5 mb-5 shadow-[0_2px_10px_rgba(23,35,19,0.05)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
+ <div
+ className={`shop-toolbar-compact bg-white border border-[#e8ece6] rounded-2xl p-2.5 sm:p-3.5 md:p-3.5 mb-5 shadow-[0_2px_10px_rgba(23,35,19,0.05)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 reveal reveal-right ${
+ toolbarVisible ? 'active' : ''
+ }`}
+ ref={toolbarRef}
+ >
  <span className="text-[#6b7a6b] text-sm font-medium order-2 sm:order-1">
  <span className="text-[#3d7a3d] font-bold">{filteredProducts.length}</span> products in {selectedCategoryName}
  </span>
@@ -530,6 +573,10 @@ export function Shop() {
  </div>
 
  {/* Products Grid */}
+ <div
+ className={`reveal reveal-right ${gridVisible ? 'active' : ''}`}
+ ref={gridRef}
+ >
  {isLoading ? (
  <div
  className={`shop-grid-compact grid gap-3 sm:gap-5 md:gap-5 lg:gap-6 ${
@@ -583,6 +630,7 @@ export function Shop() {
  </div>
  </div>
  )}
+ </div>
  </div>
  </div>
  </div>

@@ -1,3 +1,5 @@
+const { backfillKnownProductContent } = require("./productContentDefaults");
+
 const ensureTableStatements = [
   `CREATE TABLE IF NOT EXISTS user_addresses (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -86,6 +88,20 @@ const ensureTableStatements = [
     FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_inventory_movements_product (product_id, created_at),
     INDEX idx_inventory_movements_order (order_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS stock_reservations (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    order_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity INT NOT NULL,
+    state ENUM('held','consumed','released') NOT NULL DEFAULT 'held',
+    expires_at DATETIME NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    INDEX idx_resv_state_expires (state, expires_at),
+    INDEX idx_resv_order (order_id)
   )`,
   `CREATE TABLE IF NOT EXISTS product_images (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -238,6 +254,17 @@ const ensureTableStatements = [
     low_stock_threshold INT DEFAULT 10,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS announcements (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    type ENUM('info', 'success', 'warning', 'danger', 'promotion') DEFAULT 'info',
+    is_active BOOLEAN DEFAULT TRUE,
+    start_date DATETIME DEFAULT NULL,
+    end_date DATETIME DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`,
   `CREATE TABLE IF NOT EXISTS user_wishlist (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
@@ -287,6 +314,41 @@ const ensureTableStatements = [
     UNIQUE KEY unique_payment_method_code (code),
     INDEX idx_payment_methods_active_sort (is_active, sort_order)
   )`,
+  `CREATE TABLE IF NOT EXISTS payment_accounts (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    type ENUM('jazzcash', 'easypaisa', 'bank') NOT NULL,
+    account_number VARCHAR(50) NOT NULL,
+    account_name VARCHAR(100) NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS advance_payment_verifications (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    order_id VARCHAR(20) NOT NULL,
+    customer_name VARCHAR(100) NOT NULL,
+    customer_phone VARCHAR(20),
+    amount INT NOT NULL,
+    payment_method ENUM('jazzcash','easypaisa','bank') NOT NULL,
+    transaction_id VARCHAR(50) NULL,
+    screenshot_url VARCHAR(255),
+    status ENUM('pending','approved','rejected') DEFAULT 'pending',
+    rejection_reason VARCHAR(255),
+    verified_by INT,
+    verified_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_apv_transaction_id (transaction_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS team_members (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(255) NOT NULL,
+    role VARCHAR(255) NOT NULL,
+    image VARCHAR(500) DEFAULT NULL,
+    bio TEXT DEFAULT NULL,
+    sort_order INT DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`,
 ];
 
 const defaultPaymentMethods = [
@@ -324,6 +386,24 @@ const defaultPaymentMethods = [
     description: "JazzCash wallet payments",
     sort_order: 5,
     supports_online: true,
+  },
+];
+
+const defaultPaymentAccounts = [
+  {
+    type: "jazzcash",
+    account_number: "03XX-XXXXXXX",
+    account_name: "Naturanza Food",
+  },
+  {
+    type: "easypaisa",
+    account_number: "03XX-XXXXXXX",
+    account_name: "Naturanza Food",
+  },
+  {
+    type: "bank",
+    account_number: "PK00XXXX0000000000000000",
+    account_name: "Naturanza Food",
   },
 ];
 
@@ -416,6 +496,25 @@ const ensurePaymentMethodsSeed = async (db) => {
   }
 };
 
+const ensurePaymentAccountsSeed = async (db) => {
+  const [rows] = await db.query("SELECT type FROM payment_accounts");
+  const existingTypes = new Set(
+    rows.map((row) => String(row.type || "").trim().toLowerCase()),
+  );
+
+  for (const account of defaultPaymentAccounts) {
+    if (existingTypes.has(account.type)) {
+      continue;
+    }
+
+    await db.query(
+      `INSERT INTO payment_accounts (type, account_number, account_name, is_active)
+       VALUES (?, ?, ?, TRUE)`,
+      [account.type, account.account_number, account.account_name],
+    );
+  }
+};
+
 const ensureProductionSchema = async (db) => {
   for (const statement of ensureTableStatements) {
     await ensureTable(db, statement);
@@ -425,8 +524,12 @@ const ensureProductionSchema = async (db) => {
   await db.query("DROP TABLE IF EXISTS user_wellness_profiles");
 
   await ensurePaymentMethodsSeed(db);
+  await ensurePaymentAccountsSeed(db);
 
   await ensureColumns(db, "users", {
+    admin_role: "ENUM('super_admin', 'staff_admin', 'admin', 'moderator') DEFAULT NULL",
+    admin_permissions: "JSON NULL",
+    last_login: "DATETIME NULL",
     profile_image: "VARCHAR(255) NULL",
     is_active: "BOOLEAN DEFAULT TRUE",
     signup_provider: "ENUM('password', 'google') DEFAULT 'password'",
@@ -462,9 +565,11 @@ const ensureProductionSchema = async (db) => {
   await ensureColumns(db, "products", {
     slug: "VARCHAR(200) NULL",
     images: "JSON NULL",
+    qr_code_url: "VARCHAR(255) NULL",
     ingredients: "TEXT NULL",
     benefits: "TEXT NULL",
     usage: "TEXT NULL",
+    reserved_stock: "INT NOT NULL DEFAULT 0",
   });
 
   await db.query(
@@ -501,6 +606,17 @@ const ensureProductionSchema = async (db) => {
 
   await db.query("ALTER TABLE categories MODIFY COLUMN slug VARCHAR(160) NOT NULL");
   await db.query("ALTER TABLE products MODIFY COLUMN slug VARCHAR(200) NOT NULL");
+  await backfillKnownProductContent(db);
+
+  await ensureColumns(db, "advance_payment_verifications", {
+    transaction_id: "VARCHAR(50) NULL",
+  });
+  await ensureIndex(
+    db,
+    "advance_payment_verifications",
+    "uq_apv_transaction_id",
+    "CREATE UNIQUE INDEX uq_apv_transaction_id ON advance_payment_verifications (transaction_id)",
+  );
 
   await ensureColumns(db, "orders", ordersColumnDefinitions);
   await db.query(

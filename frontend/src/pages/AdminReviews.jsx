@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertCircle, RefreshCw, Star, Trash2 } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { AdminPageSkeleton } from "@/components/Skeletons/AdminPageSkeleton";
 import { adminAPI } from "@/services/api";
+import { useSWRCache, invalidateSWRKey } from "@/hooks/useSWRCache";
 
 const formatDate = (value) => {
   if (!value) {
@@ -26,33 +26,33 @@ const renderStars = (rating = 0) => {
   ));
 };
 
+const CACHE_KEY = "admin:reviews";
+
 export function AdminReviews() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [reviews, setReviews] = useState([]);
   const [savingIds, setSavingIds] = useState(new Set());
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
-  const loadReviews = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError("");
+  const [mutationError, setMutationError] = useState("");
 
-      const response = await adminAPI.getReviews({});
-      setReviews(Array.isArray(response) ? response : []);
-    } catch (requestError) {
-      setError(
-        requestError?.response?.data?.error ||
-          requestError?.message ||
-          "Failed to load product reviews",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // SWR: cached data renders instantly on re-visit; background refresh keeps it fresh.
+  const {
+    data,
+    loading,
+    revalidating,
+    error: swrError,
+    refresh,
+  } = useSWRCache(CACHE_KEY, () => adminAPI.getReviews({}));
 
-  useEffect(() => {
-    void loadReviews();
-  }, [loadReviews]);
+  const reviews = Array.isArray(data) ? data : [];
+  const fetchError = swrError
+    ? swrError?.response?.data?.error || swrError?.message || "Failed to load product reviews"
+    : "";
+  const error = mutationError || fetchError;
+  const setError = setMutationError;
+
+  const loadReviews = async () => {
+    invalidateSWRKey(CACHE_KEY);
+    await refresh();
+  };
 
   const deleteReview = async (reviewId) => {
     if (!confirm("Are you sure you want to delete this review? This action cannot be undone.")) {
@@ -79,14 +79,6 @@ export function AdminReviews() {
     }
   };
 
-  if (loading) {
-    return (
-      <AdminLayout>
-        <AdminPageSkeleton cards={3} rows={7} />
-      </AdminLayout>
-    );
-  }
-
   return (
     <AdminLayout>
       <div className="mx-auto w-full max-w-[1240px] space-y-4 sm:space-y-6">
@@ -102,7 +94,7 @@ export function AdminReviews() {
             onClick={() => void loadReviews()}
             className="inline-flex h-10 self-end items-center gap-1.5 rounded-xl border border-emerald-200/90 bg-white px-3 text-[13px] font-semibold text-emerald-800 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 sm:h-11 sm:self-auto sm:gap-2 sm:rounded-2xl sm:px-4 sm:text-sm"
           >
-            <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading || revalidating ? "animate-spin" : ""}`} />
             Refresh
           </button>
         </div>

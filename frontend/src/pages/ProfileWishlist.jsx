@@ -1,91 +1,54 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Heart, Loader2, ShoppingCart, Trash2, Star } from "lucide-react";
 import { Link } from "react-router-dom";
-import { wishlistAPI } from "@/services/api";
 import { useCart } from "@/context/CartContext";
 import { useSettings } from "@/context/SettingsContext";
+import { useWishlist } from "@/context/WishlistContext";
 import { formatPrice } from "@/lib/utils";
 import { getAbsoluteImageUrl } from "@/lib/imageUtils";
-import { products as localProducts } from "@/data/products";
-
-const normalizeProductId = (value) => String(value || "").trim();
-
-const emitWishlistUpdated = () => {
-  window.dispatchEvent(new Event("wishlistUpdated"));
-};
+import { getProductContentDefaults } from "@/lib/productContentDefaults";
 
 const resolveImage = (item) => {
   const imageValue = item?.image_url || item?.image || "";
   if (!imageValue) {
-    return "/images/products/powder.webp";
+    return "/images/products/honey.webp";
   }
 
   // Use getAbsoluteImageUrl to convert relative URLs to absolute backend URLs
-  return getAbsoluteImageUrl(imageValue);
+  return getAbsoluteImageUrl(imageValue, { defaultFolder: 'products' });
 };
 
 export function ProfileWishlist() {
   const { settings } = useSettings();
   const { addToCart } = useCart();
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    items,
+    loading,
+    error: wishlistError,
+    refreshWishlist,
+    removeFromWishlist,
+  } = useWishlist();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [movingId, setMovingId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
 
-  const localProductsMap = useMemo(() => {
-    return localProducts.reduce((acc, product) => {
-      acc[normalizeProductId(product.id)] = product;
-      return acc;
-    }, {});
-  }, []);
-
-  const loadWishlist = async () => {
-    try {
-      setLoading(true);
-      setError("");
-      const response = await wishlistAPI.get();
-      setItems(Array.isArray(response?.items) ? response.items : []);
-    } catch (err) {
-      setError(err.response?.data?.error || "Could not load wishlist");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadWishlist();
-
-    const handleWishlistUpdated = () => {
-      void loadWishlist();
-    };
-
-    window.addEventListener("wishlistUpdated", handleWishlistUpdated);
-
-    return () => {
-      window.removeEventListener("wishlistUpdated", handleWishlistUpdated);
-    };
-  }, []);
-
-  const removeItemFromList = (productId) => {
-    const normalized = normalizeProductId(productId);
-    setItems((prev) =>
-      prev.filter(
-        (item) => normalizeProductId(item.product_id || item.id) !== normalized,
-      ),
-    );
-  };
+    setError(wishlistError || "");
+  }, [wishlistError]);
 
   const handleRemove = async (productId) => {
     try {
       setRemovingId(productId);
       setError("");
-      await wishlistAPI.removeByProduct(productId);
-      removeItemFromList(productId);
+      const result = await removeFromWishlist(productId);
+      if (!result?.success) {
+        setError(result?.message || "Failed to remove wishlist item");
+        return;
+      }
+
       setSuccess("Item removed from wishlist.");
       setTimeout(() => setSuccess(""), 2500);
-      emitWishlistUpdated();
     } catch (err) {
       setError(err.response?.data?.error || "Failed to remove wishlist item");
     } finally {
@@ -104,11 +67,15 @@ export function ProfileWishlist() {
         return;
       }
 
-      await wishlistAPI.removeByProduct(productId);
-      removeItemFromList(productId);
+      const removeResult = await removeFromWishlist(productId);
+      if (!removeResult?.success) {
+        setError(removeResult?.message || "Could not move item to cart");
+        return;
+      }
+
+      await refreshWishlist({ silent: true });
       setSuccess("Moved to cart successfully.");
       setTimeout(() => setSuccess(""), 2500);
-      emitWishlistUpdated();
     } catch (err) {
       setError(err.response?.data?.error || "Could not move item to cart");
     } finally {
@@ -163,9 +130,14 @@ export function ProfileWishlist() {
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-5">
           {items.map((item) => {
             const productId = item.product_id || item.id;
-            const fallback = localProductsMap[normalizeProductId(productId)] || {};
-            const rating = Number(item.rating || fallback.rating || 0);
-            const reviewCount = Number(item.reviews || fallback.reviews || 0);
+            const rating = Number(item.average_rating ?? item.rating ?? 0);
+            const reviewCount = Number(item.review_count ?? item.reviews ?? 0);
+            const isInStock = Number(item.in_stock ?? item.stock_quantity ?? 0) > 0;
+            const contentDefaults = getProductContentDefaults(item);
+            const shortDescription = String(
+              item.description || contentDefaults?.description || "",
+            ).trim();
+            const discount = Number(item.discount_percentage || 0);
 
             return (
               <article
@@ -175,24 +147,46 @@ export function ProfileWishlist() {
                 <div className="flex gap-3 sm:block">
                   <Link
                     to={`/product/${productId}`}
-                    className="block h-24 w-24 flex-shrink-0 rounded-lg bg-gray-50 sm:h-auto sm:w-full sm:rounded-none sm:aspect-[4/3]"
+                    className="block h-24 w-24 flex-shrink-0 rounded-lg bg-gradient-to-br from-emerald-50 via-white to-lime-50 sm:h-auto sm:w-full sm:rounded-none sm:aspect-[4/3]"
                   >
                     <img
                       src={resolveImage(item)}
-                      alt={item.name || fallback.name || "Wishlist product"}
-                      className="w-full h-full object-contain sm:object-cover"
+                      alt={item.name || "Wishlist product"}
+                      className="w-full h-full object-contain p-2 sm:p-4"
                       onError={(event) => {
-                        event.currentTarget.src = "/images/products/powder.webp";
+                        event.currentTarget.src = "/images/products/honey.webp";
                       }}
                     />
                   </Link>
 
                   <div className="min-w-0 flex-1 sm:p-4">
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] sm:text-xs">
+                      {item.category_name && (
+                        <span className="rounded-full bg-green-50 px-2.5 py-1 font-medium text-green-700">
+                          {item.category_name}
+                        </span>
+                      )}
+                      <span
+                        className={`rounded-full px-2.5 py-1 font-medium ${
+                          isInStock
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-red-50 text-red-700"
+                        }`}
+                      >
+                        {isInStock ? "In Stock" : "Out of Stock"}
+                      </span>
+                      {discount > 0 && (
+                        <span className="rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">
+                          {discount}% OFF
+                        </span>
+                      )}
+                    </div>
+
                     <Link
                       to={`/product/${productId}`}
-                      className="text-sm sm:text-base font-semibold text-gray-900 hover:text-green-700 line-clamp-2"
+                      className="mt-2 block text-sm sm:text-base font-semibold text-gray-900 hover:text-green-700 line-clamp-2"
                     >
-                      {item.name || fallback.name || "Product"}
+                      {item.name || "Product"}
                     </Link>
 
                     <div className="mt-1.5 sm:mt-2 flex items-center gap-1.5 text-xs sm:text-sm text-amber-600">
@@ -205,8 +199,18 @@ export function ProfileWishlist() {
                       )}
                     </div>
 
+                    {shortDescription ? (
+                      <p className="mt-2 text-xs sm:text-sm leading-6 text-gray-600 line-clamp-2">
+                        {shortDescription}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs sm:text-sm leading-6 text-gray-400">
+                        View full product details and customer reviews.
+                      </p>
+                    )}
+
                     <p className="mt-1.5 sm:mt-2 text-base sm:text-lg font-bold text-green-700">
-                      {formatPrice(Number(item.price || fallback.price || 0), settings.currency)}
+                      {formatPrice(Number(item.price || 0), settings.currency)}
                     </p>
                   </div>
                 </div>

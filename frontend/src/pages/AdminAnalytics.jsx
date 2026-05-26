@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, BarChart3, RefreshCw, TrendingUp } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { AdminPageSkeleton } from "@/components/Skeletons/AdminPageSkeleton";
 import { adminAPI } from "@/services/api";
 import { formatPrice } from "@/lib/utils";
 import { useSettings } from "@/context/SettingsContext";
@@ -105,14 +104,6 @@ export function AdminAnalytics() {
     ],
     [settings.currency, statsData.totalProducts, totals.avgOrderValue, totals.totalOrders, totals.totalRevenue],
   );
-
-  if (loading) {
-    return (
-      <AdminLayout>
-        <AdminPageSkeleton cards={4} showCharts />
-      </AdminLayout>
-    );
-  }
 
   return (
     <AdminLayout>

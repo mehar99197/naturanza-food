@@ -1,12 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Submit contact form
-router.post('/', (req, res) => {
+router.post('/', restrictBody('name', 'email', 'phone', 'subject', 'message'), (req, res) => {
     const name    = String(req.body?.name    || '').trim().slice(0, 100);
     const email   = String(req.body?.email   || '').trim().toLowerCase().slice(0, 200);
     const phone   = String(req.body?.phone   || '').trim().slice(0, 30)  || null;
@@ -104,7 +105,7 @@ router.get('/:id', authenticateToken, isAdmin, (req, res) => {
 });
 
 // Update contact status (Admin only)
-router.put('/:id/status', authenticateToken, isAdmin, (req, res) => {
+router.put('/:id/status', authenticateToken, isAdmin, restrictBody('status'), (req, res) => {
     const { status } = req.body;
     
     if (!['new', 'read', 'responded'].includes(status)) {

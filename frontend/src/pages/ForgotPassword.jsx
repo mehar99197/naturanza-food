@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, Mail } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useAuth } from "@/context/AuthContext";
 import LeftPanel from "@/components/auth/LeftPanel";
+import { NoIndexSEO } from "@/components/SEO";
 
 const leftPoints = [
   "Secure password recovery",
@@ -53,7 +54,9 @@ const ForgotPassword = () => {
   };
 
   return (
-    <div className="auth-premium-font min-h-screen bg-green-50 lg:h-screen lg:overflow-hidden">
+    <>
+      <NoIndexSEO title="Forgot Password" />
+    <div className="auth-premium-font min-h-screen bg-green-50 overflow-y-auto lg:h-screen lg:overflow-hidden">
       <div className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:block lg:w-[42%] xl:w-[44%]">
         <LeftPanel
           heading="Recover Your Account Securely"
@@ -181,6 +184,7 @@ const ForgotPassword = () => {
         </div>
       </main>
     </div>
+    </>
   );
 };
 

@@ -2,7 +2,11 @@ import React, { createContext, useContext, useEffect, useRef, useState } from "r
 import {
   AUTH_SESSION_SYNC_EVENT,
   clearUserAccessToken,
+  getUserAccessToken,
+  setUserAccessToken,
+  hasUserSession,
   userAPI,
+  emitAuthSessionSync,
 } from "@/services/api";
 
 const AuthContext = createContext(null);
@@ -169,6 +173,12 @@ export const AuthProvider = ({ children }) => {
   };
 
   const refreshProfile = async () => {
+    if (!getUserAccessToken() || !hasUserSession()) {
+      clearUserAccessToken();
+      applyUserState(null);
+      return null;
+    }
+
     try {
       const profileResponse = await userAPI.getProfile();
       return applyUserState(resolveUserFromPayload(profileResponse));
@@ -182,26 +192,74 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const fetchProfileIfAvailable = async () => {
+    try {
+      const profileResponse = await userAPI.getProfile();
+      return {
+        user: resolveUserFromPayload(profileResponse),
+        status: null,
+      };
+    } catch (err) {
+      return {
+        user: null,
+        status: Number(err?.response?.status || 0),
+      };
+    }
+  };
+
   const bootstrapAuth = async () => {
     const runId = ++bootstrapRunIdRef.current;
 
     try {
       setLoading(true);
+      if (!getUserAccessToken() || !hasUserSession()) {
+        clearUserAccessToken();
+        applyUserState(null);
+        setError(null);
+        return;
+      }
+
+      const initialProfile = await fetchProfileIfAvailable();
+      if (bootstrapRunIdRef.current !== runId) {
+        return;
+      }
+
+      if (initialProfile.user) {
+        const resolvedUser = applyUserState(initialProfile.user);
+        if (!resolvedUser) {
+          throw new Error("Invalid profile response");
+        }
+        setError(null);
+        return;
+      }
+
+      if (!isAuthFailureStatus(initialProfile.status)) {
+        throw new Error("Profile request failed");
+      }
+
       await userAPI.refreshToken();
       if (bootstrapRunIdRef.current !== runId) {
         return;
       }
 
-      const profile = await userAPI.getProfile();
+      const refreshedProfile = await fetchProfileIfAvailable();
       if (bootstrapRunIdRef.current !== runId) {
         return;
       }
 
-      const resolvedUser = applyUserState(resolveUserFromPayload(profile));
-      if (!resolvedUser) {
-        throw new Error("Invalid profile response");
+      if (refreshedProfile.user) {
+        const resolvedUser = applyUserState(refreshedProfile.user);
+        if (!resolvedUser) {
+          throw new Error("Invalid profile response");
+        }
+        setError(null);
+        return;
       }
-      setError(null);
+
+      if (isAuthFailureStatus(refreshedProfile.status)) {
+        clearUserAccessToken();
+        applyUserState(null);
+      }
     } catch (err) {
       if (bootstrapRunIdRef.current !== runId) {
         return;
@@ -257,6 +315,74 @@ export const AuthProvider = ({ children }) => {
       window.removeEventListener(AUTH_SESSION_SYNC_EVENT, handleSessionSync);
     };
   }, []);
+
+  // Handle session sync events from other tabs/components
+  const handleSessionSyncEvent = (event) => {
+    const source = String(event?.detail?.source || "").toLowerCase();
+
+    if (source.startsWith("admin-")) {
+      return;
+    }
+
+    if (source === "user-logout" || source === "user-token-refresh-failed") {
+      clearUserAccessToken();
+      applyUserState(null);
+      setLoading(false);
+      return;
+    }
+
+    if (source === "user-token-refresh" || source === "user-refresh") {
+      return;
+    }
+
+    void refreshProfile();
+  };
+
+  useEffect(() => {
+    window.addEventListener(AUTH_SESSION_SYNC_EVENT, handleSessionSyncEvent);
+    return () => {
+      window.removeEventListener(AUTH_SESSION_SYNC_EVENT, handleSessionSyncEvent);
+    };
+  }, []);
+
+  // Periodic token refresh - runs every 12 minutes to keep session alive
+  useEffect(() => {
+    if (typeof window === "undefined" || !user) {
+      return;
+    }
+
+    // Refresh token every 12 minutes (before 15-min access token expires)
+    const refreshInterval = 12 * 60 * 1000;
+    let intervalId = null;
+
+    const startRefreshTimer = () => {
+      intervalId = setInterval(async () => {
+        if (!getUserAccessToken() || !hasUserSession()) {
+          clearInterval(intervalId);
+          return;
+        }
+
+        try {
+          const refreshResponse = await userAPI.refreshToken();
+          const newToken = refreshResponse?.accessToken || refreshResponse?.token;
+          if (newToken) {
+            setUserAccessToken(newToken);
+            emitAuthSessionSync("user-token-refresh");
+          }
+        } catch (error) {
+          // Silently ignore refresh failures - session will end naturally
+        }
+      }, refreshInterval);
+    };
+
+    startRefreshTimer();
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [user]);
 
   const register = async (userData) => {
     try {

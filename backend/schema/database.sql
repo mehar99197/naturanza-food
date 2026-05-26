@@ -1,9 +1,9 @@
--- Naturanza Foods Database Schema (MySQL 8)
+-- Naturanza Food Database Schema (MySQL 8)
 -- Create database
-CREATE DATABASE IF NOT EXISTS naturanza_foods
+CREATE DATABASE IF NOT EXISTS naturanza_food
     CHARACTER SET utf8mb4
     COLLATE utf8mb4_0900_ai_ci;
-USE naturanza_foods;
+USE naturanza_food;
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -15,10 +15,13 @@ CREATE TABLE IF NOT EXISTS users (
     signup_provider ENUM('password', 'google') DEFAULT 'password',
     password_set_by_user BOOLEAN DEFAULT TRUE,
     role ENUM('customer', 'admin') DEFAULT 'customer',
+    admin_role ENUM('super_admin', 'staff_admin', 'admin', 'moderator') DEFAULT NULL,
+    admin_permissions JSON DEFAULT NULL,
     is_active BOOLEAN DEFAULT TRUE,
     failed_login_attempts INT DEFAULT 0,
     locked_until DATETIME,
     profile_image VARCHAR(255),
+    last_login DATETIME,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -47,7 +50,9 @@ CREATE TABLE IF NOT EXISTS products (
     category_id INT,
     image_url VARCHAR(255),
     images JSON,
+    qr_code_url VARCHAR(255),
     stock_quantity INT DEFAULT 0,
+    reserved_stock INT NOT NULL DEFAULT 0,
     is_organic BOOLEAN DEFAULT FALSE,
     is_featured BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN DEFAULT TRUE,
@@ -104,7 +109,7 @@ CREATE TABLE IF NOT EXISTS orders (
         'cancelled'
     ) DEFAULT 'pending',
     payment_method ENUM('cod', 'card', 'online', 'easypaisa', 'jazzcash') DEFAULT 'cod',
-    payment_status ENUM('pending', 'paid', 'failed') DEFAULT 'pending',
+    payment_status ENUM('pending', 'partial', 'paid', 'failed') DEFAULT 'pending',
     payment_details JSON,
     shipping_address TEXT NOT NULL,
     city VARCHAR(100),
@@ -128,6 +133,21 @@ CREATE TABLE IF NOT EXISTS order_items (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+-- Stock reservations (for offline payment verification)
+CREATE TABLE IF NOT EXISTS stock_reservations (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    order_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity INT NOT NULL,
+    state ENUM('held', 'consumed', 'released') NOT NULL DEFAULT 'held',
+    expires_at DATETIME NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    INDEX idx_resv_state_expires (state, expires_at),
+    INDEX idx_resv_order (order_id)
 );
 -- Contact/Inquiries table
 CREATE TABLE IF NOT EXISTS contacts (
@@ -204,6 +224,31 @@ CREATE TABLE IF NOT EXISTS variant_attributes (
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     INDEX idx_product_id (product_id)
 );
+-- Shipping Cities table
+CREATE TABLE IF NOT EXISTS city_delivery_fees (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    city_name VARCHAR(100) NOT NULL,
+    fee INT NOT NULL DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insert default cities
+INSERT IGNORE INTO city_delivery_fees (city_name, fee, is_active) VALUES
+('Lahore', 150, TRUE),
+('Karachi', 250, TRUE),
+('Islamabad', 200, TRUE),
+('Rawalpindi', 200, TRUE),
+('Faisalabad', 180, TRUE),
+('Multan', 200, TRUE),
+('Peshawar', 220, TRUE),
+('Sialkot', 170, TRUE),
+('Gujranwala', 160, TRUE),
+('Sukkur', 250, TRUE),
+('Hyderabad', 260, TRUE),
+('Quetta', 280, TRUE);
+
 -- User Address Book
 CREATE TABLE IF NOT EXISTS user_addresses (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -489,6 +534,54 @@ CREATE TABLE IF NOT EXISTS admin_settings (
     order_notifications BOOLEAN DEFAULT TRUE,
     low_stock_alerts BOOLEAN DEFAULT TRUE,
     low_stock_threshold INT DEFAULT 10,
+    address VARCHAR(255) NOT NULL DEFAULT 'Pakistan',
+    support_hours VARCHAR(120) NOT NULL DEFAULT 'Available 24/7',
+    facebook_url VARCHAR(255) NOT NULL DEFAULT '',
+    instagram_url VARCHAR(255) NOT NULL DEFAULT '',
+    twitter_url VARCHAR(255) NOT NULL DEFAULT '',
+    youtube_url VARCHAR(255) NOT NULL DEFAULT '',
+    whatsapp_number VARCHAR(30) NOT NULL DEFAULT '',
+    whatsapp_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    map_latitude DECIMAL(10, 7) NOT NULL DEFAULT 31.5204000,
+    map_longitude DECIMAL(10, 7) NOT NULL DEFAULT 74.3587000,
+    map_location_label VARCHAR(120) NOT NULL DEFAULT 'Pakistan, Lahore',
+    newsletter_welcome_promo_code VARCHAR(40) NOT NULL DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(120) NOT NULL UNIQUE,
+    status ENUM('active', 'unsubscribed') NOT NULL DEFAULT 'active',
+    unsubscribe_token VARCHAR(64) NOT NULL,
+    source VARCHAR(40) NOT NULL DEFAULT 'footer',
+    subscribed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    unsubscribed_at TIMESTAMP NULL DEFAULT NULL,
+    reactivated_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_newsletter_status (status),
+    INDEX idx_newsletter_email (email)
+);
+CREATE TABLE IF NOT EXISTS announcements (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    type ENUM('info', 'success', 'warning', 'danger', 'promotion') DEFAULT 'info',
+    is_active BOOLEAN DEFAULT TRUE,
+    start_date DATETIME DEFAULT NULL,
+    end_date DATETIME DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+-- Team members for About page
+CREATE TABLE IF NOT EXISTS team_members (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(255) NOT NULL,
+    role VARCHAR(255) NOT NULL,
+    image VARCHAR(500) DEFAULT NULL,
+    bio TEXT DEFAULT NULL,
+    sort_order INT DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 -- Platform audit log
@@ -533,4 +626,42 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY unique_payment_method_code (code),
     INDEX idx_payment_methods_active_sort (is_active, sort_order)
+);
+-- Payment account numbers
+CREATE TABLE IF NOT EXISTS payment_accounts (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    type ENUM('jazzcash', 'easypaisa', 'bank') NOT NULL,
+    account_number VARCHAR(50) NOT NULL,
+    account_name VARCHAR(100) NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+INSERT INTO payment_accounts (type, account_number, account_name)
+SELECT 'jazzcash', '03XX-XXXXXXX', 'Naturanza Food'
+WHERE NOT EXISTS (SELECT 1 FROM payment_accounts WHERE type = 'jazzcash');
+INSERT INTO payment_accounts (type, account_number, account_name)
+SELECT 'easypaisa', '03XX-XXXXXXX', 'Naturanza Food'
+WHERE NOT EXISTS (SELECT 1 FROM payment_accounts WHERE type = 'easypaisa');
+INSERT INTO payment_accounts (type, account_number, account_name)
+SELECT 'bank', 'PK00XXXX0000000000000000', 'Naturanza Food'
+WHERE NOT EXISTS (SELECT 1 FROM payment_accounts WHERE type = 'bank');
+-- Advance payment verification submissions
+CREATE TABLE IF NOT EXISTS advance_payment_verifications (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    order_id INT NOT NULL,
+    customer_name VARCHAR(100) NOT NULL,
+    customer_phone VARCHAR(20),
+    amount DECIMAL(10, 2) NOT NULL,
+    payment_method ENUM('jazzcash','easypaisa','bank','cod') NOT NULL,
+    verification_stage ENUM('full_payment','advance_shipping','final_collection') NOT NULL DEFAULT 'full_payment',
+    screenshot_url VARCHAR(255),
+    status ENUM('pending','approved','rejected') DEFAULT 'pending',
+    rejection_reason VARCHAR(255),
+    admin_note TEXT NULL,
+    verified_by INT,
+    verified_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_apv_order_stage (order_id, verification_stage),
+    INDEX idx_apv_stage_status (verification_stage, status),
+    CONSTRAINT fk_apv_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
 );

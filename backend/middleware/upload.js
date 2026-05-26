@@ -74,14 +74,17 @@ const uploadAndCompress = (fieldName, folder = 'products', options = {}) => {
     return async (req, res, next) => {
         // Use multer to handle the upload
         upload.single(fieldName)(req, res, async (err) => {
+            // Clean up: remove the file field from req.body to avoid clashes with restrictBody
+            if (req.body && req.body[fieldName] !== undefined) {
+                delete req.body[fieldName];
+            }
+
             if (err) {
                 if (err instanceof multer.MulterError) {
-                    console.error('Multer error:', err);
                     return res.status(400).json({ 
                         error: `Upload error: ${err.message}` 
                     });
                 }
-                console.error('Upload error:', err);
                 return res.status(400).json({ 
                     error: err.message 
                 });
@@ -117,11 +120,9 @@ const uploadAndCompress = (fieldName, folder = 'products', options = {}) => {
                 req.file.compressedFilename = filename;
                 req.file.url = `/images/${folder}/${filename}`;
 
-                console.log(`✅ Image compressed and saved: ${filename} (${(compressedBuffer.length / 1024).toFixed(2)}KB)`);
 
                 next();
             } catch (error) {
-                console.error('Image compression error:', error);
                 return res.status(500).json({ 
                     error: `Failed to process image: ${error.message}` 
                 });

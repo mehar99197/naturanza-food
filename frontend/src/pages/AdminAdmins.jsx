@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Users, UserCheck, UserX, Search } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { AdminPageSkeleton } from "@/components/Skeletons/AdminPageSkeleton";
 import { adminAPI } from "@/services/api";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { AddAdminForm } from "@/components/AdminManagement/AddAdminForm";
@@ -9,12 +8,14 @@ import { AdminCard } from "@/components/AdminManagement/AdminCard";
 import { ActivityDrawer } from "@/components/AdminManagement/ActivityDrawer";
 import { ConfirmRemoveModal } from "@/components/AdminManagement/ConfirmRemoveModal";
 import { ChangePasswordModal, ResetPasswordModal } from "@/components/AdminManagement/PasswordModals";
+import { EditPermissionsModal } from "@/components/AdminManagement/EditPermissionsModal";
 import { toast } from "sonner";
 
 export function AdminAdmins() {
-  const { admin: currentAdmin } = useAdminAuth();
+  const { admin: currentAdmin, isSuperAdmin } = useAdminAuth();
 
-  const [loading, setLoading] = useState(true);
+  const STAFF_ADMIN_ROLES = new Set(["staff_admin", "admin", "moderator"]);
+
   const [error, setError] = useState("");
   const [admins, setAdmins] = useState([]);
   const [filterStatus, setFilterStatus] = useState("all");
@@ -27,18 +28,16 @@ export function AdminAdmins() {
   const [showRemoveModal, setShowRemoveModal] = useState(null);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(null);
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(null);
+  const [showEditPermissionsModal, setShowEditPermissionsModal] = useState(null);
 
   const loadAdmins = useCallback(async () => {
     try {
-      setLoading(true);
       setError("");
       const data = await adminAPI.getAdmins();
       setAdmins(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err?.response?.data?.error || "Failed to load admins");
       setAdmins([]);
-    } finally {
-      setLoading(false);
     }
   }, []);
 
@@ -48,13 +47,16 @@ export function AdminAdmins() {
 
   // Filter admins based on search and filters
   const filteredAdmins = admins.filter((admin) => {
+    // Staff admin should not see super admin accounts
+    if (!isSuperAdmin && admin.admin_role === 'super_admin') return false;
+
     // Status filter
     if (filterStatus === "active" && !admin.is_active) return false;
     if (filterStatus === "inactive" && admin.is_active) return false;
 
     // Role filter
     if (filterRole === "super_admin" && admin.admin_role !== "super_admin") return false;
-    if (filterRole === "staff_admin" && admin.admin_role !== "staff_admin") return false;
+    if (filterRole === "staff_admin" && !STAFF_ADMIN_ROLES.has(admin.admin_role)) return false;
 
     // Search query
     if (searchQuery) {
@@ -99,14 +101,6 @@ export function AdminAdmins() {
       toast.error(error?.response?.data?.error || "Failed to reset password");
     }
   };
-
-  if (loading && admins.length === 0) {
-    return (
-      <AdminLayout>
-        <AdminPageSkeleton />
-      </AdminLayout>
-    );
-  }
 
   return (
     <AdminLayout>
@@ -346,6 +340,7 @@ export function AdminAdmins() {
                       onRemove={setShowRemoveModal}
                       onChangePassword={setShowChangePasswordModal}
                       onResetPassword={setShowResetPasswordModal}
+                      onEditPermissions={isSuperAdmin ? setShowEditPermissionsModal : undefined}
                     />
                   ))
                 )}
@@ -387,6 +382,15 @@ export function AdminAdmins() {
           admin={showResetPasswordModal}
           onConfirm={handleResetPassword}
           onClose={() => setShowResetPasswordModal(null)}
+        />
+      )}
+
+      {/* Edit Permissions Modal */}
+      {showEditPermissionsModal && (
+        <EditPermissionsModal
+          admin={showEditPermissionsModal}
+          onClose={() => setShowEditPermissionsModal(null)}
+          onSuccess={loadAdmins}
         />
       )}
 
