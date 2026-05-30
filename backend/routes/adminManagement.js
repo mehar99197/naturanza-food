@@ -113,13 +113,9 @@ router.get('/admins', authenticateToken, isAdmin, async (req, res) => {
 });
 
 // POST /api/admin-management/admins - Create new admin
-router.post('/admins', authenticateToken, isAdmin, upload.single('profile_picture'), async (req, res) => {
+router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, upload.single('profile_picture'), async (req, res) => {
   try {
-    // Allow any admin for testing
-    if (!req.user || req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-    
+
     const { full_name, email, phone, role, permissions } = req.body;
 
     if (!full_name || !email) {

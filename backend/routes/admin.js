@@ -3,6 +3,7 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 const { db } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const requireSuperAdmin = require("../middleware/requireSuperAdmin");
 const { restrictBody } = require("../middleware/security");
 const { issueAccessToken, verifyAccessToken, toExpiryDate } = require("../utils/jwtTokens");
 const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/tokenStore");
@@ -1175,7 +1176,7 @@ router.get("/users", async (req, res) => {
 });
 
 // Create user/customer
-router.post("/users", restrictBody('name', 'email', 'password', 'phone', 'address', 'role', 'is_active'), async (req, res) => {
+router.post("/users", requireSuperAdmin, restrictBody('name', 'email', 'password', 'phone', 'address', 'role', 'is_active'), async (req, res) => {
   try {
     const {
       name,
@@ -1322,7 +1323,7 @@ router.patch("/users/:id/status", restrictBody('is_active'), async (req, res) =>
 });
 
 // Update user role
-router.put("/users/:id/role", restrictBody('role'), async (req, res) => {
+router.put("/users/:id/role", requireSuperAdmin, restrictBody('role'), async (req, res) => {
   const { role } = req.body;
 
   if (!["customer", "admin"].includes(role)) {
@@ -1345,7 +1346,7 @@ router.put("/users/:id/role", restrictBody('role'), async (req, res) => {
 });
 
 // Delete user
-router.delete("/users/:id", async (req, res) => {
+router.delete("/users/:id", requireSuperAdmin, async (req, res) => {
   try {
     // Prevent self-deletion
     if (parseInt(req.params.id) === req.user.id) {

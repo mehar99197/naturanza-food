@@ -89,7 +89,7 @@ router.post(
       // Customer-supplied amount is ignored — for COD the stage-1 amount must
       // equal shipping_cost; for prepaid it must equal total_amount.
       const [[order]] = await db.promise().query(
-        `SELECT payment_method AS order_payment_method, total_amount, shipping_cost
+        `SELECT user_id, payment_method AS order_payment_method, total_amount, shipping_cost
            FROM orders
           WHERE id = ?`,
         [Number(orderId)],
@@ -97,6 +97,11 @@ router.post(
 
       if (!order) {
         return res.status(404).json({ success: false, message: "Order not found" });
+      }
+
+      // Ownership: a customer may only submit verification for their own order.
+      if (order.user_id !== req.user.id && req.user.role !== "admin") {
+        return res.status(403).json({ success: false, message: "You do not have access to this order" });
       }
 
       const isCodOrder = String(order.order_payment_method || "").toLowerCase() === "cod";
