@@ -63,13 +63,27 @@ router.get('/currency', async (req, res) => {
       });
     }
 
+    // SECURITY: only proceed with a literal, well-formed IP address. Anything
+    // else (path traversal / injected URL segments) falls back to the default and
+    // is never interpolated into an outbound request URL.
+    const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
+    const IPV6_RE = /^[0-9a-fA-F:]+$/;
+    if (!IPV4_RE.test(userIP) && !IPV6_RE.test(userIP)) {
+      return res.json({
+        country_code: 'PK',
+        country_name: 'Pakistan',
+        currency: 'PKR',
+        source: 'default',
+      });
+    }
+
     // Call IP geolocation service (ip-api.com - free, no key, 45 req/min)
     const controller = new AbortController();
     const geoTimeout = setTimeout(() => controller.abort(), 4000);
     let data;
 
     try {
-      const response = await fetch(`http://ip-api.com/json/${userIP}?fields=status,country,countryCode`, {
+      const response = await fetch(`http://ip-api.com/json/${encodeURIComponent(userIP)}?fields=status,country,countryCode`, {
         signal: controller.signal,
       });
       const body = await response.json();
@@ -80,7 +94,7 @@ router.get('/currency', async (req, res) => {
       }
     } catch {
       // Fall back to ipapi.co
-      const fallbackRes = await fetch(`https://ipapi.co/${userIP}/json/`, { signal: AbortSignal.timeout(4000) });
+      const fallbackRes = await fetch(`https://ipapi.co/${encodeURIComponent(userIP)}/json/`, { signal: AbortSignal.timeout(4000) });
       if (!fallbackRes.ok) throw new Error('Geolocation service unavailable');
       data = await fallbackRes.json();
     } finally {

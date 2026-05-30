@@ -66,7 +66,7 @@ const ENFORCE_HTTPS =
     .toLowerCase() === "true";
 
 if (TRUST_PROXY_ENABLED) {
-  app.set("trust proxy", true);
+  app.set("trust proxy", 1);
 }
 
 if (ENFORCE_HTTPS && process.env.NODE_ENV === "production") {
@@ -98,10 +98,11 @@ app.use(
         fontSrc: ["'self'", "https:", "data:"],
         objectSrc: ["'none'"],
         mediaSrc: ["'self'"],
-        frameSrc: ["'none'"],
+        frameSrc: ["'self'", "https://accounts.google.com"],
       },
     },
     crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: { policy: "unsafe-none" },
     crossOriginResourcePolicy: { policy: "cross-origin" },
   }),
 );

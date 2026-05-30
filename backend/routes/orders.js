@@ -666,13 +666,7 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       0,
     );
 
-    // SECURITY: Never trust client-supplied financial values.
-    // Always compute totals server-side from verified DB prices.
     const subtotal = calculatedSubtotal;
-    const discountAmount = safeNumber(req.body?.discount_amount, 0);
-    const tax = safeNumber(req.body?.tax, 0);
-    const shippingCost = safeNumber(req.body?.shipping_cost, 0);
-    const totalAmount = Math.max(0, subtotal - discountAmount + tax + shippingCost);
 
     const paymentMethod = normalizePaymentMethod(req.body?.payment_method);
     const allowedPaymentMethods = await getAllowedPaymentMethods(connection);
@@ -684,13 +678,11 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       });
     }
 
-    const paymentStatusFallback = paymentMethod === 'cod' ? 'pending' : 'paid';
-    const requestedPaymentStatus = String(
-      req.body?.payment_status || paymentStatusFallback,
-    ).trim().toLowerCase();
-    const paymentStatus = ALLOWED_PAYMENT_STATUSES.has(requestedPaymentStatus)
-      ? requestedPaymentStatus
-      : paymentStatusFallback;
+    // SECURITY: never trust the client-supplied payment status. Prepaid gateway
+    // methods are 'paid'; COD / wallet / bank transfer stay 'pending' until an
+    // admin verifies the payment. Financial totals are recomputed below.
+    const PREPAID_METHODS = new Set(['online', 'card']);
+    const paymentStatus = PREPAID_METHODS.has(paymentMethod) ? 'paid' : 'pending';
 
     const customerName = req.body?.customer_name
       ? String(req.body.customer_name).trim()
@@ -714,6 +706,49 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     const adminSettings = await getAdminSettings(connection);
     const lowStockEvents = [];
     const lowStockThreshold = Number(adminSettings.lowStockThreshold) || 10;
+
+    // SECURITY: recompute all financials server-side; client-supplied
+    // discount_amount/tax/shipping_cost are ignored. Mirrors the storefront
+    // formula (total = subtotal - discount + shipping; no tax line). Discount is
+    // only honoured from a currently-valid coupon; shipping comes from the city
+    // fee table — the same sources the storefront reads, so totals match.
+    const tax = 0;
+    let discountAmount = 0;
+    if (couponCode) {
+      const [[coupon]] = await connection.query(
+        `SELECT discount_type, discount_value, min_order_amount, max_discount, usage_limit, used_count
+           FROM coupons
+          WHERE code = ? AND is_active = TRUE
+            AND (expiry_date IS NULL OR expiry_date > NOW())`,
+        [couponCode],
+      );
+      if (
+        coupon &&
+        !(coupon.usage_limit && coupon.used_count >= coupon.usage_limit) &&
+        !(coupon.min_order_amount && subtotal < safeNumber(coupon.min_order_amount))
+      ) {
+        if (String(coupon.discount_type) === 'percentage') {
+          discountAmount = (subtotal * safeNumber(coupon.discount_value)) / 100;
+          if (coupon.max_discount && discountAmount > safeNumber(coupon.max_discount)) {
+            discountAmount = safeNumber(coupon.max_discount);
+          }
+        } else {
+          discountAmount = safeNumber(coupon.discount_value);
+        }
+      }
+    }
+    discountAmount = Math.min(Math.max(0, discountAmount), subtotal);
+
+    let shippingCost = 0;
+    if (city) {
+      const [[cityFee]] = await connection.query(
+        `SELECT fee FROM city_delivery_fees WHERE city_name = ? AND is_active = TRUE LIMIT 1`,
+        [city],
+      );
+      shippingCost = cityFee ? safeNumber(cityFee.fee) : 0;
+    }
+
+    const totalAmount = Math.max(0, subtotal - discountAmount + tax + shippingCost);
 
     const [orderInsertResult] = await connection.query(
       `INSERT INTO orders

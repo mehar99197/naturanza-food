@@ -122,11 +122,11 @@ const normalizeIpAddress = (rawIp) => {
 };
 
 const getRequestIp = (req) => {
+  // SECURITY: rely on Express's req.ip, which is derived from the proxy chain
+  // according to the configured `trust proxy` setting. Do NOT prefer raw
+  // X-Forwarded-For / X-Real-IP / CF-Connecting-IP headers here — those are
+  // attacker-controllable and would let a client forge the logged/rate-limited IP.
   const candidates = [
-    req.headers["cf-connecting-ip"],
-    req.headers["x-real-ip"],
-    req.headers["x-forwarded-for"],
-    req.headers["x-client-ip"],
     req.ip,
     req.socket?.remoteAddress,
     req.connection?.remoteAddress,
@@ -623,9 +623,10 @@ router.post("/login", async (req, res) => {
         });
       }
 
+      // Uniform response (no attemptsLeft) so an attacker cannot distinguish a
+      // real account from an unknown email via the response body.
       return res.status(401).json({
         error: "Invalid email or password",
-        attemptsLeft: newLockStatus.attemptsLeft,
       });
     }
 

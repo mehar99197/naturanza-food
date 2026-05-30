@@ -1,6 +1,7 @@
 const LOGIN_MAX_ATTEMPTS = Number.parseInt(process.env.LOGIN_MAX_ATTEMPTS || "5", 10) || 5;
 const LOGIN_LOCK_MINUTES = Number.parseInt(process.env.LOGIN_LOCK_MINUTES || "15", 10) || 15;
 const LOGIN_MAX_ATTEMPTS_ADMIN = Number.parseInt(process.env.LOGIN_MAX_ATTEMPTS_ADMIN || "5", 10) || 5;
+const LOGIN_LOCK_MINUTES_ADMIN = Number.parseInt(process.env.LOGIN_LOCK_MINUTES_ADMIN || "30", 10) || 30;
 
 const createLoginAttemptKey = (email, isAdmin = false) => {
   const prefix = isAdmin ? "admin_login_attempts" : "user_login_attempts";
@@ -136,4 +137,5 @@ module.exports = {
   LOGIN_MAX_ATTEMPTS,
   LOGIN_LOCK_MINUTES,
   LOGIN_MAX_ATTEMPTS_ADMIN,
+  LOGIN_LOCK_MINUTES_ADMIN,
 };

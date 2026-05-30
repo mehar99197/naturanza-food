@@ -2,7 +2,7 @@ const mysql = require("mysql2/promise");
 const path = require("path");
 const dotenv = require("dotenv");
 
-dotenv.config({ path: path.join(__dirname, "..", ".env") });
+dotenv.config({ path: path.join(__dirname, "..", ".env"), override: true });
 
 const toNumber = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);

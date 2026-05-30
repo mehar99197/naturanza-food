@@ -55,7 +55,7 @@ const getTransporter = () => {
     },
     // Additional settings to improve deliverability
     tls: {
-      rejectUnauthorized: false, // Allow self-signed certificates
+      rejectUnauthorized: true, // Verify the SMTP server's TLS certificate (prevents MITM)
     },
     // Connection pool for better performance
     pool: true,
