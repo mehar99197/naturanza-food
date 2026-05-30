@@ -110,13 +110,18 @@ app.use(
 // 2. Rate Limiting - General API protection
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 500,
+  // A logged-in user browsing the SPA legitimately makes many calls per 15 min
+  // (per-page reads + background polling). 500 was too low and tripped normal
+  // sessions. Auth/brute-force is still tightly capped by authLimiter below.
+  max: Number.parseInt(process.env.API_RATE_LIMIT_MAX || "2000", 10) || 2000,
   message: {
     error: "Too many requests from this IP, please try again later.",
     retryAfter: "15 minutes",
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Don't spend the budget on CORS preflight requests.
+  skip: (req) => req.method === "OPTIONS",
 });
 
 // 3. Strict Rate Limiting for Authentication Routes
