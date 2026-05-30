@@ -11,8 +11,12 @@
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:backend": "npm --prefix backend run dev",
     "build": "npm --prefix frontend run build",
+    "start": "node backend/index.js",
     "lint": "npm --prefix frontend run lint",
     "preview": "npm --prefix frontend run preview"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "express-session": "^1.19.0",

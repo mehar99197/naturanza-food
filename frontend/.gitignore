@@ -9,6 +9,12 @@ coverage
 .vite/
 test-results/
 *.backup
+# Local/secret env files — never commit these
 .env
 .env.local
-.env.*
+.env.development
+.env.development.local
+.env.production.local
+# Committed, public, build-time config (safe — client-side values only)
+!.env.production
+!.env.example

@@ -8,3 +8,5 @@ npm-debug.log*
 *~
 .env
 .env.*
+# Allow the committed production reference template (placeholders only — no secrets)
+!.env.example
