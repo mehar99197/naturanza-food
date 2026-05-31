@@ -10,8 +10,8 @@ import { NoIndexSEO } from "@/components/SEO";
 
 const leftPoints = [
   "100% Certified Organic Products",
-  "Free Delivery on Orders Over $50",
-  "Easy 30-Day Returns",
+  "Free Delivery on Orders Over Rs. 5,000",
+  "3-Day Returns for Shipping Issues",
   "24/7 Customer Support",
 ];
 
