@@ -195,18 +195,37 @@ export function AdminOrders() {
     }
   };
 
-  // Download the printable order slip / invoice PDF (logo, customer name + phone +
-  // address, items, totals, amount paid and balance due) for shipping.
+  // Open the order slip / invoice PDF (logo, customer name + phone + address,
+  // items, totals, amount paid and balance due) in a new tab so the admin can
+  // view, print, or download it when shipping the order.
   const printOrderSlip = async () => {
     if (!selectedOrder) {
       return;
     }
+    // Open the tab synchronously (before the await) so popup blockers allow it.
+    const viewer = window.open("", "_blank");
     try {
       setError("");
       setPrinting(true);
-      await orderAPI.downloadInvoice(selectedOrder.id);
+      const { blob } = await orderAPI.downloadInvoice(selectedOrder.id);
+      const url = window.URL.createObjectURL(blob);
+      if (viewer) {
+        viewer.location.href = url;
+      } else {
+        // Popups blocked — fall back to a direct download.
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `ORD-${String(selectedOrder.id).padStart(6, "0")}-invoice.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60000);
     } catch (requestError) {
-      setError(requestError?.customMessage || "Could not generate the order slip. Please try again.");
+      if (viewer) {
+        viewer.close();
+      }
+      setError(requestError?.customMessage || "Could not open the invoice. Please try again.");
     } finally {
       setPrinting(false);
     }
