@@ -91,8 +91,8 @@ export function Footer({ variant = 'full' }) {
  support: [
  { label: 'FAQs', path: '/faq' },
  { label: 'Shipping', path: '/shipping' },
- { label: 'Returns', path: '/returns' },
- { label: 'Privacy Policy', path: '/privacy' }
+ { label: 'Returns', path: '/returns' }
+ // Privacy Policy lives in the bottom legal strip — kept single to avoid duplication
  ]
  };
 
@@ -544,14 +544,15 @@ export function Footer({ variant = 'full' }) {
  </div>
  </div>
 
- {/* Bottom Bar */}
+ {/* Bottom Bar — extra bottom/right padding keeps the legal links clear of the
+ floating WhatsApp button (fixed bottom-5 right-5) */}
  <div className="border-t border-white/10 relative z-10">
- <div className="container-custom py-3 md:py-5">
+ <div className="container-custom py-3 md:py-5 pb-20 md:pb-5">
  <div className="flex flex-col md:flex-row items-center justify-between gap-3 md:gap-4">
   <p className="text-white/80 text-xs md:text-sm font-medium">
   © 2026 Naturanza Food. All rights reserved.
   </p>
-  <div className="flex flex-wrap justify-center gap-3 md:gap-6">
+  <div className="flex flex-wrap justify-center gap-3 md:gap-6 md:pr-16 lg:pr-20">
  <Link to="/terms" className="text-white/80 md:hover:text-white text-xs md:text-sm font-medium md:hover:translate-x-1 inline-block">
  Terms of Service
  </Link>
