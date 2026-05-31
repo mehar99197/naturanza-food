@@ -221,6 +221,33 @@ export function Checkout() {
     setFieldValid((prev) => ({ ...prev, [name]: !error && value }));
   };
 
+  // Validate all required shipping fields before allowing "Continue to Payment".
+  // Returns true only if every required (*) field is valid.
+  const validateShippingForm = () => {
+    const fullName = `${shippingData.firstName} ${shippingData.lastName}`.trim();
+    const errors = {};
+    const fullNameError = validateFullName(fullName);
+    if (fullNameError) errors.fullName = fullNameError;
+    const emailError = validateEmail(shippingData.email);
+    if (emailError) errors.email = emailError;
+    const phoneError = validatePhone(shippingData.phone);
+    if (phoneError) errors.phone = phoneError;
+    if (!String(shippingData.address || "").trim()) errors.address = "Address is required";
+    if (!String(shippingData.city || "").trim()) errors.city = "Please select a city";
+    const postalError = validatePostalCode(shippingData.postalCode);
+    if (postalError) errors.postalCode = postalError;
+
+    setFieldErrors((prev) => ({ ...prev, ...errors }));
+    setFieldValid((prev) => {
+      const next = { ...prev };
+      ["fullName", "email", "phone", "address", "city"].forEach((f) => {
+        if (errors[f]) delete next[f];
+      });
+      return next;
+    });
+    return Object.keys(errors).length === 0;
+  };
+
   const getFieldState = (name) => {
     const touched = fieldErrors[name] !== undefined || fieldValid[name] !== undefined;
     if (!touched) return "default";
@@ -1847,9 +1874,12 @@ export function Checkout() {
                       autoComplete="street-address"
                       placeholder="Street address, house number, etc."
                       required
-                      className={checkoutFieldClass}
+                      className={`${checkoutFieldClass} ${getFieldState("address") === "invalid" ? "border-red-400 bg-red-50/50" : ""}`}
                     />
                   </div>
+                  {fieldErrors.address && (
+                    <p className="mt-1 text-xs font-medium text-red-600">{fieldErrors.address}</p>
+                  )}
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-700">
                       City *
@@ -1862,7 +1892,7 @@ export function Checkout() {
                         autoComplete="address-level2"
                         required
                         disabled={shippingCitiesLoading}
-                        className={`${checkoutFieldClass} appearance-none pr-10 cursor-pointer`}
+                        className={`${checkoutFieldClass} appearance-none pr-10 cursor-pointer ${getFieldState("city") === "invalid" ? "border-red-400 bg-red-50/50" : ""}`}
                       >
                         <option value="" disabled>
                           {shippingCitiesLoading ? "Loading cities..." : "Select city"}
@@ -1875,6 +1905,9 @@ export function Checkout() {
                       </select>
                       <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-emerald-600 pointer-events-none" />
                     </div>
+                    {fieldErrors.city && (
+                      <p className="mt-1 text-xs font-medium text-red-600">{fieldErrors.city}</p>
+                    )}
                   </div>
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-700">
@@ -1924,6 +1957,12 @@ export function Checkout() {
                 <button
                   onClick={() => {
                     if (!canContinueToPayment) return;
+                    if (!validateShippingForm()) {
+                      setError("Please fill in all required (*) fields correctly before continuing.");
+                      if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+                      return;
+                    }
+                    setError("");
                     setStep("payment");
                   }}
                   disabled={!canContinueToPayment}
