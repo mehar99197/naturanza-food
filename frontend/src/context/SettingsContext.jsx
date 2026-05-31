@@ -276,6 +276,25 @@ export function SettingsProvider({ children }) {
     setSettings((prev) => normalizeSettings({ ...prev, currency: normalized }));
   }, []);
 
+  // Reset to location-based auto-detection (clears the manual override and
+  // re-detects immediately).
+  const clearUserCurrency = useCallback(async () => {
+    manualCurrencyRef.current = null;
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(CURRENCY_STORAGE_KEY);
+    }
+    try {
+      const data = await geolocationAPI.getCurrency();
+      const detected = normalizeCurrency(data.currency || 'PKR');
+      const next = detected !== 'PKR' && hasExchangeRate(detected) ? detected : 'PKR';
+      setSettings((prev) => normalizeSettings({ ...prev, currency: next }));
+    } catch {
+      setSettings((prev) => normalizeSettings({ ...prev, currency: 'PKR' }));
+    } finally {
+      geoDetected.current = true;
+    }
+  }, []);
+
   const updateSettings = (newSettings) => {
     setSettings((prev) => normalizeSettings({ ...prev, ...newSettings }));
   };
@@ -294,6 +313,7 @@ export function SettingsProvider({ children }) {
   exchangeRatesError,
   updateSettings,
   setUserCurrency,
+  clearUserCurrency,
   resetSettings,
   refreshSettings,
   refreshExchangeRates,

@@ -20,7 +20,7 @@ const CURRENCIES = [
 ];
 
 export function CurrencySwitcher() {
-  const { settings, setUserCurrency } = useSettings();
+  const { settings, setUserCurrency, clearUserCurrency } = useSettings();
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef(null);
 
@@ -50,6 +50,17 @@ export function CurrencySwitcher() {
       </button>
       {isOpen && (
         <div className="absolute top-full right-0 mt-2 w-44 bg-white rounded-xl shadow-2xl border border-gray-100 py-1.5 max-h-72 overflow-y-auto z-50">
+          <button
+            onClick={() => {
+              clearUserCurrency?.();
+              setIsOpen(false);
+            }}
+            className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-gray-600 hover:bg-gray-50 border-b border-gray-100 mb-1"
+          >
+            <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 0c2.5 2.5 2.5 17.5 0 20m0-20C9.5 4.5 9.5 19.5 12 22M2 12h20" /></svg>
+            <span className="font-medium">Auto-detect</span>
+            <span className="text-gray-400 ml-auto">location</span>
+          </button>
           {CURRENCIES.map((cur) => (
             <button
               key={cur.code}
