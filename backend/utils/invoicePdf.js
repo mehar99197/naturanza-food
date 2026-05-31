@@ -605,7 +605,7 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         .font('Helvetica')
         .fontSize(9)
         .fillColor(MUTED_TEXT)
-        .text('7 days easy return for unopened products.', margin, footerY + 14, {
+        .text('3-day returns, only for shipping-related issues.', margin, footerY + 14, {
           width: contentWidth,
           align: 'center',
         })
