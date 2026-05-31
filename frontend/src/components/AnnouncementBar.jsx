@@ -196,6 +196,12 @@ export default function AnnouncementBar() {
 
   return (
     <div className="sticky top-0 z-[60]">
+      <style>{`
+        @keyframes nzMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .nz-marquee-track { animation: nzMarquee 15s linear infinite; will-change: transform; }
+        .nz-marquee-viewport:hover .nz-marquee-track { animation-play-state: paused; }
+        @media (prefers-reduced-motion: reduce) { .nz-marquee-track { animation: none; } }
+      `}</style>
       <div className="container-custom">
         <div
           className={`flex min-h-[38px] items-center gap-2.5 rounded-b-2xl border px-3 shadow-[0_8px_18px_rgba(15,64,28,0.08)] backdrop-blur-md md:min-h-[40px] md:gap-3 ${presentation.shell}`}
@@ -224,11 +230,24 @@ export default function AnnouncementBar() {
                     {truncateText(currentAnnouncement.title)}
                   </span>
                 ) : null}
-                <p
-                  className={`truncate text-[12px] font-medium leading-tight sm:text-[13px] ${presentation.message}`}
-                >
-                  {truncateText(currentAnnouncement.message)}
-                </p>
+                {/* Marquee: continuously scroll the full message so it stays
+                    readable on narrow (mobile) screens where it would otherwise
+                    truncate. The text is duplicated for a seamless loop. */}
+                <div className="nz-marquee-viewport min-w-0 flex-1 overflow-hidden">
+                  <div className="nz-marquee-track flex w-max whitespace-nowrap">
+                    <span
+                      className={`pr-16 text-[12px] font-medium leading-tight sm:text-[13px] ${presentation.message}`}
+                    >
+                      {truncateText(currentAnnouncement.message)}
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className={`pr-16 text-[12px] font-medium leading-tight sm:text-[13px] ${presentation.message}`}
+                    >
+                      {truncateText(currentAnnouncement.message)}
+                    </span>
+                  </div>
+                </div>
               </motion.div>
             </AnimatePresence>
           </div>
