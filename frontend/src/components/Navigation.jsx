@@ -836,7 +836,7 @@ export function Navigation() {
                         )}
                         <div className="min-w-0">
                           <p className="font-semibold text-gray-900 text-sm truncate">
-                            My Account
+                            {user.name || "My Account"}
                           </p>
                           <p className="text-xs text-gray-400 truncate">
                             {user.email}
