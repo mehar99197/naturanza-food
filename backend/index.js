@@ -197,6 +197,10 @@ app.use(express.json({ limit: "10mb" })); // Limit payload size
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Serve static files (images)
+// Persistent user uploads first — these live outside the git-deployed tree so
+// they survive redeploys (payment screenshots, uploaded product/category images).
+const { UPLOADS_IMAGES_DIR } = require("./middleware/upload");
+app.use("/images", express.static(UPLOADS_IMAGES_DIR));
 app.use(
   "/images",
   express.static(path.join(__dirname, "..", "public", "images")),

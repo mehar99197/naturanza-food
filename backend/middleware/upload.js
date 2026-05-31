@@ -11,6 +11,14 @@ const ensureDir = (dir) => {
     }
 };
 
+// Base directory for user uploads. MUST live OUTSIDE the git-deployed app tree
+// so customer uploads (payment screenshots, product/category/avatar images)
+// survive a redeploy (which clears the repo working tree). Defaults to a
+// sibling `persistent-uploads/images` of the app root; override via UPLOADS_DIR.
+const UPLOADS_IMAGES_DIR =
+    process.env.UPLOADS_DIR ||
+    path.join(__dirname, '..', '..', '..', 'persistent-uploads', 'images');
+
 // Configure multer for memory storage (we'll process before saving)
 const storage = multer.memoryStorage();
 
@@ -96,8 +104,8 @@ const uploadAndCompress = (fieldName, folder = 'products', options = {}) => {
             }
 
             try {
-                // Ensure upload directory exists
-                const uploadDir = path.join(__dirname, '..', '..', 'public', 'images', folder);
+                // Ensure upload directory exists (persistent, outside the repo tree)
+                const uploadDir = path.join(UPLOADS_IMAGES_DIR, folder);
                 ensureDir(uploadDir);
 
                 // Generate unique filename (use WebP extension)
@@ -161,5 +169,6 @@ module.exports = {
     uploadAndCompress,
     uploadProfileImage,
     uploadProductImage,
-    uploadCategoryImage
+    uploadCategoryImage,
+    UPLOADS_IMAGES_DIR,
 };
