@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   Package,
+  Printer,
   RefreshCw,
   Search,
   ShoppingBag,
@@ -13,6 +14,7 @@ import {
 import { AdminLayout } from "@/components/AdminLayout";
 import { useOrders } from "@/context/OrderContext";
 import { useSettings } from "@/context/SettingsContext";
+import { orderAPI } from "@/services/api";
 import { formatPrice } from "@/lib/utils";
 
 const statusClass = {
@@ -59,6 +61,7 @@ export function AdminOrders() {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [mobileView, setMobileView] = useState("queue");
   const [statusForm, setStatusForm] = useState({
     status: "pending",
@@ -189,6 +192,23 @@ export function AdminOrders() {
       await fetchOrders();
     } catch (requestError) {
       setError(requestError?.response?.data?.error || "Failed to delete order");
+    }
+  };
+
+  // Download the printable order slip / invoice PDF (logo, customer name + phone +
+  // address, items, totals, amount paid and balance due) for shipping.
+  const printOrderSlip = async () => {
+    if (!selectedOrder) {
+      return;
+    }
+    try {
+      setError("");
+      setPrinting(true);
+      await orderAPI.downloadInvoice(selectedOrder.id);
+    } catch (requestError) {
+      setError(requestError?.customMessage || "Could not generate the order slip. Please try again.");
+    } finally {
+      setPrinting(false);
     }
   };
 
@@ -490,6 +510,15 @@ export function AdminOrders() {
                   >
                     <CheckCircle2 className="h-4 w-4" />
                     Save Update
+                  </button>
+                  <button
+                    type="button"
+                    disabled={printing}
+                    onClick={() => void printOrderSlip()}
+                    className="inline-flex min-h-[40px] items-center gap-2 rounded-xl border border-[#2a5f1e]/30 bg-emerald-50 px-4 py-2 text-sm font-semibold text-[#2a5f1e] hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    <Printer className="h-4 w-4" />
+                    {printing ? "Preparing…" : "Print Slip"}
                   </button>
                   <button
                     type="button"

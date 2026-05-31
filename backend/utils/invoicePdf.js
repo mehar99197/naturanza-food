@@ -201,6 +201,8 @@ const drawItemsTableHeader = (doc, y, columns) => {
 const createInvoicePdfBuffer = async (order, options = {}) => {
   const currency = options.currency || 'PKR';
   const company = { ...COMPANY, ...(options.company || {}) };
+  const amountPaid = options.amountPaid != null ? Number(options.amountPaid) || 0 : null;
+  const balanceDue = options.balanceDue != null ? Number(options.balanceDue) || 0 : null;
 
   return new Promise((resolve, reject) => {
     try {
@@ -330,7 +332,13 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
       const billToName = normalizeText(order.customer_name || order.user_name, 'Customer');
       const billToEmail = normalizeText(order.customer_email, '-');
       const billToAddress = normalizeText(order.shipping_address, 'Address not available');
-      const billToBlock = [billToName, billToEmail, billToAddress].join('\n');
+      const billToLines = [billToName, billToEmail, billToAddress];
+      if (order.city) billToLines.push(`City: ${normalizeText(order.city)}`);
+      if (order.phone) billToLines.push(`Phone: ${normalizeText(order.phone)}`);
+      if (order.estimated_delivery) {
+        billToLines.push(`Expected Delivery: ${formatDateTime(order.estimated_delivery)}`);
+      }
+      const billToBlock = billToLines.join('\n');
       const fromBlock = [
         company.legalName,
         company.email,
@@ -483,7 +491,7 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
       const totalLabelWidth = 112;
       const totalValueWidth = 104;
       const totalRowGap = 18;
-      const totalsBoxHeight = 128;
+      const totalsBoxHeight = amountPaid != null ? 182 : 128;
 
       if (y + totalsBoxHeight > pageHeight - 110) {
         doc.addPage();
@@ -496,6 +504,22 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
       const shipping = safeNumber(order.shipping_cost, 0);
       const discount = safeNumber(order.discount_amount, 0);
       const grandTotal = safeNumber(order.total_amount, 0);
+
+      // Special instructions / notes (rendered on the left, beside the totals box).
+      const blockTop = y;
+      if (order.notes) {
+        const notesWidth = totalsX - margin - 18;
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(9.5)
+          .fillColor(PRIMARY_GREEN)
+          .text('Special Instructions', margin, blockTop + 2, { width: notesWidth });
+        doc
+          .font('Helvetica')
+          .fontSize(9)
+          .fillColor(DARK_TEXT)
+          .text(normalizeText(order.notes), margin, blockTop + 18, { width: notesWidth, lineGap: 2 });
+      }
 
       doc
         .save()
@@ -550,6 +574,22 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         color: PRIMARY_GREEN,
         step: 18,
       });
+
+      if (amountPaid != null) {
+        doc.moveTo(totalsX + 14, y - 6).lineTo(totalValueX, y - 6).stroke(BORDER);
+        drawTotalRow('Amount Paid', formatMoney(amountPaid, currency), { color: MUTED_TEXT });
+        const due = balanceDue != null ? balanceDue : Math.max(0, grandTotal - amountPaid);
+        drawTotalRow(
+          due > 0 ? 'Balance Due (Pending)' : 'Balance Due',
+          formatMoney(due, currency),
+          {
+            bold: true,
+            size: 12,
+            color: due > 0 ? DISCOUNT_RED : PRIMARY_GREEN,
+            step: 18,
+          },
+        );
+      }
 
       const footerY = pageHeight - 72;
       doc

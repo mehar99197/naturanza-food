@@ -1070,9 +1070,28 @@ router.get('/:id/invoice', authenticateToken, async (req, res) => {
       ...(adminSettings.storeEmail ? { email: adminSettings.storeEmail } : {}),
       ...(adminSettings.storePhone ? { phone: adminSettings.storePhone } : {}),
     };
+
+    // Amount paid = approved payment verifications (COD advance / prepaid / final
+    // collection). Balance Due is what is still pending (e.g. COD to collect).
+    const [[paidRow]] = await db.promise().query(
+      `SELECT COALESCE(SUM(amount), 0) AS paid
+         FROM advance_payment_verifications
+        WHERE order_id = ? AND status = 'approved'`,
+      [orderId],
+    );
+    const orderTotal = Number(order.total_amount) || 0;
+    let amountPaid = Number(paidRow.paid) || 0;
+    if (String(order.payment_status || '').toLowerCase() === 'paid' && amountPaid < orderTotal) {
+      amountPaid = orderTotal;
+    }
+    amountPaid = Math.min(Math.max(0, amountPaid), orderTotal);
+    const balanceDue = Math.max(0, orderTotal - amountPaid);
+
     const pdfBuffer = await createInvoicePdfBuffer(order, {
       currency: adminSettings.currency || 'PKR',
       company: companyOverrides,
+      amountPaid,
+      balanceDue,
     });
     const orderNumber = `ORD-${String(order.id).padStart(6, '0')}`;
     const fileName = `invoice-${orderNumber}.pdf`;
