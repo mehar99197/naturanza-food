@@ -220,27 +220,20 @@ export function SettingsProvider({ children }) {
   }, [refreshExchangeRates]);
 
   const geoDetected = useRef(false);
-  // A user's explicit currency choice (from the switcher) overrides auto-detect.
-  const manualCurrencyRef = useRef(null);
 
-  // Apply a saved manual currency preference on mount.
+  // No manual currency switcher: currency is purely auto-detected from the
+  // visitor's location. Clear any legacy saved preference so it can't pin the
+  // currency away from the detected one.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const saved = normalizeCurrency(window.localStorage.getItem(CURRENCY_STORAGE_KEY) || '');
-    if (!saved) return;
-    manualCurrencyRef.current = saved;
-    if (saved !== 'PKR') {
-      setSettings((prev) => normalizeSettings({ ...prev, currency: saved }));
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(CURRENCY_STORAGE_KEY);
     }
   }, []);
 
+  // Auto-detect the visitor's currency by IP/location and convert from the PKR
+  // base. Falls back to PKR (the store default) on any failure.
   useEffect(() => {
     if (geoDetected.current || isAdminAuthenticated) return;
-    // A saved manual choice wins — don't override it with geo-detection.
-    if (manualCurrencyRef.current) {
-      geoDetected.current = true;
-      return;
-    }
     if (!exchangeRates.updatedAt && !settings.storeName) return;
 
     const detectCurrency = async () => {
@@ -254,7 +247,7 @@ export function SettingsProvider({ children }) {
           });
         }
       } catch {
-        // Ignore geolocation errors — fall back to store default
+        // Ignore geolocation errors — fall back to store default (PKR)
       } finally {
         geoDetected.current = true;
       }
@@ -262,38 +255,6 @@ export function SettingsProvider({ children }) {
 
     void detectCurrency();
   }, [exchangeRates.updatedAt, settings.storeName, isAdminAuthenticated]);
-
-  // Manual currency override from the CurrencySwitcher. Persists the choice and
-  // stops geo auto-detect from changing it. Pass 'PKR' to reset to the base.
-  const setUserCurrency = useCallback((code) => {
-    const normalized = normalizeCurrency(code);
-    if (normalized !== 'PKR' && !hasExchangeRate(normalized)) return;
-    manualCurrencyRef.current = normalized;
-    geoDetected.current = true;
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(CURRENCY_STORAGE_KEY, normalized);
-    }
-    setSettings((prev) => normalizeSettings({ ...prev, currency: normalized }));
-  }, []);
-
-  // Reset to location-based auto-detection (clears the manual override and
-  // re-detects immediately).
-  const clearUserCurrency = useCallback(async () => {
-    manualCurrencyRef.current = null;
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(CURRENCY_STORAGE_KEY);
-    }
-    try {
-      const data = await geolocationAPI.getCurrency();
-      const detected = normalizeCurrency(data.currency || 'PKR');
-      const next = detected !== 'PKR' && hasExchangeRate(detected) ? detected : 'PKR';
-      setSettings((prev) => normalizeSettings({ ...prev, currency: next }));
-    } catch {
-      setSettings((prev) => normalizeSettings({ ...prev, currency: 'PKR' }));
-    } finally {
-      geoDetected.current = true;
-    }
-  }, []);
 
   const updateSettings = (newSettings) => {
     setSettings((prev) => normalizeSettings({ ...prev, ...newSettings }));
@@ -312,8 +273,6 @@ export function SettingsProvider({ children }) {
   exchangeRatesLoading,
   exchangeRatesError,
   updateSettings,
-  setUserCurrency,
-  clearUserCurrency,
   resetSettings,
   refreshSettings,
   refreshExchangeRates,
