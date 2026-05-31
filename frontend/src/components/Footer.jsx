@@ -139,8 +139,10 @@ export function Footer({ variant = 'full' }) {
  </p>
  </div>
  
- {/* Quick Links */}
- <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
+ {/* Quick Links + Social (grouped on the right so the row stays balanced
+ even when no social links are configured) */}
+ <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 md:gap-8">
+ <nav className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
  <Link to="/about" className="text-white/70 md:hover:text-white text-sm font-medium transition-colors">
  About
  </Link>
@@ -153,9 +155,9 @@ export function Footer({ variant = 'full' }) {
  <Link to="/faq" className="text-white/70 md:hover:text-white text-sm font-medium transition-colors">
  FAQ
  </Link>
- </div>
- 
- {/* Social Icons */}
+ </nav>
+
+ {socialLinks.length > 0 && (
  <div className="flex gap-2.5">
  {socialLinks.map((social) => {
  const Icon = social.icon;
@@ -172,6 +174,8 @@ export function Footer({ variant = 'full' }) {
  </a>
  );
  })}
+ </div>
+ )}
  </div>
  </div>
  
