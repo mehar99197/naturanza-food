@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { orderAPI } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 
 const OrderContext = createContext(null);
 
@@ -14,6 +15,7 @@ export const useOrders = () => {
 
 export const OrderProvider = ({ children }) => {
   const { user, loading: authLoading } = useAuth();
+  const { admin, loading: adminLoading } = useAdminAuth();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -41,18 +43,24 @@ export const OrderProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (authLoading) {
+    // Wait until BOTH auth contexts have settled, so we don't fire the fetch
+    // before the admin token has been read from storage (the bug that made the
+    // admin Orders page load empty until a manual Refresh).
+    if (authLoading || adminLoading) {
       return;
     }
 
-    if (!user?.id) {
+    // Fetch when EITHER a customer OR an admin is authenticated. The admin
+    // Orders page has no regular `user`, so the old `!user?.id` check bailed out
+    // and never loaded the list.
+    if (!user?.id && !admin?.id) {
       setOrders([]);
       setLoading(false);
       return;
     }
 
     void fetchOrders();
-  }, [authLoading, fetchOrders, user?.id]);
+  }, [authLoading, adminLoading, fetchOrders, user?.id, admin?.id]);
 
   const addOrder = async (orderData) => {
     try {
