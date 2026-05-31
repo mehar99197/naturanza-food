@@ -11,7 +11,11 @@ export function FAQ() {
   const faqs = [
     {
     question: 'How long does delivery take?',
-    answer: 'Most orders are delivered within 2 to 5 business days, depending on your location.',
+    answer: 'Most orders are delivered within 2 to 5 business days across Pakistan, depending on your city. Delivery is free on orders over Rs. 5,000.',
+    },
+    {
+    question: 'What payment methods do you accept?',
+    answer: 'You can pay by Cash on Delivery (with a small advance shipping fee) or online via JazzCash, EasyPaisa, or bank transfer. All prices are in Pakistani Rupees (PKR).',
     },
     {
     question: 'Are your products 100% organic?',
@@ -23,7 +27,7 @@ export function FAQ() {
     },
     {
     question: 'Do you offer refunds?',
-    answer: 'Yes, eligible products can be returned under our returns policy if conditions are met.',
+    answer: 'Returns and refunds are accepted within 3 days of delivery for shipping-related issues only — orders that arrive damaged, incorrect, or with missing items. Share photos with your order ID and we will resolve it quickly.',
     },
     {
     question: 'How can I contact support quickly?',

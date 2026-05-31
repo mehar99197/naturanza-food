@@ -12,7 +12,7 @@ export function Privacy() {
  {
  title: 'Information We Collect',
  content:
- 'We collect details you provide during account creation, orders, and contact requests such as name, email, address, and phone number.',
+ 'We collect details you provide during account creation, orders, and contact requests such as name, email, address, and phone number. If you sign in with Google, we receive your basic Google profile (name and email). For Cash on Delivery and online payments, you may upload a payment screenshot for verification.',
  },
  {
  title: 'How We Use Data',
@@ -50,7 +50,7 @@ return (
  <p className="text-sm md:text-base text-[#6b7a6b] mt-3 max-w-2xl mx-auto">
  Your privacy matters to us. This policy explains how we handle your personal information.
  </p>
- <p className="text-xs text-[#8a958a] mt-2">Last updated: March 15, 2026</p>
+ <p className="text-xs text-[#8a958a] mt-2">Last updated: May 31, 2026</p>
  </header>
 
  <section className="grid gap-4 md:gap-5 max-w-4xl mx-auto">

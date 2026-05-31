@@ -10,12 +10,12 @@ export function Returns() {
  const sections = [
  {
  title: 'Return Window',
- content: `You may request a return within ${RETURNS_POLICY.returnWindow} of receiving your order.`,
+ content: `You may request a return within ${RETURNS_POLICY.returnWindow} of receiving your order, for shipping-related issues only.`,
  },
  {
  title: 'Eligible Items',
  content:
- 'Items must be unused, sealed, and in original packaging to qualify for return approval.',
+ 'Returns are accepted only for shipping-related problems — orders that arrive damaged, incorrect, or with missing items. The product must be unused and in its original, sealed packaging.',
  },
  {
  title: 'Refund Process',
@@ -59,7 +59,7 @@ return (
  <div className="flex items-start gap-3">
  <ShieldAlert className="w-5 h-5 text-[#3d7a3d] mt-0.5" />
  <p className="text-sm text-[#4f5f4f] leading-relaxed">
- Some products may be non-returnable for hygiene and safety reasons, including opened consumables and temperature-sensitive items.
+ Change-of-mind returns are not accepted. Opened consumables and temperature-sensitive items are non-returnable for hygiene and safety reasons.
  </p>
  </div>
  <div className="flex items-start gap-3 mt-3">

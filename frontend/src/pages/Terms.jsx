@@ -16,7 +16,7 @@ export function Terms() {
  {
  title: 'Orders and Payments',
  content:
- 'All orders are subject to product availability and payment confirmation. Prices and promotions may change without prior notice.',
+ 'All orders are subject to product availability and payment confirmation. Prices are listed in Pakistani Rupees (PKR). We accept Cash on Delivery (with a small advance shipping fee) and online payment via JazzCash, EasyPaisa, or bank transfer. Prices and promotions may change without prior notice.',
  },
  {
  title: 'Product Information',
@@ -49,7 +49,7 @@ return (
  <p className="text-sm md:text-base text-[#6b7a6b] mt-3 max-w-2xl mx-auto">
  Please read these terms carefully before using our website and services.
  </p>
- <p className="text-xs text-[#8a958a] mt-2">Last updated: March 15, 2026</p>
+ <p className="text-xs text-[#8a958a] mt-2">Last updated: May 31, 2026</p>
  </header>
 
  <section className="grid gap-4 md:gap-5 max-w-4xl mx-auto">

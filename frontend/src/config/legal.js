@@ -19,11 +19,11 @@ export const SHIPPING_POLICY = {
  dispatchCity: 'Lahore',
  standardWindow: '2 to 5 business days',
  expressWindow: '1 to 2 business days',
- freeShippingThreshold: 'PKR 6,000',
+ freeShippingThreshold: 'Rs. 5,000',
 };
 
 export const RETURNS_POLICY = {
- returnWindow: '7 days',
+ returnWindow: '3 days',
  inspectionWindow: '2 business days',
  refundWindow: '5 to 10 business days',
 };

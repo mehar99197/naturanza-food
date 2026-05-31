@@ -17,8 +17,12 @@ export function Shipping() {
  content: `Standard delivery usually takes ${SHIPPING_POLICY.standardWindow} after dispatch. Express shipping, where available, takes ${SHIPPING_POLICY.expressWindow}.`,
  },
  {
- title: 'Shipping Charges',
- content: `Shipping charges are calculated at checkout. Free shipping is available on qualifying orders above ${SHIPPING_POLICY.freeShippingThreshold}.`,
+ title: 'Delivery Areas & Charges',
+ content: `We deliver across Pakistan. The delivery fee for your city is shown at checkout, and shipping is free on orders above ${SHIPPING_POLICY.freeShippingThreshold}.`,
+ },
+ {
+ title: 'Payment Options',
+ content: 'Pay by Cash on Delivery (with a small advance shipping fee) or online via JazzCash, EasyPaisa, or bank transfer. All charges are in Pakistani Rupees (PKR).',
  },
  {
  title: 'Tracking Information',
