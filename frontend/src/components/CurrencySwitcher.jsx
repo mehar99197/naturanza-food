@@ -40,7 +40,8 @@ export function CurrencySwitcher() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+        className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-gray-700 hover:text-green-600 bg-gray-100 hover:bg-gray-200 rounded-lg border border-gray-200 transition-colors"
+        aria-label="Change currency"
       >
         <span className="font-semibold">{current.code}</span>
         <svg className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -48,7 +49,7 @@ export function CurrencySwitcher() {
         </svg>
       </button>
       {isOpen && (
-        <div className="absolute bottom-full right-0 mb-2 w-44 bg-white rounded-xl shadow-2xl border border-gray-100 py-1.5 max-h-60 overflow-y-auto z-50">
+        <div className="absolute top-full right-0 mt-2 w-44 bg-white rounded-xl shadow-2xl border border-gray-100 py-1.5 max-h-72 overflow-y-auto z-50">
           {CURRENCIES.map((cur) => (
             <button
               key={cur.code}

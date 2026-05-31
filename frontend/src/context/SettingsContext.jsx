@@ -6,6 +6,7 @@ import { setExchangeRates as setExchangeRatesStore, hasExchangeRate } from '@/li
 const SettingsContext = createContext();
 const SETTINGS_POLL_INTERVAL_MS = 30000;
 const EXCHANGE_RATE_POLL_INTERVAL_MS = 1000 * 60 * 10;
+const CURRENCY_STORAGE_KEY = 'naturanza_currency';
 
 const DEFAULT_SETTINGS = {
  storeName: 'Naturanza',
@@ -218,17 +219,28 @@ export function SettingsProvider({ children }) {
  };
   }, [refreshExchangeRates]);
 
-  // Clear old localStorage currency preference (manual switcher was removed)
+  const geoDetected = useRef(false);
+  // A user's explicit currency choice (from the switcher) overrides auto-detect.
+  const manualCurrencyRef = useRef(null);
+
+  // Apply a saved manual currency preference on mount.
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem('naturanza_currency');
+    if (typeof window === 'undefined') return;
+    const saved = normalizeCurrency(window.localStorage.getItem(CURRENCY_STORAGE_KEY) || '');
+    if (!saved) return;
+    manualCurrencyRef.current = saved;
+    if (saved !== 'PKR') {
+      setSettings((prev) => normalizeSettings({ ...prev, currency: saved }));
     }
   }, []);
 
-  const geoDetected = useRef(false);
-
   useEffect(() => {
     if (geoDetected.current || isAdminAuthenticated) return;
+    // A saved manual choice wins — don't override it with geo-detection.
+    if (manualCurrencyRef.current) {
+      geoDetected.current = true;
+      return;
+    }
     if (!exchangeRates.updatedAt && !settings.storeName) return;
 
     const detectCurrency = async () => {
@@ -251,6 +263,19 @@ export function SettingsProvider({ children }) {
     void detectCurrency();
   }, [exchangeRates.updatedAt, settings.storeName, isAdminAuthenticated]);
 
+  // Manual currency override from the CurrencySwitcher. Persists the choice and
+  // stops geo auto-detect from changing it. Pass 'PKR' to reset to the base.
+  const setUserCurrency = useCallback((code) => {
+    const normalized = normalizeCurrency(code);
+    if (normalized !== 'PKR' && !hasExchangeRate(normalized)) return;
+    manualCurrencyRef.current = normalized;
+    geoDetected.current = true;
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(CURRENCY_STORAGE_KEY, normalized);
+    }
+    setSettings((prev) => normalizeSettings({ ...prev, currency: normalized }));
+  }, []);
+
   const updateSettings = (newSettings) => {
     setSettings((prev) => normalizeSettings({ ...prev, ...newSettings }));
   };
@@ -267,7 +292,8 @@ export function SettingsProvider({ children }) {
   exchangeRates,
   exchangeRatesLoading,
   exchangeRatesError,
-  updateSettings, 
+  updateSettings,
+  setUserCurrency,
   resetSettings,
   refreshSettings,
   refreshExchangeRates,

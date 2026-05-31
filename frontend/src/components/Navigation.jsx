@@ -27,6 +27,7 @@ import {
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { useWishlist } from "@/context/WishlistContext";
+import { CurrencySwitcher } from "@/components/CurrencySwitcher";
 import { userAPI } from "@/services/api";
 
 const resolveUserImage = (user, fallbackImage) => {
@@ -571,6 +572,8 @@ export function Navigation() {
 
             {/* Actions - Optimized mobile layout */}
             <div className="flex items-center gap-1.5 sm:gap-2">
+              {/* Currency switcher — auto-detected by location, user can override */}
+              <CurrencySwitcher />
               {/* Search Icon */}
               <button
                 onClick={() => setIsSearchOpen(true)}
