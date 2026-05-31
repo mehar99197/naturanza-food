@@ -83,10 +83,12 @@ export function SEO({
 }
 
 export function HomeSEO() {
+  // No `title` prop on the home page → the SEO component uses the branded fallback
+  // ("Naturanza Food - Premium Organic & Natural Products in Pakistan") instead of
+  // appending a generic "Home", which Google was showing as "Naturanza Food: Home".
   return (
     <SEO
-      title="Home"
-      description="Shop premium organic honey, herbal teas, natural supplements, and wellness products. 100% natural, sustainably sourced. Free shipping on orders over Rs. 2000 across Pakistan."
+      description="Shop premium organic honey, herbal teas, natural supplements, and wellness products. 100% natural, sustainably sourced. Free shipping on orders over Rs. 5,000 across Pakistan."
       keywords="organic food Pakistan, natural products, buy organic honey, herbal tea online Pakistan, natural supplements, organic store Karachi Lahore Islamabad"
       type="website"
       url={`${SITE_URL}/`}
