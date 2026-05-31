@@ -487,17 +487,17 @@
   html {
     scroll-behavior: smooth;
     -webkit-overflow-scrolling: touch;
-    overflow-x: hidden !important;
+    overflow-x: clip !important; /* clip (not hidden) so position:sticky still works */
   }
   
   body {
-    overflow-x: hidden !important;
+    overflow-x: clip !important; /* clip (not hidden) so position:sticky still works */
     max-width: 100vw;
     position: relative;
   }
   
   #root {
-    overflow-x: hidden !important;
+    overflow-x: clip !important; /* clip (not hidden) so position:sticky still works */
     max-width: 100vw;
   }
   
