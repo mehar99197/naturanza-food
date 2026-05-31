@@ -34,6 +34,7 @@ const initialFormState = {
   price: "",
   category_id: "",
   image_url: "",
+  gallery_images: [],
   stock_quantity: "0",
   discount_percentage: "0",
   is_featured: false,
@@ -186,6 +187,7 @@ export function AdminProducts() {
   const [error, setError] = useState("");
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadingGallery, setUploadingGallery] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrProductData, setQrProductData] = useState(null);
 
@@ -257,6 +259,16 @@ export function AdminProducts() {
 
   const openEditModal = (product) => {
     const resolvedImageUrl = pickProductImageValue(product);
+    // Gallery = all stored images minus the primary (the primary keeps its own field).
+    const galleryFromProduct = Array.isArray(product.images)
+      ? product.images
+          .map((entry) => (typeof entry === "string" ? entry : entry?.image_url))
+          .map((url) => String(url || "").trim())
+          .filter(Boolean)
+      : [];
+    const additionalImages = [...new Set(galleryFromProduct)].filter(
+      (url) => url !== String(resolvedImageUrl || "").trim(),
+    );
     setEditingProduct(product);
     setFormData({
       name: String(product.name || ""),
@@ -267,6 +279,7 @@ export function AdminProducts() {
       price: String(product.price || ""),
       category_id: product.category_id ? String(product.category_id) : "",
       image_url: resolvedImageUrl,
+      gallery_images: additionalImages,
       stock_quantity: String(product.stock_quantity || 0),
       discount_percentage: String(product.discount_percentage || 0),
       is_featured: Boolean(product.is_featured),
@@ -308,6 +321,14 @@ export function AdminProducts() {
       setSaving(true);
       setError("");
 
+      const primaryImage = String(formData.image_url || "").trim();
+      // Full ordered gallery: primary first, then the additional images. Deduped so the
+      // backend stores each image once (it flags index 0 as is_primary).
+      const galleryImages = [...new Set(
+        [primaryImage, ...(formData.gallery_images || []).map((url) => String(url || "").trim())]
+          .filter(Boolean),
+      )];
+
       const payload = {
         name,
         description: description || null,
@@ -316,7 +337,8 @@ export function AdminProducts() {
         usage: usage || null,
         price,
         category_id: formData.category_id ? Number(formData.category_id) : null,
-        image_url: String(formData.image_url || "").trim() || null,
+        image_url: primaryImage || null,
+        gallery_images: galleryImages,
         stock_quantity: Math.max(0, Number(formData.stock_quantity) || 0),
         discount_percentage: Math.max(0, Number(formData.discount_percentage) || 0),
         is_featured: Boolean(formData.is_featured),
@@ -364,20 +386,57 @@ export function AdminProducts() {
     setQrProductData(null);
   };
 
+  // Validates a single image file (type + size). Returns an error string, or "" if valid.
+  const validateImageFile = (file) => {
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      return 'Please select a valid image file (JPEG, PNG, GIF, or WebP)';
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      return 'Each image must be less than 5MB';
+    }
+    return "";
+  };
+
+  // Uploads one file to the product image endpoint and resolves to its stored URL.
+  const uploadImageFile = async (file) => {
+    const uploadFormData = new FormData();
+    uploadFormData.append('product_image', file);
+
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/products/upload-image`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminAccessToken') || localStorage.getItem('token')}`
+      },
+      body: uploadFormData,
+      credentials: 'include'
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = 'Failed to upload image';
+      try {
+        errorMessage = JSON.parse(errorText).error || errorMessage;
+      } catch (e) {
+        errorMessage = errorText || errorMessage;
+      }
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    if (!data.imageUrl) {
+      throw new Error('Upload did not return an image URL');
+    }
+    return data.imageUrl;
+  };
+
   const handleImageUpload = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    if (!validTypes.includes(file.type)) {
-      setError('Please select a valid image file (JPEG, PNG, GIF, or WebP)');
-      return;
-    }
-
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Image size must be less than 5MB');
+    const validationError = validateImageFile(file);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
@@ -385,44 +444,77 @@ export function AdminProducts() {
     setError("");
 
     try {
-      const uploadFormData = new FormData();
-      uploadFormData.append('product_image', file);
-
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/products/upload-image`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('adminAccessToken') || localStorage.getItem('token')}`
-        },
-        body: uploadFormData,
-        credentials: 'include'
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = 'Failed to upload image';
-        
-        try {
-          const errorData = JSON.parse(errorText);
-          errorMessage = errorData.error || errorMessage;
-        } catch (e) {
-          console.error('Response was not JSON:', errorText);
-          errorMessage = errorText || errorMessage;
-        }
-        
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-
-      if (data.imageUrl) {
-        setFormData(prev => ({ ...prev, image_url: data.imageUrl }));
-      }
+      const imageUrl = await uploadImageFile(file);
+      setFormData(prev => ({ ...prev, image_url: imageUrl }));
     } catch (uploadError) {
       console.error('Upload failed:', uploadError);
       setError(uploadError.message || 'Failed to upload image');
     } finally {
       setUploadingImage(false);
     }
+  };
+
+  // Uploads one or more gallery (additional) images and appends their URLs.
+  const handleGalleryUpload = async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    for (const file of files) {
+      const validationError = validateImageFile(file);
+      if (validationError) {
+        setError(validationError);
+        event.target.value = "";
+        return;
+      }
+    }
+
+    setUploadingGallery(true);
+    setError("");
+
+    try {
+      const uploadedUrls = [];
+      for (const file of files) {
+        uploadedUrls.push(await uploadImageFile(file));
+      }
+      setFormData(prev => ({
+        ...prev,
+        gallery_images: [
+          ...new Set([
+            ...(prev.gallery_images || []),
+            ...uploadedUrls,
+          ].filter(Boolean)),
+        ],
+      }));
+    } catch (uploadError) {
+      console.error('Gallery upload failed:', uploadError);
+      setError(uploadError.message || 'Failed to upload gallery image');
+    } finally {
+      setUploadingGallery(false);
+      event.target.value = "";
+    }
+  };
+
+  const removeGalleryImage = (url) => {
+    setFormData(prev => ({
+      ...prev,
+      gallery_images: (prev.gallery_images || []).filter((item) => item !== url),
+    }));
+  };
+
+  // Promote a gallery image to the main image; the old main moves into the gallery.
+  const makeImagePrimary = (url) => {
+    setFormData(prev => {
+      const previousPrimary = String(prev.image_url || "").trim();
+      const nextGallery = (prev.gallery_images || []).filter((item) => item !== url);
+      if (previousPrimary && previousPrimary !== url) {
+        nextGallery.unshift(previousPrimary);
+      }
+      return {
+        ...prev,
+        image_url: url,
+        gallery_images: [...new Set(nextGallery.filter(Boolean))],
+      };
+    });
   };
 
   const statusFilterOptions = [
@@ -1043,7 +1135,7 @@ export function AdminProducts() {
                     <div className="flex items-center gap-2 text-emerald-700">
                       <Image className="h-4 w-4" />
                       <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-700">
-                        Product Image
+                        Main Image
                       </h3>
                     </div>
 
@@ -1089,6 +1181,72 @@ export function AdminProducts() {
                           <p className="text-xs text-slate-500">
                             Current image • Click X to remove
                           </p>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  <div className="h-px bg-emerald-100" />
+
+                  <section className="space-y-3 sm:space-y-4">
+                    <div className="flex items-center gap-2 text-emerald-700">
+                      <Image className="h-4 w-4" />
+                      <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-700">
+                        Additional Images (Gallery)
+                      </h3>
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="block cursor-pointer">
+                        <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          Add Images
+                        </span>
+                        <div className="mt-1.5 flex items-center gap-3">
+                          <label className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-700 shadow-sm transition-all duration-200 hover:bg-emerald-50 cursor-pointer">
+                            <Upload className="h-4 w-4" />
+                            {uploadingGallery ? 'Uploading...' : 'Choose Images'}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              onChange={handleGalleryUpload}
+                              disabled={uploadingGallery}
+                              className="hidden"
+                            />
+                          </label>
+                          <span className="text-xs text-slate-500">
+                            Select multiple • Max 5MB each • Shown on the product gallery
+                          </span>
+                        </div>
+                      </label>
+
+                      {(formData.gallery_images?.length || 0) > 0 && (
+                        <div className="flex flex-wrap gap-3">
+                          {formData.gallery_images.map((url) => (
+                            <div key={url} className="relative inline-block group">
+                              <img
+                                src={getAbsoluteImageUrl(url, { defaultFolder: 'products' })}
+                                alt="Gallery preview"
+                                className="h-24 w-24 rounded-xl border border-emerald-100 object-cover shadow-sm"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeGalleryImage(url)}
+                                title="Remove image"
+                                className="absolute -right-2 -top-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white shadow-lg hover:bg-red-600"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => makeImagePrimary(url)}
+                                title="Set as main image"
+                                className="absolute inset-x-1 bottom-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                              >
+                                Make Main
+                              </button>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
