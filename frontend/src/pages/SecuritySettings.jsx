@@ -869,6 +869,8 @@ export default function SecuritySettings() {
                 onChange={handleDeleteFieldChange}
                 placeholder="DELETE"
                 autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
                 className="block w-full px-3 py-2.5 sm:py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
               />
             </div>
@@ -887,6 +889,9 @@ export default function SecuritySettings() {
                   value={deleteForm.currentPassword}
                   onChange={handleDeleteFieldChange}
                   placeholder="Enter current password"
+                  autoComplete="new-password"
+                  data-1p-ignore
+                  data-lpignore="true"
                   className="block w-full pl-8 sm:pl-10 pr-10 py-2.5 sm:py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
                 />
                 <button
