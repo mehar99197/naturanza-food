@@ -32,28 +32,34 @@ import ProfileLayout from "@/components/ProfileLayout";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminProtectedRoute from "@/components/AdminProtectedRoute";
 import { AnalyticsTracker } from "./components/Analytics";
+// Home stays eager — it's the landing page, so we want its LCP as fast as
+// possible with no extra chunk round-trip. Every other public page is lazy
+// (declared below, after the `named` helper) to keep the initial bundle small.
 import { Home } from "@/pages/Home";
-import { Shop } from "@/pages/Shop";
-import { About } from "@/pages/About";
-import { ProductDetail } from "@/pages/ProductDetail";
-import { Contact } from "@/pages/Contact";
-import { Checkout } from "@/pages/Checkout";
-import { FAQ } from "@/pages/FAQ";
-import { Shipping } from "@/pages/Shipping";
-import { Returns } from "@/pages/Returns";
-import { Terms } from "@/pages/Terms";
-import { Privacy } from "@/pages/Privacy";
-import { Cookies } from "@/pages/Cookies";
-import Login from "@/pages/Login";
-import Register from "@/pages/Register";
-import ForgotPassword from "@/pages/ForgotPassword";
-import ResetPassword from "@/pages/ResetPassword";
 // --- Lazy-loaded: admin pages, profile sub-pages, blog, 404 ---
 // Splits the bulk of route-specific code out of the initial bundle. Each chunk
 // loads on demand when its route is visited, dramatically improving LCP/TTI on
 // the public-facing pages a first-time visitor actually sees.
 const named = (loader, exportName) =>
   lazy(() => loader().then((m) => ({ default: m[exportName] })));
+
+// Public pages (code-split out of the initial bundle; rendered inside the
+// route-level <Suspense> boundary, same as the admin/profile chunks below).
+const Shop = named(() => import("@/pages/Shop"), "Shop");
+const About = named(() => import("@/pages/About"), "About");
+const ProductDetail = named(() => import("@/pages/ProductDetail"), "ProductDetail");
+const Contact = named(() => import("@/pages/Contact"), "Contact");
+const Checkout = named(() => import("@/pages/Checkout"), "Checkout");
+const FAQ = named(() => import("@/pages/FAQ"), "FAQ");
+const Shipping = named(() => import("@/pages/Shipping"), "Shipping");
+const Returns = named(() => import("@/pages/Returns"), "Returns");
+const Terms = named(() => import("@/pages/Terms"), "Terms");
+const Privacy = named(() => import("@/pages/Privacy"), "Privacy");
+const Cookies = named(() => import("@/pages/Cookies"), "Cookies");
+const Login = lazy(() => import("@/pages/Login"));
+const Register = lazy(() => import("@/pages/Register"));
+const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 
 const AdminForgotPassword = lazy(() => import("@/pages/AdminForgotPassword"));
 const AdminResetPassword = lazy(() => import("@/pages/AdminResetPassword"));

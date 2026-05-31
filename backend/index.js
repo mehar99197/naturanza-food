@@ -447,12 +447,40 @@ app.get("/api/csrf-token", (req, res) => {
 // Serve React frontend in production
 const frontendDist = path.join(__dirname, "..", "frontend", "dist");
 if (process.env.NODE_ENV === "production") {
-  app.use(express.static(frontendDist));
+  // Canonical host: 301 www -> apex so the two don't compete as duplicate content.
   app.use((req, res, next) => {
+    const host = req.headers.host || "";
+    if (host.startsWith("www.")) {
+      return res.redirect(301, `https://${host.slice(4)}${req.originalUrl}`);
+    }
+    next();
+  });
+
+  app.use(express.static(frontendDist));
+
+  const { renderPage } = require("./utils/seoRenderer");
+  const ASSET_EXTENSION = /\.[a-zA-Z0-9]{1,8}$/;
+
+  // SPA fallback with per-route SEO meta injection + correct HTTP status.
+  app.use(async (req, res, next) => {
+    if (req.method !== "GET") {
+      return next();
+    }
     if (req.path.startsWith("/api/") || req.path.startsWith("/images/") || req.path.startsWith("/uploads/")) {
       return next();
     }
-    res.sendFile(path.join(frontendDist, "index.html"));
+    // A static asset that wasn't matched by express.static above doesn't exist —
+    // return a real 404 instead of serving the SPA shell for a missing file.
+    if (ASSET_EXTENSION.test(req.path)) {
+      return res.status(404).type("txt").send("Not Found");
+    }
+    try {
+      const { status, html } = await renderPage(req.path, frontendDist);
+      return res.status(status).type("html").send(html);
+    } catch (renderError) {
+      // Never let meta rendering break navigation — fall back to the raw shell.
+      return res.sendFile(path.join(frontendDist, "index.html"));
+    }
   });
 }
 
