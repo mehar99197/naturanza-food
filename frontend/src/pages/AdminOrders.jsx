@@ -82,7 +82,6 @@ export function AdminOrders() {
   const [mobileView, setMobileView] = useState("queue");
   const [statusForm, setStatusForm] = useState({
     status: "pending",
-    payment_status: "pending",
     courier_name: "",
     tracking_number: "",
     note: "",
@@ -154,7 +153,6 @@ export function AdminOrders() {
 
     setStatusForm({
       status: String(selectedOrder.status || "pending"),
-      payment_status: String(selectedOrder.payment_status || "pending"),
       courier_name: String(selectedOrder.shipment?.courier_name || ""),
       tracking_number: String(selectedOrder.shipment?.tracking_number || ""),
       note: "",
@@ -179,7 +177,9 @@ export function AdminOrders() {
       setSaving(true);
       setError("");
 
-      await updateOrderStatus(selectedOrder.id, statusForm.status, statusForm.payment_status, {
+      // Payment status is owned by the Payments section (advance + COD collection),
+      // so we never send it from here — pass null to leave it untouched.
+      await updateOrderStatus(selectedOrder.id, statusForm.status, null, {
         courier_name: statusForm.courier_name || undefined,
         tracking_number: statusForm.tracking_number || undefined,
         note: statusForm.note || undefined,
@@ -485,44 +485,35 @@ export function AdminOrders() {
                     </select>
                   </label>
 
-                  <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  {/* Payment status is READ-ONLY here — it is owned and updated by the
+                      Payments section (advance verification + COD cash collection). */}
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Payment Status
-                    <select
-                      value={statusForm.payment_status}
-                      onChange={(event) =>
-                        setStatusForm((prev) => ({ ...prev, payment_status: event.target.value }))
-                      }
-                      className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-green-500 focus:outline-none"
-                    >
-                      {(() => {
-                        const isCod =
-                          String(selectedOrder.payment_method || "").toLowerCase() === "cod";
-                        const labels = isCod ? COD_PAYMENT_LABELS : DEFAULT_PAYMENT_LABELS;
-                        // COD exposes the advance ("partial") stage; prepaid doesn't.
-                        const options = isCod
-                          ? ["pending", "partial", "paid", "failed"]
-                          : ["pending", "paid", "failed"];
-                        // Always keep the order's current status selectable.
-                        if (!options.includes(statusForm.payment_status)) {
-                          options.push(statusForm.payment_status);
-                        }
-                        return options.map((status) => (
-                          <option key={status} value={status}>
-                            {labels[status] || status}
-                          </option>
-                        ));
-                      })()}
-                    </select>
-                    {String(selectedOrder.payment_method || "").toLowerCase() === "cod" ? (
-                      <p className="mt-1.5 text-[11px] font-normal normal-case leading-snug tracking-normal text-gray-500">
-                        COD order: customer pays a small advance, the rest is collected on delivery.
-                        Set <span className="font-semibold">Advance paid</span> once the advance is
-                        verified, and <span className="font-semibold">Fully collected</span> only after
-                        the rider returns the cash. Manage/verify these in the{" "}
-                        <span className="font-semibold text-green-700">Payments</span> section.
-                      </p>
-                    ) : null}
-                  </label>
+                    {(() => {
+                      const isCod =
+                        String(selectedOrder.payment_method || "").toLowerCase() === "cod";
+                      const ps = String(selectedOrder.payment_status || "pending").toLowerCase();
+                      const labels = isCod ? COD_PAYMENT_LABELS : DEFAULT_PAYMENT_LABELS;
+                      return (
+                        <>
+                          <div className="mt-1.5 flex items-center rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold normal-case tracking-normal ${
+                                paymentClass[ps] || "bg-gray-100 text-gray-700"
+                              }`}
+                            >
+                              {labels[ps] || ps}
+                            </span>
+                          </div>
+                          <p className="mt-1.5 text-[11px] font-normal normal-case leading-snug tracking-normal text-gray-500">
+                            Payment{isCod ? " & COD collection" : ""} is managed in the{" "}
+                            <span className="font-semibold text-green-700">Payments</span> section
+                            {isCod ? " (advance + cash on delivery)" : ""}.
+                          </p>
+                        </>
+                      );
+                    })()}
+                  </div>
 
                   <input
                     type="text"
