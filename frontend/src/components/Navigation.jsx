@@ -28,6 +28,7 @@ import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { useWishlist } from "@/context/WishlistContext";
 import { userAPI } from "@/services/api";
+import { playNotificationChime, primeNotificationSound } from "@/lib/notificationSound";
 
 const resolveUserImage = (user, fallbackImage) => {
   return (
@@ -64,6 +65,7 @@ export function Navigation() {
   const desktopLinkRefs = useRef({});
   const userMenuRef = useRef(null);
   const previousTotalItemsRef = useRef(0);
+  const prevNotifUnreadRef = useRef(null);
   const previousWishlistTotalItemsRef = useRef(0);
   const hasInitializedWishlistCountRef = useRef(false);
   const { totalItems, setIsCartOpen } = useCart();
@@ -155,27 +157,43 @@ export function Navigation() {
     };
   }, [isMobileMenuOpen]);
 
-  // Fetch unread-notifications count for the bell badge.
-  // Refresh on login + on route change so the badge stays in sync after
-  // visiting /notifications (which marks items as read).
+  // Fetch unread-notifications count for the bell badge — on login, on route
+  // change, and on a 45s interval. When the count rises (a new notification
+  // arrived) we ring a soft chime.
   useEffect(() => {
     if (!user?.id) {
       setNotifUnreadCount(0);
-      return;
+      prevNotifUnreadRef.current = null;
+      return undefined;
     }
+
+    primeNotificationSound();
     let cancelled = false;
-    userAPI
-      .getNotificationsUnreadCount()
-      .then((data) => {
-        if (!cancelled) {
-          setNotifUnreadCount(Number(data?.count) || 0);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setNotifUnreadCount(0);
-      });
+
+    const fetchUnread = () => {
+      userAPI
+        .getNotificationsUnreadCount()
+        .then((data) => {
+          if (cancelled) return;
+          const count = Number(data?.count) || 0;
+          // Ring only when the count increases, and not on the first fetch.
+          if (prevNotifUnreadRef.current !== null && count > prevNotifUnreadRef.current) {
+            playNotificationChime();
+          }
+          prevNotifUnreadRef.current = count;
+          setNotifUnreadCount(count);
+        })
+        .catch(() => {
+          if (!cancelled) setNotifUnreadCount(0);
+        });
+    };
+
+    fetchUnread();
+    const intervalId = window.setInterval(fetchUnread, 45000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
     };
   }, [user?.id, location.pathname]);
 

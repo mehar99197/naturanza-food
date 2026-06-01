@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { adminAPI } from "@/services/api";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { playNotificationChime, primeNotificationSound } from "@/lib/notificationSound";
 
 const AdminNotificationsContext = createContext(null);
 const NOTIFICATION_POLL_INTERVAL_MS = 10000;
@@ -31,6 +32,9 @@ export const AdminNotificationsProvider = ({ children }) => {
   const [error, setError] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [mutedUntil, setMutedUntil] = useState(null);
+  // Highest notification id we've seen — lets us detect a genuinely NEW
+  // notification on a silent poll and chime for it (null = not initialised yet).
+  const lastSeenMaxIdRef = useRef(null);
 
   const loadNotifications = useCallback(
     async ({ silent = false } = {}) => {
@@ -40,6 +44,7 @@ export const AdminNotificationsProvider = ({ children }) => {
         setMutedUntil(null);
         setError("");
         setLoading(false);
+        lastSeenMaxIdRef.current = null;
         return;
       }
 
@@ -53,8 +58,19 @@ export const AdminNotificationsProvider = ({ children }) => {
           adminAPI.getNotificationSettings(),
         ]);
 
-        setNotifications(normalizeNotifications(notificationsResponse));
-        setIsMuted(Boolean(settingsResponse?.isMuted));
+        const normalized = normalizeNotifications(notificationsResponse);
+        const muted = Boolean(settingsResponse?.isMuted);
+
+        // Ring only for a notification newer than the highest we'd seen before,
+        // and not on the very first load (so existing items stay silent).
+        const maxId = normalized.reduce((max, item) => Math.max(max, Number(item.id) || 0), 0);
+        if (lastSeenMaxIdRef.current !== null && maxId > lastSeenMaxIdRef.current && !muted) {
+          playNotificationChime();
+        }
+        lastSeenMaxIdRef.current = maxId;
+
+        setNotifications(normalized);
+        setIsMuted(muted);
         setMutedUntil(settingsResponse?.mutedUntil || null);
         setError("");
       } catch (requestError) {
@@ -115,6 +131,32 @@ export const AdminNotificationsProvider = ({ children }) => {
     }
   }, [loadNotifications]);
 
+  const deleteNotification = useCallback(
+    async (notificationId) => {
+      if (!notificationId) {
+        return;
+      }
+      setNotifications((prev) => prev.filter((item) => item.id !== notificationId));
+      try {
+        await adminAPI.deleteNotification(notificationId);
+      } catch (requestError) {
+        await loadNotifications({ silent: true });
+        throw requestError;
+      }
+    },
+    [loadNotifications],
+  );
+
+  const clearAllNotifications = useCallback(async () => {
+    setNotifications([]);
+    try {
+      await adminAPI.clearNotifications();
+    } catch (requestError) {
+      await loadNotifications({ silent: true });
+      throw requestError;
+    }
+  }, [loadNotifications]);
+
   const updateMuteSettings = useCallback(async (nextSettings) => {
     const payload = {
       isMuted: Boolean(nextSettings?.isMuted),
@@ -144,6 +186,9 @@ export const AdminNotificationsProvider = ({ children }) => {
     if (adminLoading || !isAdminAuthenticated || typeof window === "undefined") {
       return undefined;
     }
+
+    // Unlock audio on the admin's first interaction so the chime can play.
+    primeNotificationSound();
 
     const pollTimerId = window.setInterval(() => {
       void loadNotifications({ silent: true });
@@ -185,6 +230,8 @@ export const AdminNotificationsProvider = ({ children }) => {
       refreshNotifications,
       markNotificationRead,
       markAllNotificationsRead,
+      deleteNotification,
+      clearAllNotifications,
       updateMuteSettings,
     }),
     [
@@ -193,6 +240,8 @@ export const AdminNotificationsProvider = ({ children }) => {
       loading,
       markAllNotificationsRead,
       markNotificationRead,
+      deleteNotification,
+      clearAllNotifications,
       mutedUntil,
       notifications,
       refreshNotifications,

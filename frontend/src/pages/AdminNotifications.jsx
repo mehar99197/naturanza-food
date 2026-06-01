@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   Bell,
   BellOff,
   CheckCheck,
   Clock3,
+  ExternalLink,
   RefreshCw,
+  Trash2,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -20,6 +23,64 @@ const typeClassMap = {
   admin_contact_created: "bg-violet-100 text-violet-700",
   return_review_required: "bg-amber-100 text-amber-700",
   default: "bg-gray-100 text-gray-700",
+};
+
+// Broad category for the filter tabs.
+const categoryOf = (type) => {
+  const t = String(type || "").toLowerCase();
+  if (t.includes("order")) return "order";
+  if (t.includes("stock") || t.includes("inventory")) return "stock";
+  if (t.includes("contact") || t.includes("message")) return "message";
+  if (t.includes("payment")) return "payment";
+  return "other";
+};
+
+const TYPE_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "unread", label: "Unread" },
+  { key: "order", label: "Orders" },
+  { key: "stock", label: "Stock" },
+  { key: "message", label: "Messages" },
+];
+
+const safePayload = (raw) => {
+  if (!raw) return {};
+  if (typeof raw === "object") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+};
+
+// Where a notification links to, for the detail-pane "open" button.
+const linkForNotification = (notification) => {
+  const p = safePayload(notification?.payload);
+  if (p.order_id) return { to: "/admin/orders", label: "View order" };
+  if (p.contact_id || p.message_id) return { to: "/admin/messages", label: "Open message" };
+  if (p.product_id) return { to: "/admin/products", label: "View product" };
+  return null;
+};
+
+// "Just now" / "5m ago" / "2h ago" / "3d ago", then an absolute date.
+const formatRelativeTime = (value) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 45) return "Just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 };
 
 const formatDateTime = (value) => {
@@ -69,9 +130,12 @@ export function AdminNotifications() {
     refreshNotifications,
     markNotificationRead,
     markAllNotificationsRead,
+    deleteNotification,
+    clearAllNotifications,
     updateMuteSettings,
   } = useAdminNotifications();
 
+  const navigate = useNavigate();
   const [activeFilter, setActiveFilter] = useState("all");
   const [selectedNotificationId, setSelectedNotificationId] = useState(null);
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
@@ -82,9 +146,22 @@ export function AdminNotifications() {
     if (activeFilter === "unread") {
       return notifications.filter((item) => !item.is_read);
     }
-
-    return notifications;
+    if (activeFilter === "all") {
+      return notifications;
+    }
+    return notifications.filter((item) => categoryOf(item.type) === activeFilter);
   }, [activeFilter, notifications]);
+
+  const filterCounts = useMemo(
+    () => ({
+      all: notifications.length,
+      unread: unreadCount,
+      order: notifications.filter((n) => categoryOf(n.type) === "order").length,
+      stock: notifications.filter((n) => categoryOf(n.type) === "stock").length,
+      message: notifications.filter((n) => categoryOf(n.type) === "message").length,
+    }),
+    [notifications, unreadCount],
+  );
 
   const mobileRows = useMemo(
     () =>
@@ -166,6 +243,35 @@ export function AdminNotifications() {
     }
   };
 
+  const handleDeleteOne = async (notificationId) => {
+    setActionError("");
+    try {
+      await deleteNotification(notificationId);
+    } catch (requestError) {
+      setActionError(
+        requestError?.response?.data?.error || requestError?.message || "Failed to delete notification",
+      );
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (!notifications.length) return;
+    if (!window.confirm("Clear all notifications? This cannot be undone.")) return;
+    setActionError("");
+    try {
+      await clearAllNotifications();
+    } catch (requestError) {
+      setActionError(
+        requestError?.response?.data?.error || requestError?.message || "Failed to clear notifications",
+      );
+    }
+  };
+
+  const handleOpenLink = (notification) => {
+    const link = linkForNotification(notification);
+    if (link) navigate(link.to);
+  };
+
   const handleToggleMute = async () => {
     setActionError("");
     try {
@@ -239,6 +345,16 @@ export function AdminNotifications() {
               <Clock3 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               Mute 1h
             </button>
+
+            <button
+              type="button"
+              onClick={() => void handleClearAll()}
+              disabled={!notifications.length}
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-red-100 bg-white px-3 text-[13px] font-semibold text-red-600 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-red-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:gap-2 sm:rounded-2xl sm:px-4 sm:text-sm"
+            >
+              <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              Clear all
+            </button>
           </div>
         </div>
 
@@ -286,25 +402,24 @@ export function AdminNotifications() {
               </button>
             </div>
 
-            <div className="mb-3 inline-flex rounded-full border border-emerald-100 bg-[#f4faf5] p-1">
-              <button
-                type="button"
-                onClick={() => setActiveFilter("all")}
-                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                  activeFilter === "all" ? "bg-emerald-700 text-white" : "text-slate-600"
-                }`}
-              >
-                All
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveFilter("unread")}
-                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                  activeFilter === "unread" ? "bg-emerald-700 text-white" : "text-slate-600"
-                }`}
-              >
-                Unread
-              </button>
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {TYPE_FILTERS.map((filter) => {
+                const isActive = activeFilter === filter.key;
+                return (
+                  <button
+                    key={filter.key}
+                    type="button"
+                    onClick={() => setActiveFilter(filter.key)}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                      isActive
+                        ? "bg-emerald-700 text-white"
+                        : "border border-emerald-100 bg-[#f4faf5] text-slate-600"
+                    }`}
+                  >
+                    {filter.label} ({filterCounts[filter.key] ?? 0})
+                  </button>
+                );
+              })}
             </div>
 
             <div className="space-y-2.5">
@@ -325,7 +440,9 @@ export function AdminNotifications() {
                         </span>
                       </div>
                       <p className="line-clamp-2 text-xs text-slate-600">{item.message}</p>
-                      <p className="mt-1 text-[11px] text-slate-500">{formatDateTime(item.created_at)}</p>
+                      <p className="mt-1 text-[11px] text-slate-500" title={formatDateTime(item.created_at)}>
+                        {formatRelativeTime(item.created_at)}
+                      </p>
                     </button>
                   );
                 })
@@ -366,29 +483,25 @@ export function AdminNotifications() {
                 </button>
               </div>
 
-              <div className="inline-flex rounded-full border border-emerald-200 bg-emerald-50/65 p-1">
-                <button
-                  type="button"
-                  onClick={() => setActiveFilter("all")}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                    activeFilter === "all"
-                      ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
-                      : "text-slate-600"
-                  }`}
-                >
-                  All ({notifications.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveFilter("unread")}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                    activeFilter === "unread"
-                      ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
-                      : "text-slate-600"
-                  }`}
-                >
-                  Unread ({unreadCount})
-                </button>
+              <div className="flex flex-wrap gap-1.5">
+                {TYPE_FILTERS.map((filter) => {
+                  const isActive = activeFilter === filter.key;
+                  const count = filterCounts[filter.key] ?? 0;
+                  return (
+                    <button
+                      key={filter.key}
+                      type="button"
+                      onClick={() => setActiveFilter(filter.key)}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                        isActive
+                          ? "bg-[#16a34a] text-white shadow-[0_8px_18px_rgba(22,163,74,0.28)]"
+                          : "border border-emerald-100 bg-emerald-50/65 text-slate-600 hover:bg-emerald-50"
+                      }`}
+                    >
+                      {filter.label} ({count})
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -410,7 +523,9 @@ export function AdminNotifications() {
                         {!item.is_read ? <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> : null}
                       </div>
                       <p className="line-clamp-2 text-xs text-slate-600">{item.message}</p>
-                      <p className="mt-1 text-xs text-slate-400">{formatDateTime(item.created_at)}</p>
+                      <p className="mt-1 text-xs text-slate-400" title={formatDateTime(item.created_at)}>
+                        {formatRelativeTime(item.created_at)}
+                      </p>
                     </button>
                   );
                 })
@@ -426,8 +541,8 @@ export function AdminNotifications() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xl font-bold text-slate-900">{selectedNotification.title}</p>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {formatDateTime(selectedNotification.created_at)}
+                    <p className="mt-1 text-sm text-slate-500" title={formatDateTime(selectedNotification.created_at)}>
+                      {formatRelativeTime(selectedNotification.created_at)}
                     </p>
                   </div>
                   <span
@@ -450,6 +565,26 @@ export function AdminNotifications() {
                     <Bell className="h-3.5 w-3.5" />
                     Type: {selectedNotification.type || "general"}
                   </span>
+
+                  {linkForNotification(selectedNotification) ? (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenLink(selectedNotification)}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-[#16a34a] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      {linkForNotification(selectedNotification).label}
+                    </button>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteOne(selectedNotification.id)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-red-100 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </button>
                 </div>
               </div>
             ) : (
