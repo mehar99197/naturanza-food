@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ArrowLeft, Clock3, CalendarDays } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SEO } from '@/components/SEO';
@@ -84,7 +84,7 @@ export function BlogPost() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-stone-50">
+      <div className="min-h-screen flex items-center justify-center bg-[#faf8f3]">
         <Loader2 className="w-7 h-7 text-green-600 animate-spin" />
       </div>
     );
@@ -92,7 +92,7 @@ export function BlogPost() {
 
   if (notFound || !post) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-stone-50">
+      <div className="min-h-screen flex items-center justify-center bg-[#faf8f3]">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-gray-800 mb-4">Post Not Found</h1>
           <Link to="/blog" className="text-green-600 hover:underline">Back to Blog</Link>
@@ -103,6 +103,7 @@ export function BlogPost() {
 
   const articleUrl = `${SITE_URL}/blog/${post.slug}`;
   const coverImage = post.image ? getAbsoluteImageUrl(post.image, { defaultFolder: 'blog' }) : null;
+  const authorInitial = (String(post.author || 'N').trim().charAt(0) || 'N').toUpperCase();
 
   return (
     <>
@@ -125,41 +126,56 @@ export function BlogPost() {
 
       <div className="min-h-screen bg-[#faf8f3]">
         {/* Header — pt clears the fixed navbar */}
-        <div className="bg-gradient-to-br from-green-800 via-green-700 to-emerald-600 text-white pt-24 sm:pt-28 pb-10 sm:pb-14">
+        <div className="bg-gradient-to-br from-green-800 via-green-700 to-emerald-600 text-white pt-24 sm:pt-28 pb-16 sm:pb-24">
           <div className="container-custom">
-            <Link to="/blog" className="inline-flex items-center text-white/80 hover:text-white mb-4">
-              ← Back to Blog
+            <Link
+              to="/blog"
+              className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3.5 py-1.5 text-sm font-medium text-white/90 backdrop-blur-sm transition hover:bg-white/25 hover:text-white"
+            >
+              <ArrowLeft className="h-4 w-4" /> Back to Blog
             </Link>
-            {post.category && (
-              <span className="inline-block bg-white/20 text-white px-3 py-1 rounded-full text-sm mb-4">
-                {post.category}
-              </span>
-            )}
-            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold max-w-3xl">{post.title}</h1>
-            <div className="flex flex-wrap items-center mt-4 text-white/80 text-sm gap-x-3 gap-y-1">
-              <span>By {post.author}</span>
-              <span>•</span>
-              <span>{post.date}</span>
-              <span>•</span>
-              <span>{post.readTime}</span>
+            <div className="mt-5 max-w-3xl">
+              {post.category && (
+                <span className="inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold uppercase tracking-wide">
+                  {post.category}
+                </span>
+              )}
+              <h1 className="mt-3 font-display text-2xl sm:text-3xl md:text-[2.6rem] md:leading-tight font-bold">
+                {post.title}
+              </h1>
+              <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-green-50/90">
+                <span className="inline-flex items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-sm font-bold text-white">
+                    {authorInitial}
+                  </span>
+                  By {post.author}
+                </span>
+                <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-4 w-4" /> {post.date}</span>
+                <span className="inline-flex items-center gap-1.5"><Clock3 className="h-4 w-4" /> {post.readTime}</span>
+              </div>
             </div>
           </div>
         </div>
 
         {/* Content */}
-        <div className="container-custom py-10 sm:py-12">
+        <div className="container-custom pb-12">
           <div className="max-w-3xl mx-auto">
+            {/* Cover image (or the article card) overlaps the header for a magazine feel */}
             {coverImage && (
               <img
                 src={coverImage}
                 alt={post.title}
-                className="w-full h-56 sm:h-72 object-cover rounded-2xl shadow-sm mb-8"
+                className="-mt-12 sm:-mt-20 w-full h-52 sm:h-80 object-cover rounded-2xl shadow-xl ring-4 ring-[#faf8f3]"
               />
             )}
 
-            <article className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm mb-8">
+            <article
+              className={`bg-white rounded-2xl p-6 sm:p-9 shadow-sm mb-8 ${
+                coverImage ? 'mt-8' : '-mt-8 sm:-mt-12'
+              }`}
+            >
               {post.excerpt && (
-                <p className="text-lg text-gray-600 leading-relaxed mb-6 pb-6 border-b border-gray-100">
+                <p className="text-lg leading-relaxed text-slate-600 mb-7 pb-7 border-b border-gray-100">
                   {post.excerpt}
                 </p>
               )}
@@ -170,29 +186,36 @@ export function BlogPost() {
 
             {/* Related */}
             {related.length > 0 && (
-              <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm">
-                <h3 className="text-xl font-bold text-gray-800 mb-6">Related Articles</h3>
-                <div className="grid sm:grid-cols-3 gap-6">
+              <div className="mb-8">
+                <h3 className="mb-5 text-xl font-bold text-[#2d3a2d]">Related Articles</h3>
+                <div className="grid gap-5 sm:grid-cols-3">
                   {related.map((rp) => (
-                    <Link key={rp.id} to={`/blog/${rp.slug}`} className="group">
-                      <div className="h-28 rounded-lg mb-3 overflow-hidden">
+                    <Link
+                      key={rp.id}
+                      to={`/blog/${rp.slug}`}
+                      className="group flex flex-col overflow-hidden rounded-2xl border border-green-100 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg"
+                    >
+                      <div className="h-28 overflow-hidden">
                         {rp.image ? (
                           <img
                             src={getAbsoluteImageUrl(rp.image, { defaultFolder: 'blog' })}
                             alt={rp.title}
                             loading="lazy"
-                            className="w-full h-full object-cover"
+                            className="h-full w-full object-cover"
                           />
                         ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-green-100 to-emerald-50 flex items-center justify-center">
-                            <span className="text-2xl">📄</span>
+                          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-green-100 to-emerald-50">
+                            <span className="text-2xl">🌿</span>
                           </div>
                         )}
                       </div>
-                      <h4 className="font-medium text-gray-800 group-hover:text-green-600 transition-colors line-clamp-2">
-                        {rp.title}
-                      </h4>
-                      <span className="text-gray-500 text-sm">{rp.readTime}</span>
+                      <div className="flex flex-1 flex-col p-4">
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-green-600">{rp.category}</span>
+                        <h4 className="mt-1 flex-1 font-semibold text-slate-800 transition-colors group-hover:text-green-700 line-clamp-2">
+                          {rp.title}
+                        </h4>
+                        <span className="mt-2 text-xs text-slate-500">{rp.readTime}</span>
+                      </div>
                     </Link>
                   ))}
                 </div>
