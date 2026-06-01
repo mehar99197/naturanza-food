@@ -23,6 +23,7 @@ import {
   Settings,
   Package,
   Bell,
+  Newspaper,
 } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
@@ -304,6 +305,7 @@ export function Navigation() {
     { path: "/", label: "Home", icon: Home },
     { path: "/shop", label: "Shop", icon: ShoppingBag },
     { path: "/about", label: "About", icon: Info },
+    { path: "/blog", label: "Blog", icon: Newspaper },
     { path: "/contact", label: "Contact", icon: MessageCircle },
   ];
 
@@ -315,6 +317,13 @@ export function Navigation() {
       label: "Shop",
       icon: ShoppingBag,
       theme: "shop",
+    },
+    {
+      key: "blog",
+      path: "/blog",
+      label: "Blog",
+      icon: Newspaper,
+      theme: "support",
     },
     ...(user
       ? [

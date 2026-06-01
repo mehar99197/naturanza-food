@@ -85,6 +85,7 @@ export function Footer({ variant = 'full' }) {
  shop: categories, // Dynamic categories from database
  company: [
  { label: 'About Us', path: '/about' },
+ { label: 'Blog', path: '/blog' },
  { label: 'Our Story', path: '/about' },
  { label: 'Contact', path: '/contact' }
  ],
@@ -148,6 +149,9 @@ export function Footer({ variant = 'full' }) {
  </Link>
  <Link to="/shop" className="text-white/70 md:hover:text-white text-sm font-medium transition-colors">
  Shop
+ </Link>
+ <Link to="/blog" className="text-white/70 md:hover:text-white text-sm font-medium transition-colors">
+ Blog
  </Link>
  <Link to="/contact" className="text-white/70 md:hover:text-white text-sm font-medium transition-colors">
  Contact
