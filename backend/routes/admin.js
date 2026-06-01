@@ -8,6 +8,7 @@ const { restrictBody } = require("../middleware/security");
 const { issueAccessToken, verifyAccessToken, toExpiryDate } = require("../utils/jwtTokens");
 const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/tokenStore");
 const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
+const { getClientIp } = require("../utils/clientIp");
 const asyncHandler = require("../middleware/asyncHandler");
 const newsletterController = require("../controllers/newsletterController");
 const { syncDefaultAdminPassword } = require("../utils/envSync");
@@ -79,57 +80,10 @@ const resetLoginFailures = async (userId) => {
     );
 };
 
-const normalizeIpAddress = (rawIp) => {
-  let value = String(rawIp || "").trim();
-  if (!value) {
-    return null;
-  }
-
-  if (value.includes(",")) {
-    value = value.split(",")[0].trim();
-  }
-
-  if (value.startsWith("[") && value.includes("]")) {
-    value = value.slice(1, value.indexOf("]"));
-  }
-
-  if (value.includes("::ffff:")) {
-    value = value.split("::ffff:").pop().trim();
-  }
-
-  if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(value)) {
-    value = value.split(":")[0];
-  }
-
-  if (value.toLowerCase() === "unknown") {
-    return null;
-  }
-
-  return value;
-};
-
-const getRequestIp = (req) => {
-  const candidates = [
-    req.headers["cf-connecting-ip"],
-    req.headers["x-real-ip"],
-    req.headers["x-forwarded-for"],
-    req.headers["x-client-ip"],
-    req.ip,
-    req.socket?.remoteAddress,
-    req.connection?.remoteAddress,
-  ];
-
-  for (const candidate of candidates) {
-    const normalized = normalizeIpAddress(
-      Array.isArray(candidate) ? candidate[0] : candidate,
-    );
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return null;
-};
+// Real client IP for admin login-history/session display — resolved from the
+// forwarded headers (Express's req.ip is a Hostinger internal hop). See
+// utils/clientIp.js.
+const getRequestIp = (req) => getClientIp(req);
 
 const isPrivateOrLocalIp = (ipAddress) => {
   const ip = String(ipAddress || "").trim().toLowerCase();

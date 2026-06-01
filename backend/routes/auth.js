@@ -48,6 +48,7 @@ const {
   sendVerificationCodeEmail,
 } = require("../utils/emailService");
 const { isDisposableEmail, hasDeliverableDomain } = require("../utils/emailValidation");
+const { getClientIp } = require("../utils/clientIp");
 const {
   createVerificationCode,
   verifyCode,
@@ -103,57 +104,10 @@ const getAllowedGoogleClientIds = () => {
   return [...new Set(configuredIds)];
 };
 
-const normalizeIpAddress = (rawIp) => {
-  let value = String(rawIp || "").trim();
-  if (!value) {
-    return null;
-  }
-
-  if (value.includes(",")) {
-    value = value.split(",")[0].trim();
-  }
-
-  if (value.startsWith("[") && value.includes("]")) {
-    value = value.slice(1, value.indexOf("]"));
-  }
-
-  if (value.includes("::ffff:")) {
-    value = value.split("::ffff:").pop().trim();
-  }
-
-  if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(value)) {
-    value = value.split(":")[0];
-  }
-
-  if (value.toLowerCase() === "unknown") {
-    return null;
-  }
-
-  return value;
-};
-
-const getRequestIp = (req) => {
-  // SECURITY: rely on Express's req.ip, which is derived from the proxy chain
-  // according to the configured `trust proxy` setting. Do NOT prefer raw
-  // X-Forwarded-For / X-Real-IP / CF-Connecting-IP headers here — those are
-  // attacker-controllable and would let a client forge the logged/rate-limited IP.
-  const candidates = [
-    req.ip,
-    req.socket?.remoteAddress,
-    req.connection?.remoteAddress,
-  ];
-
-  for (const candidate of candidates) {
-    const normalized = normalizeIpAddress(
-      Array.isArray(candidate) ? candidate[0] : candidate,
-    );
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return null;
-};
+// Real client IP for display/logging (login history, sessions, geolocation).
+// Behind Hostinger's proxy, Express's req.ip is an internal hop, so we resolve
+// the originating client from the forwarded headers — see utils/clientIp.js.
+const getRequestIp = (req) => getClientIp(req);
 
 const isPrivateOrLocalIp = (ipAddress) => {
   const ip = String(ipAddress || "").trim().toLowerCase();
