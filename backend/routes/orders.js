@@ -1069,6 +1069,9 @@ router.get('/:id/invoice', authenticateToken, async (req, res) => {
       ...(adminSettings.storeName ? { legalName: adminSettings.storeName } : {}),
       ...(adminSettings.storeEmail ? { email: adminSettings.storeEmail } : {}),
       ...(adminSettings.storePhone ? { phone: adminSettings.storePhone } : {}),
+      // From-address tracks the admin's editable store address (same source the
+      // storefront uses), so changing it in the dashboard updates new invoices.
+      ...(adminSettings.address ? { officeAddress: adminSettings.address } : {}),
     };
 
     // Amount paid = approved payment verifications (COD advance / prepaid / final
