@@ -495,7 +495,7 @@ router.post("/register", async (req, res) => {
 
     // Reject obviously fake addresses up front. The 6-digit code emailed below is
     // the real proof of ownership; these checks just filter out the obvious fakes.
-    if (isDisposableEmail(normalizedEmail)) {
+    if (await isDisposableEmail(normalizedEmail)) {
       return res.status(400).json({
         error: "Temporary/disposable emails are not allowed. Please use a permanent email address.",
       });
