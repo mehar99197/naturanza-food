@@ -211,6 +211,7 @@ function AppContent() {
     "/login",
     "/register",
     "/signup",
+    "/verify-email",
     "/forgot-password",
     "/reset-password",
   ];
