@@ -195,78 +195,75 @@ export default function AnnouncementBar() {
   const Icon = presentation.Icon;
 
   return (
-    <div className="sticky top-0 z-[60]">
+    <div className="sticky top-0 z-[60] overflow-x-hidden w-full">
       <style>{`
         @keyframes nzMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-        .nz-marquee-track { animation: nzMarquee 15s linear infinite; will-change: transform; }
+        .nz-marquee-track { animation: nzMarquee 18s linear infinite; will-change: transform; }
         .nz-marquee-viewport:hover .nz-marquee-track { animation-play-state: paused; }
         @media (prefers-reduced-motion: reduce) { .nz-marquee-track { animation: none; } }
       `}</style>
-      <div className="container-custom">
-        <div
-          className={`flex min-h-[38px] items-center gap-2.5 rounded-b-2xl border px-3 shadow-[0_8px_18px_rgba(15,64,28,0.08)] backdrop-blur-md md:min-h-[40px] md:gap-3 ${presentation.shell}`}
+      <div
+        className={`flex min-h-[38px] w-full items-center gap-1.5 border-b px-3 shadow-[0_4px_12px_rgba(15,64,28,0.10)] backdrop-blur-md sm:gap-2.5 sm:px-4 md:min-h-[40px] md:gap-3 ${presentation.shell} rounded-none border-x-0 border-t-0`}
+      >
+        {/* Icon — hidden on xs so title pill + marquee + X have room */}
+        <span
+          className={`hidden sm:inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${presentation.icon}`}
         >
-          <span
-            className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${presentation.icon}`}
-          >
-            <Icon
-              className={`h-3.5 w-3.5 ${
-                currentAnnouncement.type === "promotion" ? "animate-pulse" : ""
-              }`}
-            />
-          </span>
+          <Icon
+            className={`h-3.5 w-3.5 ${
+              currentAnnouncement.type === "promotion" ? "animate-pulse" : ""
+            }`}
+          />
+        </span>
 
-          <div className="min-w-0 flex-1 overflow-hidden">
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={currentAnnouncement.id}
-                {...slideTransition}
-                className="flex items-center gap-2 overflow-hidden"
-              >
-                {currentAnnouncement.title ? (
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={currentAnnouncement.id}
+              {...slideTransition}
+              className="flex items-center gap-1.5 sm:gap-2 overflow-hidden"
+            >
+              {currentAnnouncement.title ? (
+                <span
+                  className={`shrink-0 max-w-[100px] truncate rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.07em] sm:max-w-none sm:px-2.5 sm:text-[10px] sm:tracking-[0.08em] ${presentation.titlePill}`}
+                >
+                  {truncateText(currentAnnouncement.title)}
+                </span>
+              ) : null}
+              {/* Marquee scrolls the full message on narrow screens */}
+              <div className="nz-marquee-viewport min-w-0 flex-1 overflow-hidden">
+                <div className="nz-marquee-track flex w-max whitespace-nowrap">
                   <span
-                    className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${presentation.titlePill}`}
+                    className={`pr-12 text-[11px] font-medium leading-tight sm:pr-16 sm:text-[13px] ${presentation.message}`}
                   >
-                    {truncateText(currentAnnouncement.title)}
+                    {truncateText(currentAnnouncement.message)}
                   </span>
-                ) : null}
-                {/* Marquee: continuously scroll the full message so it stays
-                    readable on narrow (mobile) screens where it would otherwise
-                    truncate. The text is duplicated for a seamless loop. */}
-                <div className="nz-marquee-viewport min-w-0 flex-1 overflow-hidden">
-                  <div className="nz-marquee-track flex w-max whitespace-nowrap">
-                    <span
-                      className={`pr-16 text-[12px] font-medium leading-tight sm:text-[13px] ${presentation.message}`}
-                    >
-                      {truncateText(currentAnnouncement.message)}
-                    </span>
-                    <span
-                      aria-hidden="true"
-                      className={`pr-16 text-[12px] font-medium leading-tight sm:text-[13px] ${presentation.message}`}
-                    >
-                      {truncateText(currentAnnouncement.message)}
-                    </span>
-                  </div>
+                  <span
+                    aria-hidden="true"
+                    className={`pr-12 text-[11px] font-medium leading-tight sm:pr-16 sm:text-[13px] ${presentation.message}`}
+                  >
+                    {truncateText(currentAnnouncement.message)}
+                  </span>
                 </div>
-              </motion.div>
-            </AnimatePresence>
-          </div>
-
-          {announcements.length > 1 ? (
-            <span className={`hidden shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold sm:inline-flex ${presentation.counter}`}>
-              {currentIndex + 1}/{announcements.length}
-            </span>
-          ) : null}
-
-          <button
-            type="button"
-            onClick={handleDismiss}
-            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-current transition-colors duration-200 ${presentation.dismiss}`}
-            aria-label="Dismiss announcements"
-          >
-            <X className="h-4 w-4" />
-          </button>
+              </div>
+            </motion.div>
+          </AnimatePresence>
         </div>
+
+        {announcements.length > 1 ? (
+          <span className={`hidden shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold sm:inline-flex ${presentation.counter}`}>
+            {currentIndex + 1}/{announcements.length}
+          </span>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={handleDismiss}
+          className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-current transition-colors duration-200 sm:h-8 sm:w-8 sm:rounded-xl ${presentation.dismiss}`}
+          aria-label="Dismiss announcements"
+        >
+          <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+        </button>
       </div>
     </div>
   );
