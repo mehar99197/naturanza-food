@@ -39,9 +39,20 @@ const {
   googleLoginSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  verifyEmailSchema,
+  resendVerificationSchema,
   strongPassword,
 } = require("../validation/authSchemas");
-const { sendPasswordResetEmail } = require("../utils/emailService");
+const {
+  sendPasswordResetEmail,
+  sendVerificationCodeEmail,
+} = require("../utils/emailService");
+const { isDisposableEmail, hasDeliverableDomain } = require("../utils/emailValidation");
+const {
+  createVerificationCode,
+  verifyCode,
+  secondsUntilResendAllowed,
+} = require("../utils/emailVerificationCodes");
 const {
   createPasswordResetToken,
   validatePasswordResetToken,
@@ -482,19 +493,41 @@ router.post("/register", async (req, res) => {
     const { name, email, password, phone, address } = parsedBody.data;
     const normalizedEmail = String(email).trim().toLowerCase();
 
+    // Reject obviously fake addresses up front. The 6-digit code emailed below is
+    // the real proof of ownership; these checks just filter out the obvious fakes.
+    if (isDisposableEmail(normalizedEmail)) {
+      return res.status(400).json({
+        error: "Temporary/disposable emails are not allowed. Please use a permanent email address.",
+      });
+    }
+    if (!(await hasDeliverableDomain(normalizedEmail))) {
+      return res.status(400).json({
+        error: "This email domain can't receive mail. Please check your email address.",
+      });
+    }
+
     const [existingUsers] = await db
       .promise()
-      .query("SELECT id FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
+      .query("SELECT id, email_verified FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
 
     if (existingUsers.length > 0) {
+      // A prior signup that was never verified: steer them to verification
+      // instead of a dead-end "already registered" error.
+      if (!existingUsers[0].email_verified) {
+        return res.status(409).json({
+          error: "This email is already registered but not verified. Please verify it.",
+          code: "EMAIL_NOT_VERIFIED",
+          email: normalizedEmail,
+        });
+      }
       return res.status(400).json({ error: "Email already registered" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
     const [insertResult] = await db.promise().query(
       `INSERT INTO users
-        (name, email, password, phone, address, role, signup_provider, password_set_by_user, failed_login_attempts, locked_until)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+        (name, email, password, phone, address, role, signup_provider, password_set_by_user, email_verified, failed_login_attempts, locked_until)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, FALSE, 0, NULL)`,
       [
         name,
         normalizedEmail,
@@ -507,27 +540,126 @@ router.post("/register", async (req, res) => {
       ],
     );
 
-    const userRecord = {
-      id: insertResult.insertId,
-      name,
-      email: normalizedEmail,
-      phone: phone || null,
-      address: address || null,
-      profile_image: null,
-      signup_provider: "password",
-      password_set_by_user: true,
-      role: "customer",
-    };
-
-    const authSession = await issueAuthSession(req, res, userRecord, "password");
+    // Email the verification code. The account stays inactive (cannot log in)
+    // until the code is confirmed at POST /verify-email.
+    const { code, expiresInMinutes } = await createVerificationCode(
+      db.promise(),
+      insertResult.insertId,
+      normalizedEmail,
+    );
+    void sendVerificationCodeEmail(normalizedEmail, name, code, expiresInMinutes);
 
     res.setHeader("Cache-Control", "no-store");
     return res.status(201).json({
-      message: "User registered successfully",
+      message: "We've sent a 6-digit verification code to your email.",
+      requiresVerification: true,
+      email: normalizedEmail,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Verify email with the 6-digit code, then sign the user in
+router.post("/verify-email", async (req, res) => {
+  try {
+    const parsedBody = parsePayload(verifyEmailSchema, req.body || {});
+    if (!parsedBody.ok) {
+      return res.status(400).json({ error: parsedBody.error });
+    }
+
+    const normalizedEmail = String(parsedBody.data.email).trim().toLowerCase();
+    const result = await verifyCode(db.promise(), normalizedEmail, parsedBody.data.code);
+
+    if (!result.valid) {
+      return res.status(400).json({ error: result.reason, code: "INVALID_CODE" });
+    }
+
+    await db
+      .promise()
+      .query("UPDATE users SET email_verified = TRUE WHERE id = ?", [result.userId]);
+
+    const [users] = await db.promise().query(
+      "SELECT id, name, email, phone, address, profile_image, role, is_active, signup_provider, password_set_by_user FROM users WHERE id = ? LIMIT 1",
+      [result.userId],
+    );
+    const user = users[0];
+
+    if (!user || !user.is_active) {
+      return res.status(403).json({ error: "Account is not available. Please contact support." });
+    }
+
+    if (String(user.role || "").trim().toLowerCase() === "admin") {
+      return res.status(403).json({
+        error: "Admin accounts must use the admin login page.",
+        isAdmin: true,
+        redirect: "/admin/login",
+      });
+    }
+
+    const authSession = await issueAuthSession(req, res, user, "password");
+
+    void recordLoginHistorySafely({
+      req,
+      userId: user.id,
+      attemptedEmail: user.email,
+      status: "success",
+      provider: "password",
+    });
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json({
+      message: "Email verified successfully",
       accessToken: authSession.accessToken,
       accessTokenExpiresIn: authSession.accessTokenExpiresIn,
-      user: buildUserResponse(userRecord),
+      user: buildUserResponse(user),
     });
+  } catch (error) {
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Resend the email verification code (per-user cooldown prevents email-bombing)
+router.post("/resend-verification", async (req, res) => {
+  try {
+    const parsedBody = parsePayload(resendVerificationSchema, req.body || {});
+    if (!parsedBody.ok) {
+      return res.status(400).json({ error: parsedBody.error });
+    }
+
+    const normalizedEmail = String(parsedBody.data.email).trim().toLowerCase();
+    const [users] = await db.promise().query(
+      "SELECT id, name, email_verified FROM users WHERE email = ? LIMIT 1",
+      [normalizedEmail],
+    );
+
+    // Generic response so this endpoint can't be used to probe which emails exist.
+    const genericOk = () =>
+      res.status(200).json({
+        message: "If that account exists and is unverified, a new code has been sent.",
+      });
+
+    if (!users.length || users[0].email_verified) {
+      return genericOk();
+    }
+
+    const user = users[0];
+    const wait = await secondsUntilResendAllowed(db.promise(), user.id);
+    if (wait > 0) {
+      return res.status(429).json({
+        error: `Please wait ${wait}s before requesting another code.`,
+        retryAfterSeconds: wait,
+      });
+    }
+
+    const { code, expiresInMinutes } = await createVerificationCode(
+      db.promise(),
+      user.id,
+      normalizedEmail,
+    );
+    void sendVerificationCodeEmail(normalizedEmail, user.name, code, expiresInMinutes);
+
+    return genericOk();
   } catch (error) {
     return res.status(500).json({ error: "Server error" });
   }
@@ -650,6 +782,26 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    // Block sign-in until the email is verified. Existing accounts were
+    // grandfathered as verified by the migration, so only new, unverified
+    // self-signups are gated here.
+    if (!user.email_verified) {
+      void recordLoginHistorySafely({
+        req,
+        userId: user.id,
+        attemptedEmail: user.email,
+        status: "failed",
+        provider: "password",
+        failureReason: "Email not verified",
+      });
+
+      return res.status(403).json({
+        error: "Please verify your email before logging in. Check your inbox for the verification code.",
+        code: "EMAIL_NOT_VERIFIED",
+        email: user.email,
+      });
+    }
+
     const authSession = await issueAuthSession(req, res, user, "password");
 
     void recordLoginHistorySafely({
@@ -725,7 +877,7 @@ router.post("/google", async (req, res) => {
     const displayName = payload.name || email.split("@")[0] || "Google User";
 
     const [results] = await db.promise().query(
-      "SELECT id, name, email, phone, address, profile_image, role, is_active, signup_provider, password_set_by_user FROM users WHERE email = ? LIMIT 1",
+      "SELECT id, name, email, phone, address, profile_image, role, is_active, signup_provider, password_set_by_user, email_verified FROM users WHERE email = ? LIMIT 1",
       [email],
     );
 
@@ -762,6 +914,14 @@ router.post("/google", async (req, res) => {
 
       await resetLoginFailures(existingUser.id);
 
+      // Google has verified this email — clear any unverified flag so a user who
+      // signed up with a password but never verified can still get in via Google.
+      if (!existingUser.email_verified) {
+        await db
+          .promise()
+          .query("UPDATE users SET email_verified = TRUE WHERE id = ?", [existingUser.id]);
+      }
+
       const authSession = await issueAuthSession(req, res, existingUser, "google");
 
       void recordLoginHistorySafely({
@@ -790,8 +950,8 @@ router.post("/google", async (req, res) => {
 
     const [insertResult] = await db.promise().query(
       `INSERT INTO users
-        (name, email, password, role, signup_provider, password_set_by_user, failed_login_attempts, locked_until)
-       VALUES (?, ?, ?, ?, ?, ?, 0, NULL)`,
+        (name, email, password, role, signup_provider, password_set_by_user, email_verified, failed_login_attempts, locked_until)
+       VALUES (?, ?, ?, ?, ?, ?, TRUE, 0, NULL)`,
       [displayName, email, randomPassword, "customer", "google", false],
     );
 

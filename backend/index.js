@@ -367,6 +367,8 @@ if (ENABLE_RATE_LIMITS) {
   app.use("/api/auth/login", authLimiter);
   app.use("/api/auth/register", authLimiter);
   app.use("/api/auth/google", authLimiter);
+  app.use("/api/auth/verify-email", authLimiter);
+  app.use("/api/auth/resend-verification", authLimiter);
   app.use("/api/auth/refresh", refreshLimiter);
   app.use("/api/auth/refresh-token", refreshLimiter);
   app.use("/api/admin/login", authLimiter);

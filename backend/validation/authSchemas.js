@@ -54,12 +54,23 @@ const resetPasswordSchema = z.object({
   newPassword: strongPassword,
 }).strict();
 
+const verifyEmailSchema = z.object({
+  email: z.string().trim().email().max(120),
+  code: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code"),
+}).strict();
+
+const resendVerificationSchema = z.object({
+  email: z.string().trim().email().max(120),
+}).strict();
+
 module.exports = {
   registerSchema,
   loginSchema,
   googleLoginSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  verifyEmailSchema,
+  resendVerificationSchema,
   strongPassword,
   adminResetPasswordSchema,
 };

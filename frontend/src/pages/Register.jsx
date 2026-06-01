@@ -126,6 +126,11 @@ const Register = () => {
 
     const result = await registerUser(payload);
     if (result.success) {
+      // New accounts must confirm a 6-digit code emailed to them before they're active.
+      if (result.requiresVerification) {
+        navigate("/verify-email", { state: { email: result.email || payload.email } });
+        return;
+      }
       navigate("/");
       return;
     }

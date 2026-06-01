@@ -129,6 +129,12 @@ const Login = () => {
       return;
     }
 
+    // Account exists but email isn't verified yet — send them to verify it.
+    if (result.requiresVerification) {
+      navigate("/verify-email", { state: { email: result.email || values.email } });
+      return;
+    }
+
     if (result.isAdmin) {
       setGeneralError(result.message || "Admin accounts must use the admin login page.");
       setTimeout(() => {

@@ -388,6 +388,16 @@ export const AuthProvider = ({ children }) => {
     try {
       setError(null);
       const response = await userAPI.register(userData);
+
+      // New flow: registration emails a 6-digit code instead of logging in.
+      if (response.requiresVerification) {
+        return {
+          success: true,
+          requiresVerification: true,
+          email: response.email || userData.email,
+        };
+      }
+
       if (response.accessToken || response.token) {
         const profileUser = await refreshProfile();
         if (!profileUser) {
@@ -402,9 +412,53 @@ export const AuthProvider = ({ children }) => {
       setError(message);
       return { success: false, message };
     } catch (err) {
-      const message = err.response?.data?.error || "Registration failed";
+      const responseData = err.response?.data || {};
+      // Existing-but-unverified account: send them to the verification screen.
+      if (responseData.code === "EMAIL_NOT_VERIFIED") {
+        return {
+          success: true,
+          requiresVerification: true,
+          email: responseData.email || userData.email,
+        };
+      }
+      const message = responseData.error || "Registration failed";
       setError(message);
       return { success: false, message };
+    }
+  };
+
+  const verifyEmail = async (email, code) => {
+    try {
+      setError(null);
+      const response = await userAPI.verifyEmail({ email, code });
+      if (response.accessToken || response.token) {
+        const profileUser = await refreshProfile();
+        if (!profileUser) {
+          applyUserState(response.user || { email });
+        }
+        return { success: true };
+      }
+      const message = response.error || "Verification failed";
+      setError(message);
+      return { success: false, message };
+    } catch (err) {
+      const message = err.response?.data?.error || "Verification failed";
+      setError(message);
+      return { success: false, message };
+    }
+  };
+
+  const resendVerification = async (email) => {
+    try {
+      const response = await userAPI.resendVerification(email);
+      return { success: true, message: response.message };
+    } catch (err) {
+      const data = err.response?.data || {};
+      return {
+        success: false,
+        message: data.error || "Could not resend the code. Please try again.",
+        retryAfterSeconds: data.retryAfterSeconds,
+      };
     }
   };
 
@@ -444,6 +498,15 @@ export const AuthProvider = ({ children }) => {
       return { success: false, message };
     } catch (err) {
       const responseData = err.response?.data || {};
+      // Unverified account trying to log in — route to the verification screen.
+      if (responseData.code === "EMAIL_NOT_VERIFIED") {
+        return {
+          success: false,
+          requiresVerification: true,
+          email: responseData.email || email,
+          message: responseData.error || "Please verify your email first.",
+        };
+      }
       const message = responseData.error || "Login failed";
       const isAdmin = Boolean(responseData.isAdmin);
       setError(message);
@@ -555,6 +618,8 @@ export const AuthProvider = ({ children }) => {
     login,
     loginWithGoogle,
     register,
+    verifyEmail,
+    resendVerification,
     logout,
     forgotPassword,
     resetPassword,

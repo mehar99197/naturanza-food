@@ -152,6 +152,7 @@ const NOINDEX_PREFIXES = [
   "/login",
   "/register",
   "/signup",
+  "/verify-email",
   "/forgot-password",
   "/reset-password",
   "/auth",

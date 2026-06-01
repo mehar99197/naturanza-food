@@ -684,9 +684,64 @@ const sendPaymentStatusEmail = async ({
   return sendEmail({ to: email, subject, html, text });
 };
 
+/**
+ * Send a 6-digit email verification code for new self-signup accounts.
+ */
+const sendVerificationCodeEmail = async (email, userName, code, expiryMinutes = 15) => {
+  const greetingName = userName ? ` ${userName}` : "";
+  const html = `
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f7f4;padding:32px 0;font-family:Arial,Helvetica,sans-serif;">
+    <tr><td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:520px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:linear-gradient(135deg,#15803d,#047857);padding:24px 28px;">
+          <h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:700;">Naturanza Food</h1>
+        </td></tr>
+        <tr><td style="padding:28px;">
+          <p style="margin:0 0 12px;color:#1f2937;font-size:15px;">Hi${greetingName},</p>
+          <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">
+            Use the verification code below to confirm your email and activate your Naturanza Food account.
+          </p>
+          <div style="text-align:center;margin:24px 0;">
+            <div style="display:inline-block;background:#f0fdf4;border:2px dashed #16a34a;border-radius:12px;padding:18px 32px;">
+              <span style="font-size:34px;font-weight:800;letter-spacing:10px;color:#065f46;">${code}</span>
+            </div>
+          </div>
+          <p style="margin:0 0 6px;color:#6b7280;font-size:13px;text-align:center;">
+            This code expires in ${expiryMinutes} minutes.
+          </p>
+          <p style="margin:18px 0 0;color:#9ca3af;font-size:12px;line-height:1.6;">
+            If you didn't try to create a Naturanza Food account, you can safely ignore this email.
+          </p>
+        </td></tr>
+        <tr><td style="background:#f9fafb;padding:16px 28px;text-align:center;color:#9ca3af;font-size:11px;">
+          &copy; ${new Date().getFullYear()} Naturanza Food. Pure Nature. Pure Health.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>`;
+
+  const text = `Hi${greetingName},
+
+Your Naturanza Food verification code is: ${code}
+
+This code expires in ${expiryMinutes} minutes.
+
+If you didn't try to create an account, you can ignore this email.
+
+- Naturanza Food Team`;
+
+  return sendEmail({
+    to: email,
+    subject: `${code} is your Naturanza Food verification code`,
+    html,
+    text,
+  });
+};
+
 module.exports = {
   sendEmail,
   sendPasswordResetEmail,
+  sendVerificationCodeEmail,
   sendNewsletterWelcomeEmail,
   sendNewsletterBroadcastEmail,
   sendPaymentStatusEmail,

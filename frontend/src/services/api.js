@@ -579,6 +579,21 @@ export const userAPI = {
     return response.data;
   },
 
+  verifyEmail: async ({ email, code }) => {
+    const response = await axiosInstance.post("/auth/verify-email", { email, code });
+    const nextToken = response.data.accessToken || response.data.token;
+    if (nextToken) {
+      setUserAccessToken(nextToken);
+      emitAuthSessionSync("user-verify-email");
+    }
+    return response.data;
+  },
+
+  resendVerification: async (email) => {
+    const response = await axiosInstance.post("/auth/resend-verification", { email });
+    return response.data;
+  },
+
   login: async (credentials) => {
     const response = await axiosInstance.post("/auth/login", credentials);
     const nextToken = response.data.accessToken || response.data.token;
