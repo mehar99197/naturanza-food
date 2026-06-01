@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Info, Sparkles, Tag, X } from "lucide-react";
 import { announcementAPI } from "@/services/api";
 
 const DISMISSED_STORAGE_KEY = "naturanza:announcements:dismissed";
 const ROTATION_INTERVAL_MS = 5000;
-const BAR_HEIGHT = "40px";
 
 const typeStyles = {
   info: {
@@ -133,17 +132,30 @@ export default function AnnouncementBar() {
     return announcements.length > 0;
   }, [announcements.length, dismissed, error, loading]);
 
+  const barRef = useRef(null);
+
   useEffect(() => {
-    if (typeof document === "undefined") {
+    if (typeof document === "undefined") return undefined;
+
+    const isVisible = shouldRender && !loading && !dismissed && announcements.length > 0;
+    if (!isVisible) {
+      document.documentElement.style.setProperty("--announcement-bar-height", "0px");
       return undefined;
     }
 
-    document.documentElement.style.setProperty(
-      "--announcement-bar-height",
-      shouldRender && !loading && !dismissed && announcements.length > 0 ? BAR_HEIGHT : "0px",
-    );
+    const el = barRef.current;
+    if (!el) return undefined;
 
+    const sync = () => {
+      const h = el.getBoundingClientRect().height;
+      document.documentElement.style.setProperty("--announcement-bar-height", `${h}px`);
+    };
+
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
     return () => {
+      ro.disconnect();
       document.documentElement.style.setProperty("--announcement-bar-height", "0px");
     };
   }, [shouldRender, loading, dismissed, announcements.length]);
@@ -203,6 +215,7 @@ export default function AnnouncementBar() {
         @media (prefers-reduced-motion: reduce) { .nz-marquee-track { animation: none; } }
       `}</style>
       <div
+        ref={barRef}
         className={`flex min-h-[38px] w-full items-center gap-1.5 border-b px-3 shadow-[0_4px_12px_rgba(15,64,28,0.10)] backdrop-blur-md sm:gap-2.5 sm:px-4 md:min-h-[40px] md:gap-3 ${presentation.shell} rounded-none border-x-0 border-t-0`}
       >
         {/* Icon — hidden on xs so title pill + marquee + X have room */}
