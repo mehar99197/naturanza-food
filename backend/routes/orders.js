@@ -1556,18 +1556,23 @@ router.put('/:id/status', authenticateToken, isAdmin, restrictBody('status', 'pa
       });
     }
 
-    await insertNotification(
-      connection,
-      order.user_id,
-      'order_status_changed',
-      'Order Status Updated',
-      `Your order #${orderId} status is now ${nextStatusRaw}.`,
-      {
-        order_id: orderId,
-        status: nextStatusRaw,
-        payment_status: nextPaymentStatus,
-      },
-    );
+    // Only notify the customer when the order status actually changed — saving
+    // the same status again must not spam a duplicate notification.
+    const orderStatusChanged = nextStatusRaw !== String(order.status || '').toLowerCase();
+    if (orderStatusChanged) {
+      await insertNotification(
+        connection,
+        order.user_id,
+        'order_status_changed',
+        'Order Status Updated',
+        `Your order #${orderId} status is now ${nextStatusRaw}.`,
+        {
+          order_id: orderId,
+          status: nextStatusRaw,
+          payment_status: nextPaymentStatus,
+        },
+      );
+    }
 
     await connection.commit();
     res.json({ message: 'Order status updated successfully' });

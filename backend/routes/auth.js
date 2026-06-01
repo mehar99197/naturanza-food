@@ -1594,6 +1594,37 @@ router.patch("/notifications/read-all", authenticateToken, restrictBody(), (req,
   );
 });
 
+// Delete a single notification
+router.delete("/notifications/:id", authenticateToken, restrictBody(), (req, res) => {
+  db.query(
+    "DELETE FROM notifications WHERE id = ? AND user_id = ?",
+    [req.params.id, req.user.id],
+    (err, result) => {
+      if (err) {
+        return res.status(500).json({ error: "Error deleting notification" });
+      }
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      res.json({ message: "Notification deleted" });
+    },
+  );
+});
+
+// Clear notifications — all by default, or only read ones with ?read=true
+router.delete("/notifications", authenticateToken, restrictBody(), (req, res) => {
+  const readOnly = String(req.query.read || "").toLowerCase() === "true";
+  const sql = readOnly
+    ? "DELETE FROM notifications WHERE user_id = ? AND is_read = TRUE"
+    : "DELETE FROM notifications WHERE user_id = ?";
+  db.query(sql, [req.user.id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ error: "Error clearing notifications" });
+    }
+    res.json({ message: "Notifications cleared", deleted: result.affectedRows });
+  });
+});
+
 // Get notification mute settings
 router.get("/notifications/settings", authenticateToken, (req, res) => {
   db.query(

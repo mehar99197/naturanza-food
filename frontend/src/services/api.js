@@ -738,6 +738,20 @@ export const userAPI = {
     return response.data;
   },
 
+  deleteNotification: async (notificationId) => {
+    const response = await axiosInstance.delete(
+      `/auth/notifications/${notificationId}`,
+    );
+    return response.data;
+  },
+
+  clearNotifications: async ({ readOnly = false } = {}) => {
+    const response = await axiosInstance.delete("/auth/notifications", {
+      params: readOnly ? { read: "true" } : {},
+    });
+    return response.data;
+  },
+
   getNotificationSettings: async () => {
     const response = await axiosInstance.get("/auth/notifications/settings");
     return response.data;
@@ -1303,6 +1317,20 @@ export const adminAPI = {
 
   markAllNotificationsRead: async () => {
     const response = await axiosInstance.patch("/auth/notifications/read-all");
+    return response.data;
+  },
+
+  deleteNotification: async (notificationId) => {
+    const response = await axiosInstance.delete(
+      `/auth/notifications/${notificationId}`,
+    );
+    return response.data;
+  },
+
+  clearNotifications: async ({ readOnly = false } = {}) => {
+    const response = await axiosInstance.delete("/auth/notifications", {
+      params: readOnly ? { read: "true" } : {},
+    });
     return response.data;
   },
 
