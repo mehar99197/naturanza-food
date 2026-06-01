@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Loader2, Newspaper } from 'lucide-react';
+import { Loader2, Newspaper, Clock3, CalendarDays, ArrowRight } from 'lucide-react';
 import { SEO } from '@/components/SEO';
 import { BlogStructuredData } from '@/components/StructuredData';
 import { blogAPI } from '@/services/api';
 import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 import { SITE_URL } from '@/config/site';
 
-const CoverImage = ({ post, className, fallbackEmoji = '📝', emojiClass = 'text-4xl' }) => {
+const CoverImage = ({ post, className, emojiClass = 'text-4xl' }) => {
   if (post.image) {
     return (
       <img
@@ -20,10 +20,21 @@ const CoverImage = ({ post, className, fallbackEmoji = '📝', emojiClass = 'tex
   }
   return (
     <div className={`${className} bg-gradient-to-br from-green-100 to-emerald-50 flex items-center justify-center`}>
-      <span className={emojiClass}>{fallbackEmoji}</span>
+      <span className={emojiClass}>🌿</span>
     </div>
   );
 };
+
+const MetaRow = ({ post, className = '' }) => (
+  <div className={`flex items-center gap-3 text-[13px] text-slate-500 ${className}`}>
+    <span className="inline-flex items-center gap-1">
+      <Clock3 className="h-3.5 w-3.5" /> {post.readTime || '—'}
+    </span>
+    <span className="inline-flex items-center gap-1">
+      <CalendarDays className="h-3.5 w-3.5" /> {post.date}
+    </span>
+  </div>
+);
 
 export function Blog() {
   const [posts, setPosts] = useState([]);
@@ -58,7 +69,7 @@ export function Blog() {
 
   const featuredPosts = useMemo(() => posts.filter((p) => p.featured), [posts]);
   const recentPosts = useMemo(
-    () => [...posts].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 3),
+    () => [...posts].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 4),
     [posts],
   );
   const filteredPosts = useMemo(
@@ -76,55 +87,53 @@ export function Blog() {
       />
       <BlogStructuredData posts={posts} />
 
-      <div className="min-h-screen bg-stone-50">
-        {/* Hero */}
-        <div className="bg-gradient-to-r from-green-700 to-emerald-600 text-white py-14 sm:py-16">
-          <div className="container mx-auto px-4">
-            <h1 className="text-3xl md:text-5xl font-bold mb-3">Naturanza Food Blog</h1>
-            <p className="text-base sm:text-xl opacity-90 max-w-2xl">
+      <main className="pt-20 sm:pt-24 pb-14 min-h-screen bg-[#faf8f3]">
+        <div className="container-custom">
+          {/* Hero */}
+          <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-green-800 via-green-700 to-emerald-600 px-6 py-10 sm:px-10 sm:py-14 text-white shadow-[0_18px_48px_rgba(7,43,24,0.18)]">
+            <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-white/10 blur-2xl" />
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur-sm">
+              <Newspaper className="h-3.5 w-3.5" /> Naturanza Journal
+            </span>
+            <h1 className="mt-4 font-display text-3xl md:text-5xl font-bold leading-tight">Naturanza Food Blog</h1>
+            <p className="mt-3 max-w-2xl text-base sm:text-lg text-green-50/90">
               Insights on pure honey, ispaghol husk, and natural living — tips you can actually use.
             </p>
-          </div>
-        </div>
+          </section>
 
-        <div className="container mx-auto px-4 py-10 sm:py-12">
           {loading ? (
             <div className="flex justify-center py-20">
-              <Loader2 className="w-7 h-7 text-green-600 animate-spin" />
+              <Loader2 className="h-7 w-7 animate-spin text-green-600" />
             </div>
           ) : error ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700 max-w-xl">{error}</div>
+            <div className="mt-8 max-w-xl rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">{error}</div>
           ) : posts.length === 0 ? (
-            <div className="rounded-2xl border border-green-100 bg-white p-12 text-center text-slate-500">
-              <Newspaper className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+            <div className="mt-10 rounded-2xl border border-green-100 bg-white p-12 text-center text-slate-500">
+              <Newspaper className="mx-auto mb-3 h-10 w-10 text-slate-300" />
               <p className="font-semibold text-slate-700">No articles yet</p>
-              <p className="text-sm mt-1">Check back soon for tips and guides.</p>
+              <p className="mt-1 text-sm">Check back soon for tips and guides.</p>
             </div>
           ) : (
             <>
               {/* Featured */}
               {featuredPosts.length > 0 && (
-                <section className="mb-14">
-                  <h2 className="text-2xl font-bold text-gray-800 mb-6">Featured Articles</h2>
-                  <div className="grid md:grid-cols-2 gap-8">
+                <section className="mt-10 sm:mt-12">
+                  <h2 className="mb-5 text-xl sm:text-2xl font-bold text-[#2d3a2d]">Featured Articles</h2>
+                  <div className="grid gap-6 md:grid-cols-2">
                     {featuredPosts.map((post) => (
                       <Link
                         key={post.id}
                         to={`/blog/${post.slug}`}
-                        className="group block bg-white rounded-2xl overflow-hidden shadow-md hover:shadow-xl transition-shadow"
+                        className="group flex flex-col overflow-hidden rounded-2xl border border-green-100 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg"
                       >
-                        <CoverImage post={post} className="h-56 w-full" fallbackEmoji="🍯" emojiClass="text-6xl" />
-                        <div className="p-6">
-                          <span className="text-green-600 text-sm font-semibold">{post.category}</span>
-                          <h3 className="text-xl font-bold mt-2 group-hover:text-green-600 transition-colors">
+                        <CoverImage post={post} className="h-52 w-full" emojiClass="text-6xl" />
+                        <div className="flex flex-1 flex-col p-5 sm:p-6">
+                          <span className="text-xs font-bold uppercase tracking-wide text-green-600">{post.category}</span>
+                          <h3 className="mt-2 text-lg sm:text-xl font-bold text-slate-900 transition-colors group-hover:text-green-700 line-clamp-2">
                             {post.title}
                           </h3>
-                          <p className="text-gray-600 mt-2 line-clamp-2">{post.excerpt}</p>
-                          <div className="flex items-center mt-4 text-gray-500 text-sm">
-                            <span>{post.readTime}</span>
-                            <span className="mx-2">•</span>
-                            <span>{post.date}</span>
-                          </div>
+                          <p className="mt-2 flex-1 text-sm text-slate-600 line-clamp-2">{post.excerpt}</p>
+                          <MetaRow post={post} className="mt-4" />
                         </div>
                       </Link>
                     ))}
@@ -133,14 +142,14 @@ export function Blog() {
               )}
 
               {/* Category filter */}
-              <section className="mb-10">
+              <section className="mt-12">
                 <div className="flex flex-wrap gap-2.5">
                   <button
                     onClick={() => setSelectedCategory('all')}
-                    className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
                       selectedCategory === 'all'
-                        ? 'bg-green-600 text-white'
-                        : 'bg-white text-gray-700 hover:bg-green-50 border border-gray-200'
+                        ? 'bg-green-600 text-white shadow-sm'
+                        : 'border border-green-100 bg-white text-slate-600 hover:bg-green-50'
                     }`}
                   >
                     All Posts ({posts.length})
@@ -149,10 +158,10 @@ export function Blog() {
                     <button
                       key={cat.name}
                       onClick={() => setSelectedCategory(cat.name)}
-                      className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
                         selectedCategory === cat.name
-                          ? 'bg-green-600 text-white'
-                          : 'bg-white text-gray-700 hover:bg-green-50 border border-gray-200'
+                          ? 'bg-green-600 text-white shadow-sm'
+                          : 'border border-green-100 bg-white text-slate-600 hover:bg-green-50'
                       }`}
                     >
                       {cat.name} ({cat.count})
@@ -162,53 +171,58 @@ export function Blog() {
               </section>
 
               {/* All posts */}
-              <section className="mb-14">
-                <h2 className="text-2xl font-bold text-gray-800 mb-6">All Articles</h2>
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-7">
+              <section className="mt-7">
+                <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                   {filteredPosts.map((post) => (
                     <Link
                       key={post.id}
                       to={`/blog/${post.slug}`}
-                      className="group block bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-shadow"
+                      className="group flex flex-col overflow-hidden rounded-2xl border border-green-100 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg"
                     >
-                      <CoverImage post={post} className="h-44 w-full" />
-                      <div className="p-5">
-                        <span className="text-green-600 text-xs font-semibold">{post.category}</span>
-                        <h3 className="text-lg font-bold mt-2 group-hover:text-green-600 transition-colors line-clamp-2">
+                      <CoverImage post={post} className="h-40 w-full" />
+                      <div className="flex flex-1 flex-col p-5">
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-green-600">{post.category}</span>
+                        <h3 className="mt-1.5 text-base font-bold text-slate-900 transition-colors group-hover:text-green-700 line-clamp-2">
                           {post.title}
                         </h3>
-                        <p className="text-gray-600 text-sm mt-2 line-clamp-2">{post.excerpt}</p>
-                        <div className="flex items-center mt-3 text-gray-500 text-xs">
-                          <span>{post.readTime}</span>
-                          <span className="mx-2">•</span>
-                          <span>{post.date}</span>
-                        </div>
+                        <p className="mt-2 flex-1 text-sm text-slate-600 line-clamp-2">{post.excerpt}</p>
+                        <MetaRow post={post} className="mt-3" />
                       </div>
                     </Link>
                   ))}
                 </div>
+                {filteredPosts.length === 0 && (
+                  <p className="rounded-2xl border border-green-100 bg-white px-4 py-10 text-center text-slate-500">
+                    No articles in this category.
+                  </p>
+                )}
               </section>
 
               {/* Recent */}
               {recentPosts.length > 0 && (
-                <section className="bg-white rounded-2xl p-6 shadow-sm">
-                  <h3 className="text-xl font-bold text-gray-800 mb-4">Recent Posts</h3>
-                  <div className="space-y-3.5">
+                <section className="mt-12 rounded-2xl border border-green-100 bg-white p-6 shadow-sm">
+                  <h3 className="mb-4 text-lg font-bold text-[#2d3a2d]">Recent Posts</h3>
+                  <ul className="divide-y divide-slate-100">
                     {recentPosts.map((post) => (
-                      <Link key={post.id} to={`/blog/${post.slug}`} className="block group">
-                        <h4 className="font-medium text-gray-800 group-hover:text-green-600 transition-colors">
-                          {post.title}
-                        </h4>
-                        <span className="text-gray-500 text-sm">{post.date}</span>
-                      </Link>
+                      <li key={post.id}>
+                        <Link to={`/blog/${post.slug}`} className="group flex items-center justify-between gap-3 py-3">
+                          <div className="min-w-0">
+                            <h4 className="truncate font-medium text-slate-800 transition-colors group-hover:text-green-700">
+                              {post.title}
+                            </h4>
+                            <span className="text-sm text-slate-500">{post.date}</span>
+                          </div>
+                          <ArrowRight className="h-4 w-4 flex-shrink-0 text-slate-300 transition-colors group-hover:text-green-600" />
+                        </Link>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 </section>
               )}
             </>
           )}
         </div>
-      </div>
+      </main>
     </>
   );
 }

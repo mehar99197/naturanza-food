@@ -123,10 +123,10 @@ export function BlogPost() {
         image={post.image}
       />
 
-      <div className="min-h-screen bg-stone-50">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-green-700 to-emerald-600 text-white py-12 sm:py-16">
-          <div className="container mx-auto px-4">
+      <div className="min-h-screen bg-[#faf8f3]">
+        {/* Header — pt clears the fixed navbar */}
+        <div className="bg-gradient-to-br from-green-800 via-green-700 to-emerald-600 text-white pt-24 sm:pt-28 pb-10 sm:pb-14">
+          <div className="container-custom">
             <Link to="/blog" className="inline-flex items-center text-white/80 hover:text-white mb-4">
               ← Back to Blog
             </Link>
@@ -147,7 +147,7 @@ export function BlogPost() {
         </div>
 
         {/* Content */}
-        <div className="container mx-auto px-4 py-10 sm:py-12">
+        <div className="container-custom py-10 sm:py-12">
           <div className="max-w-3xl mx-auto">
             {coverImage && (
               <img
