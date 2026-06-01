@@ -28,8 +28,25 @@ const statusClass = {
 
 const paymentClass = {
   pending: "bg-amber-100 text-amber-700",
+  partial: "bg-blue-100 text-blue-700",
   paid: "bg-emerald-100 text-emerald-700",
   failed: "bg-red-100 text-red-700",
+};
+
+// COD orders settle in two stages (advance upfront, then cash on delivery), so
+// their payment statuses get explicit labels — "paid" must mean the FULL cash
+// was collected, never just the advance.
+const COD_PAYMENT_LABELS = {
+  pending: "Pending — no payment yet",
+  partial: "Advance paid — COD pending",
+  paid: "Fully collected (COD received)",
+  failed: "Failed / not collected",
+};
+const DEFAULT_PAYMENT_LABELS = {
+  pending: "Pending",
+  partial: "Partial",
+  paid: "Paid",
+  failed: "Failed",
 };
 
 const formatDateTime = (value) => {
@@ -477,16 +494,34 @@ export function AdminOrders() {
                       }
                       className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-green-500 focus:outline-none"
                     >
-                      {[
-                        "pending",
-                        "paid",
-                        "failed",
-                      ].map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
+                      {(() => {
+                        const isCod =
+                          String(selectedOrder.payment_method || "").toLowerCase() === "cod";
+                        const labels = isCod ? COD_PAYMENT_LABELS : DEFAULT_PAYMENT_LABELS;
+                        // COD exposes the advance ("partial") stage; prepaid doesn't.
+                        const options = isCod
+                          ? ["pending", "partial", "paid", "failed"]
+                          : ["pending", "paid", "failed"];
+                        // Always keep the order's current status selectable.
+                        if (!options.includes(statusForm.payment_status)) {
+                          options.push(statusForm.payment_status);
+                        }
+                        return options.map((status) => (
+                          <option key={status} value={status}>
+                            {labels[status] || status}
+                          </option>
+                        ));
+                      })()}
                     </select>
+                    {String(selectedOrder.payment_method || "").toLowerCase() === "cod" ? (
+                      <p className="mt-1.5 text-[11px] font-normal normal-case leading-snug tracking-normal text-gray-500">
+                        COD order: customer pays a small advance, the rest is collected on delivery.
+                        Set <span className="font-semibold">Advance paid</span> once the advance is
+                        verified, and <span className="font-semibold">Fully collected</span> only after
+                        the rider returns the cash. Manage/verify these in the{" "}
+                        <span className="font-semibold text-green-700">Payments</span> section.
+                      </p>
+                    ) : null}
                   </label>
 
                   <input
