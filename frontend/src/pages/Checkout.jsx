@@ -712,7 +712,7 @@ export function Checkout() {
   const discount = parseFloat(appliedCoupon?.discount_amount) || 0;
   const selectedCityData = shippingCities.find(c => c.city_name === shippingData.city);
   const freeShippingThreshold = Number(settings.shippingFree) || 5000;
-  const isShippingFree = (subtotal - discount) >= freeShippingThreshold;
+  const isShippingFree = paymentMethod !== 'cod' && (subtotal - discount) >= freeShippingThreshold;
   const deliveryFee = (selectedCityData && !isShippingFree) ? parseInt(selectedCityData.fee, 10) || 0 : 0;
   const hasDeliveryFee = selectedCityData !== undefined;
   const finalTotal = subtotal - discount + deliveryFee;

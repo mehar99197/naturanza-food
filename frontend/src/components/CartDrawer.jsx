@@ -240,7 +240,7 @@ export function CartDrawer() {
  {/* Footer */}
  {items.length > 0 && (
  <div className="shrink-0 border-t border-slate-200/80 bg-white/92 p-4 backdrop-blur-xl sm:p-6">
- {/* Free shipping progress */}
+ {/* Free shipping progress — advance payment only (not COD) */}
  {(() => {
    const threshold = Number(settings.shippingFree) || 5000;
    const remaining = Math.max(0, threshold - normalizedTotalPrice);
@@ -250,12 +250,13 @@ export function CartDrawer() {
      <div className="mb-3.5 rounded-xl border border-emerald-200/60 bg-emerald-50/60 px-3 py-2.5">
        {qualified ? (
          <p className="text-[12px] font-semibold text-emerald-700 text-center">
-           🎉 You've unlocked free delivery!
+           🎉 Free delivery unlocked for advance payments!
          </p>
        ) : (
          <>
            <p className="mb-1.5 text-[11px] text-slate-500">
-             Add <span className="font-bold text-emerald-700">{formatPrice(remaining, settings.currency)}</span> more for <span className="font-semibold text-emerald-700">free delivery</span>
+             Add <span className="font-bold text-emerald-700">{formatPrice(remaining, settings.currency)}</span> more for <span className="font-semibold text-emerald-700">free delivery</span>{' '}
+             <span className="text-slate-400">(advance payment)</span>
            </p>
            <div className="h-1.5 w-full rounded-full bg-emerald-100 overflow-hidden">
              <div
