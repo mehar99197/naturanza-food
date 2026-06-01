@@ -483,8 +483,17 @@ export function AdminPaymentsExtensions() {
                   const isRejecting = rejectingId === verification.id;
 
                   const orderTotal = Number(verification.order_total || verification.amount || 0);
-                  const paidAmount = Number(verification.amount || 0);
-                  const pendingAmount = Math.max(0, orderTotal - paidAmount);
+                  // For a COD final-collection row, `amount` is the cash still to be
+                  // COLLECTED (the remaining COD) and the advance was already paid.
+                  // For every other stage, `amount` is what the customer already PAID
+                  // (the advance, or the full prepaid amount).
+                  const verificationAmount = Number(verification.amount || 0);
+                  const paidAmount = isFinalCollection
+                    ? Math.max(0, orderTotal - verificationAmount)
+                    : verificationAmount;
+                  const pendingAmount = isFinalCollection
+                    ? verificationAmount
+                    : Math.max(0, orderTotal - paidAmount);
                   const paymentMethodDisplay = verification.payment_method
                     ? (verification.payment_method === "jazzcash" ? "JazzCash" : verification.payment_method === "easypaisa" ? "EasyPaisa" : verification.payment_method === "cod" ? "Cash" : verification.payment_method)
                     : "-";
