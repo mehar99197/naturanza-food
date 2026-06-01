@@ -711,7 +711,9 @@ export function Checkout() {
   const subtotal = totalPrice;
   const discount = parseFloat(appliedCoupon?.discount_amount) || 0;
   const selectedCityData = shippingCities.find(c => c.city_name === shippingData.city);
-  const deliveryFee = selectedCityData ? parseInt(selectedCityData.fee, 10) || 0 : 0;
+  const freeShippingThreshold = Number(settings.shippingFree) || 5000;
+  const isShippingFree = (subtotal - discount) >= freeShippingThreshold;
+  const deliveryFee = (selectedCityData && !isShippingFree) ? parseInt(selectedCityData.fee, 10) || 0 : 0;
   const hasDeliveryFee = selectedCityData !== undefined;
   const finalTotal = subtotal - discount + deliveryFee;
   const payOnDeliveryAmount = Math.max(0, subtotal - discount);
@@ -2486,14 +2488,31 @@ export function Checkout() {
                     <span>Shipping</span>
                     <div className="flex flex-col items-end gap-0.5">
                       {hasDeliveryFee ? (
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-semibold text-emerald-700">
-                            {formatPrice(deliveryFee, settings.currency)}
-                          </span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium whitespace-nowrap">
-                            📦 Delivery to {shippingData.city}
-                          </span>
-                        </div>
+                        isShippingFree ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-emerald-600 line-through text-xs opacity-60">
+                              {formatPrice(parseInt(selectedCityData?.fee, 10) || 0, settings.currency)}
+                            </span>
+                            <span className="font-bold text-emerald-600">Free</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium whitespace-nowrap">
+                              🎉 Free delivery
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-end gap-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-semibold text-emerald-700">
+                                {formatPrice(deliveryFee, settings.currency)}
+                              </span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium whitespace-nowrap">
+                                📦 Delivery to {shippingData.city}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-slate-400">
+                              Free on orders above {formatPrice(freeShippingThreshold, settings.currency)}
+                            </span>
+                          </div>
+                        )
                       ) : (
                         <span className="font-semibold text-slate-400">—</span>
                       )}

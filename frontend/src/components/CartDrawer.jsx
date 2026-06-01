@@ -240,6 +240,34 @@ export function CartDrawer() {
  {/* Footer */}
  {items.length > 0 && (
  <div className="shrink-0 border-t border-slate-200/80 bg-white/92 p-4 backdrop-blur-xl sm:p-6">
+ {/* Free shipping progress */}
+ {(() => {
+   const threshold = Number(settings.shippingFree) || 5000;
+   const remaining = Math.max(0, threshold - normalizedTotalPrice);
+   const pct = Math.min(100, (normalizedTotalPrice / threshold) * 100);
+   const qualified = remaining === 0;
+   return (
+     <div className="mb-3.5 rounded-xl border border-emerald-200/60 bg-emerald-50/60 px-3 py-2.5">
+       {qualified ? (
+         <p className="text-[12px] font-semibold text-emerald-700 text-center">
+           🎉 You've unlocked free delivery!
+         </p>
+       ) : (
+         <>
+           <p className="mb-1.5 text-[11px] text-slate-500">
+             Add <span className="font-bold text-emerald-700">{formatPrice(remaining, settings.currency)}</span> more for <span className="font-semibold text-emerald-700">free delivery</span>
+           </p>
+           <div className="h-1.5 w-full rounded-full bg-emerald-100 overflow-hidden">
+             <div
+               className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-green-500 transition-all duration-500"
+               style={{ width: `${pct}%` }}
+             />
+           </div>
+         </>
+       )}
+     </div>
+   );
+ })()}
  <div className="mb-3.5 rounded-xl sm:rounded-2xl border border-emerald-200/70 bg-gradient-to-r from-white via-emerald-50/50 to-green-50/70 px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
  <div className="flex items-center justify-between gap-3">
  <div>

@@ -740,7 +740,8 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     discountAmount = Math.min(Math.max(0, discountAmount), subtotal);
 
     let shippingCost = 0;
-    if (city) {
+    const freeShippingThreshold = safeNumber(adminSettings.shippingFree, 5000);
+    if (city && subtotal - discountAmount < freeShippingThreshold) {
       const [[cityFee]] = await connection.query(
         `SELECT fee FROM city_delivery_fees WHERE city_name = ? AND is_active = TRUE LIMIT 1`,
         [city],
