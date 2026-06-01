@@ -27,6 +27,31 @@ const MUTED_TEXT = '#475569';
 const BORDER = '#e2e8f0';
 const DISCOUNT_RED = '#b91c1c';
 
+// Human label for the payment status shown on the invoice. COD orders settle in
+// two stages (advance upfront, then cash on delivery), so they get clearer text.
+const getPaymentStatusLabel = (status, isCod) => {
+  const s = String(status || 'pending').toLowerCase();
+  if (isCod) {
+    if (s === 'paid') return 'Paid (COD collected)';
+    if (s === 'partial') return 'Advance Paid';
+    if (s === 'failed') return 'Not Collected';
+    return 'Pending';
+  }
+  if (s === 'paid') return 'Paid';
+  if (s === 'partial') return 'Partial';
+  if (s === 'failed') return 'Failed';
+  return 'Pending';
+};
+
+// Badge palette for the payment status pill.
+const getPaymentStatusColors = (status) => {
+  const s = String(status || 'pending').toLowerCase();
+  if (s === 'paid') return { bg: SOFT_GREEN, border: '#86efac', text: PRIMARY_GREEN };
+  if (s === 'partial') return { bg: '#dbeafe', border: '#93c5fd', text: '#1d4ed8' };
+  if (s === 'failed') return { bg: '#fee2e2', border: '#fca5a5', text: DISCOUNT_RED };
+  return { bg: '#fef3c7', border: '#fcd34d', text: '#b45309' };
+};
+
 const safeNumber = (value, fallback = 0) => {
   const next = Number(value);
   return Number.isFinite(next) ? next : fallback;
@@ -203,6 +228,8 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
   const company = { ...COMPANY, ...(options.company || {}) };
   const amountPaid = options.amountPaid != null ? Number(options.amountPaid) || 0 : null;
   const balanceDue = options.balanceDue != null ? Number(options.balanceDue) || 0 : null;
+  const paymentStatus = options.paymentStatus ? String(options.paymentStatus).toLowerCase() : null;
+  const isCodOrder = Boolean(options.isCod);
 
   return new Promise((resolve, reject) => {
     try {
@@ -319,6 +346,27 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
           align: 'center',
           lineBreak: false,
         });
+
+      // Payment status pill (to the left of the order-status badge) — reflects
+      // the current payment_status so the invoice always matches what the admin
+      // set (Paid / Advance Paid / Pending / etc.).
+      if (paymentStatus) {
+        const payText = `Payment: ${getPaymentStatusLabel(paymentStatus, isCodOrder)}`;
+        const payColors = getPaymentStatusColors(paymentStatus);
+        const payBadgeWidth = doc.widthOfString(payText) + 24;
+        const payBadgeX = badgeX - 10 - payBadgeWidth;
+        doc.save().roundedRect(payBadgeX, badgeY, payBadgeWidth, badgeHeight, 10).fill(payColors.bg).restore();
+        doc.save().roundedRect(payBadgeX, badgeY, payBadgeWidth, badgeHeight, 10).stroke(payColors.border).restore();
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(9)
+          .fillColor(payColors.text)
+          .text(payText, payBadgeX, badgeY + 7, {
+            width: payBadgeWidth,
+            align: 'center',
+            lineBreak: false,
+          });
+      }
 
       let y = margin + 118;
       doc.moveTo(margin, y).lineTo(pageWidth - margin, y).stroke(BORDER);
@@ -579,8 +627,11 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         doc.moveTo(totalsX + 14, y - 6).lineTo(totalValueX, y - 6).stroke(BORDER);
         drawTotalRow('Amount Paid', formatMoney(amountPaid, currency), { color: MUTED_TEXT });
         const due = balanceDue != null ? balanceDue : Math.max(0, grandTotal - amountPaid);
+        const dueLabel = due > 0
+          ? (isCodOrder ? 'Balance Due (Cash on Delivery)' : 'Balance Due (Pending)')
+          : 'Balance Due';
         drawTotalRow(
-          due > 0 ? 'Balance Due (Pending)' : 'Balance Due',
+          dueLabel,
           formatMoney(due, currency),
           {
             bold: true,

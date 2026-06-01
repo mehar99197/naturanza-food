@@ -1082,10 +1082,20 @@ router.get('/:id/invoice', authenticateToken, async (req, res) => {
         WHERE order_id = ? AND status = 'approved'`,
       [orderId],
     );
+    const paymentStatus = String(order.payment_status || 'pending').toLowerCase();
+    const isCodOrder = String(order.payment_method || '').toLowerCase() === 'cod';
     const orderTotal = Number(order.total_amount) || 0;
     let amountPaid = Number(paidRow.paid) || 0;
-    if (String(order.payment_status || '').toLowerCase() === 'paid' && amountPaid < orderTotal) {
+    // Keep the invoice's paid/balance in lockstep with the order's payment status
+    // so it updates the moment the admin (or the Payments flow) changes it.
+    if (paymentStatus === 'paid') {
       amountPaid = orderTotal;
+    } else if (paymentStatus === 'partial' && amountPaid <= 0) {
+      // Advance paid but no verification row carried the amount — fall back to the
+      // shipping advance so a COD invoice still shows the advance/balance split.
+      amountPaid = Math.min(orderTotal, Number(order.shipping_cost) || 0);
+    } else if (paymentStatus === 'pending' || paymentStatus === 'failed') {
+      amountPaid = 0;
     }
     amountPaid = Math.min(Math.max(0, amountPaid), orderTotal);
     const balanceDue = Math.max(0, orderTotal - amountPaid);
@@ -1095,6 +1105,8 @@ router.get('/:id/invoice', authenticateToken, async (req, res) => {
       company: companyOverrides,
       amountPaid,
       balanceDue,
+      paymentStatus,
+      isCod: isCodOrder,
     });
     const orderNumber = `ORD-${String(order.id).padStart(6, '0')}`;
     const fileName = `invoice-${orderNumber}.pdf`;
