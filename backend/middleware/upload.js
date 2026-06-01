@@ -163,6 +163,14 @@ const uploadCategoryImage = uploadAndCompress('category_image', 'categories', {
     fit: 'cover'
 });
 
+// Blog cover image upload (1200x630 = social/OG card ratio)
+const uploadBlogImage = uploadAndCompress('blog_image', 'blog', {
+    width: 1200,
+    height: 630,
+    quality: 80,
+    fit: 'cover'
+});
+
 module.exports = {
     upload,
     compressImage,
@@ -170,5 +178,6 @@ module.exports = {
     uploadProfileImage,
     uploadProductImage,
     uploadCategoryImage,
+    uploadBlogImage,
     UPLOADS_IMAGES_DIR,
 };

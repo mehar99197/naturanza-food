@@ -30,6 +30,7 @@ export const PERMISSION_LIST = [
   // Operations
   { id: "manage_payments",         label: "Payments",         group: "Operations" },
   { id: "manage_announcements",    label: "Announcements",    group: "Operations" },
+  { id: "manage_blog",             label: "Blog",             group: "Operations" },
   { id: "manage_team",             label: "Team",             group: "Operations" },
 ];
 
@@ -66,6 +67,7 @@ export const FEATURE_PERMISSIONS = {
   "shipping-cities": "manage_shipping_cities",
   payments:          "manage_payments",
   announcements:     "manage_announcements",
+  blog:              "manage_blog",
   team:              "manage_team",
   admins:            null,
   settings:          null,

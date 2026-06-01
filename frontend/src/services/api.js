@@ -1574,6 +1574,41 @@ export const categoryAPI = {
   },
 };
 
+export const blogAPI = {
+  // Public
+  getPosts: async (params = {}) => {
+    const response = await axiosInstance.get("/blog", { params });
+    return response.data;
+  },
+  getPostBySlug: async (slug) => {
+    const response = await axiosInstance.get(`/blog/${encodeURIComponent(slug)}`);
+    return response.data;
+  },
+  // Admin
+  getAllAdmin: async () => {
+    const response = await axiosInstance.get("/blog/admin");
+    return response.data;
+  },
+  create: async (postData) => {
+    const response = await axiosInstance.post("/blog", postData);
+    return response.data;
+  },
+  update: async (id, postData) => {
+    const response = await axiosInstance.put(`/blog/${id}`, postData);
+    return response.data;
+  },
+  delete: async (id) => {
+    const response = await axiosInstance.delete(`/blog/${id}`);
+    return response.data;
+  },
+  uploadImage: async (file) => {
+    const formData = new FormData();
+    formData.append("blog_image", file);
+    const response = await axiosInstance.post("/blog/upload-image", formData);
+    return response.data;
+  },
+};
+
 // Geolocation APIs
 export const geolocationAPI = {
   getCurrency: async () => {
