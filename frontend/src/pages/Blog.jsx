@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Loader2, Newspaper, Clock3, CalendarDays, ArrowRight } from 'lucide-react';
+import { Loader2, Newspaper, Clock3, CalendarDays } from 'lucide-react';
 import { SEO } from '@/components/SEO';
 import { BlogStructuredData } from '@/components/StructuredData';
 import { blogAPI } from '@/services/api';
@@ -68,10 +68,6 @@ export function Blog() {
   }, [posts]);
 
   const featuredPosts = useMemo(() => posts.filter((p) => p.featured), [posts]);
-  const recentPosts = useMemo(
-    () => [...posts].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 4),
-    [posts],
-  );
   const filteredPosts = useMemo(
     () => (selectedCategory === 'all' ? posts : posts.filter((p) => p.category === selectedCategory)),
     [posts, selectedCategory],
@@ -91,14 +87,24 @@ export function Blog() {
         <div className="container-custom">
           {/* Hero */}
           <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-green-800 via-green-700 to-emerald-600 px-6 py-10 sm:px-10 sm:py-14 text-white shadow-[0_18px_48px_rgba(7,43,24,0.18)]">
-            <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-white/10 blur-2xl" />
-            <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur-sm">
-              <Newspaper className="h-3.5 w-3.5" /> Naturanza Journal
-            </span>
-            <h1 className="mt-4 font-display text-3xl md:text-5xl font-bold leading-tight">Naturanza Food Blog</h1>
-            <p className="mt-3 max-w-2xl text-base sm:text-lg text-green-50/90">
-              Insights on pure honey, ispaghol husk, and natural living — tips you can actually use.
-            </p>
+            <div className="pointer-events-none absolute -right-10 -top-10 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-8 left-1/3 h-40 w-40 rounded-full bg-white/5 blur-2xl" />
+            {/* Subtle dot grid */}
+            <div className="pointer-events-none absolute inset-0 opacity-10" style={{backgroundImage:'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize:'28px 28px'}} />
+            <div className="relative">
+              <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur-sm">
+                <Newspaper className="h-3.5 w-3.5" /> Naturanza Journal
+              </span>
+              {posts.length > 0 && (
+                <span className="ml-2 inline-flex items-center rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-semibold text-emerald-100">
+                  {posts.length} {posts.length === 1 ? 'Article' : 'Articles'}
+                </span>
+              )}
+              <h1 className="mt-4 font-display text-3xl md:text-5xl font-bold leading-tight">Naturanza Food Blog</h1>
+              <p className="mt-3 max-w-2xl text-base sm:text-lg text-green-50/90">
+                Insights on pure honey, ispaghol husk, and natural living — tips you can actually use.
+              </p>
+            </div>
           </section>
 
           {loading ? (
@@ -173,20 +179,34 @@ export function Blog() {
               {/* All posts */}
               <section className="mt-7">
                 <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                  {filteredPosts.map((post) => (
+                  {filteredPosts.map((post, idx) => (
                     <Link
                       key={post.id}
                       to={`/blog/${post.slug}`}
-                      className="group flex flex-col overflow-hidden rounded-2xl border border-green-100 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg"
+                      className={`group flex flex-col overflow-hidden rounded-2xl border border-green-100 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:border-green-200 ${
+                        idx === 0 && filteredPosts.length >= 3 ? 'sm:col-span-2 lg:col-span-1' : ''
+                      }`}
                     >
-                      <CoverImage post={post} className="h-40 w-full" />
+                      <div className="overflow-hidden">
+                        <CoverImage
+                          post={post}
+                          className={`w-full transition-transform duration-500 group-hover:scale-105 ${
+                            idx === 0 && filteredPosts.length >= 3 ? 'h-52 sm:h-64 lg:h-44' : 'h-44'
+                          }`}
+                        />
+                      </div>
                       <div className="flex flex-1 flex-col p-5">
                         <span className="text-[11px] font-bold uppercase tracking-wide text-green-600">{post.category}</span>
                         <h3 className="mt-1.5 text-base font-bold text-slate-900 transition-colors group-hover:text-green-700 line-clamp-2">
                           {post.title}
                         </h3>
-                        <p className="mt-2 flex-1 text-sm text-slate-600 line-clamp-2">{post.excerpt}</p>
-                        <MetaRow post={post} className="mt-3" />
+                        <p className="mt-2 flex-1 text-sm text-slate-500 line-clamp-2">{post.excerpt}</p>
+                        <div className="mt-4 flex items-center justify-between">
+                          <MetaRow post={post} />
+                          <span className="text-xs font-semibold text-green-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                            Read →
+                          </span>
+                        </div>
                       </div>
                     </Link>
                   ))}
@@ -197,28 +217,6 @@ export function Blog() {
                   </p>
                 )}
               </section>
-
-              {/* Recent */}
-              {recentPosts.length > 0 && (
-                <section className="mt-12 rounded-2xl border border-green-100 bg-white p-6 shadow-sm">
-                  <h3 className="mb-4 text-lg font-bold text-[#2d3a2d]">Recent Posts</h3>
-                  <ul className="divide-y divide-slate-100">
-                    {recentPosts.map((post) => (
-                      <li key={post.id}>
-                        <Link to={`/blog/${post.slug}`} className="group flex items-center justify-between gap-3 py-3">
-                          <div className="min-w-0">
-                            <h4 className="truncate font-medium text-slate-800 transition-colors group-hover:text-green-700">
-                              {post.title}
-                            </h4>
-                            <span className="text-sm text-slate-500">{post.date}</span>
-                          </div>
-                          <ArrowRight className="h-4 w-4 flex-shrink-0 text-slate-300 transition-colors group-hover:text-green-600" />
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
             </>
           )}
         </div>
