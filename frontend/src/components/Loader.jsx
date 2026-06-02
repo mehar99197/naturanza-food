@@ -1,24 +1,9 @@
-// Modern 3D Spinning Loader
-export function Loader({ fullScreen = true, size = 'md' }) {
-  if (fullScreen) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center bg-gradient-light z-50 animate-fadeIn">
-        <div className="animate-slideUp">
-          <span className="loader drop-shadow-lg"></span>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center justify-center p-4">
-      <span className="loader"></span>
-    </div>
-  );
-}
-
-// Leaf Pulse — branded page/section loader for Naturanza Food
-export function LeafLoader({ fullPage = false, label = '' }) {
+// Naturanza Food — branded leaf-pulse loader.
+// A breathing leaf inside two expanding green rings. Used project-wide:
+//   <Loader />                         full-screen (default) — app boot, route guards, Suspense
+//   <Loader fullScreen={false} />      inline section loader
+//   <Loader fullScreen={false} label="Loading articles..." />
+export function Loader({ fullScreen = true, label = '' }) {
   const inner = (
     <>
       <style>{`
@@ -39,6 +24,9 @@ export function LeafLoader({ fullPage = false, label = '' }) {
         .nz-ring1 { animation: nz-pulse-ring  1.8s ease-out infinite; }
         .nz-ring2 { animation: nz-pulse-ring2 1.8s ease-out 0.35s infinite; }
         .nz-leaf  { animation: nz-leaf-breathe 1.8s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .nz-ring1, .nz-ring2, .nz-leaf { animation: none; }
+        }
       `}</style>
       <div className="flex flex-col items-center gap-3">
         <div className="relative flex h-20 w-20 items-center justify-center">
@@ -55,9 +43,9 @@ export function LeafLoader({ fullPage = false, label = '' }) {
     </>
   );
 
-  if (fullPage) {
+  if (fullScreen) {
     return (
-      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-[#faf8f3]">
+      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-[#faf8f3] animate-fadeIn">
         {inner}
       </div>
     );

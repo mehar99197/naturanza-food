@@ -7,7 +7,7 @@ const AdminProtectedRoute = ({ children, requireSuper }) => {
  const location = useLocation();
 
  if (loading) {
-   return <Loader fullScreen size="md" />;
+   return <Loader fullScreen />;
  }
 
  if (!admin) {

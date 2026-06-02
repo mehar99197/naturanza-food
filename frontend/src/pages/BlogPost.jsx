@@ -4,7 +4,7 @@ import {
   Loader2, ArrowLeft, Clock3, CalendarDays,
   Copy, Check, List, ChevronDown, ChevronUp, BookOpen,
 } from 'lucide-react';
-import { LeafLoader } from '@/components/Loader';
+import { Loader } from '@/components/Loader';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SEO } from '@/components/SEO';
@@ -304,7 +304,7 @@ export function BlogPost() {
   // ── Loading / error states ──────────────────────────────────────────────────
 
   if (loading) {
-    return <LeafLoader fullPage />;
+    return <Loader />;
   }
 
   if (notFound || !post) {
