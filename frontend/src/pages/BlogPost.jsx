@@ -4,6 +4,7 @@ import {
   Loader2, ArrowLeft, Clock3, CalendarDays,
   Copy, Check, List, ChevronDown, ChevronUp, BookOpen,
 } from 'lucide-react';
+import { LeafLoader } from '@/components/Loader';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SEO } from '@/components/SEO';
@@ -303,11 +304,7 @@ export function BlogPost() {
   // ── Loading / error states ──────────────────────────────────────────────────
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#faf8f3]">
-        <Loader2 className="w-7 h-7 text-green-600 animate-spin" />
-      </div>
-    );
+    return <LeafLoader fullPage />;
   }
 
   if (notFound || !post) {

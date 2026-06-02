@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Loader2, Newspaper, Clock3, CalendarDays } from 'lucide-react';
+import { Newspaper, Clock3, CalendarDays } from 'lucide-react';
+import { LeafLoader } from '@/components/Loader';
 import { SEO } from '@/components/SEO';
 import { BlogStructuredData } from '@/components/StructuredData';
 import { blogAPI } from '@/services/api';
@@ -108,9 +109,7 @@ export function Blog() {
           </section>
 
           {loading ? (
-            <div className="flex justify-center py-20">
-              <Loader2 className="h-7 w-7 animate-spin text-green-600" />
-            </div>
+            <LeafLoader label="Loading articles..." />
           ) : error ? (
             <div className="mt-8 max-w-xl rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">{error}</div>
           ) : posts.length === 0 ? (
