@@ -358,7 +358,7 @@ export function BlogPost() {
       <div className="min-h-screen bg-[#faf8f3]">
 
         {/* ── Green header ───────────────────────────────────────────────── */}
-        <div className="relative bg-gradient-to-br from-green-800 via-green-700 to-emerald-600 text-white pt-24 sm:pt-28 pb-14 sm:pb-16 overflow-hidden">
+        <div className="relative bg-gradient-to-br from-green-800 via-green-700 to-emerald-600 text-white pt-24 sm:pt-28 pb-20 sm:pb-28 overflow-hidden">
           <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
           <div className="pointer-events-none absolute bottom-0 left-1/3 h-40 w-40 rounded-full bg-white/5 blur-2xl" />
           <div className="container-custom relative">
@@ -435,12 +435,12 @@ export function BlogPost() {
             {/* ── Article column ─────────────────────────────────────────── */}
             <div>
               {/* Article card — overlaps header cleanly, image at top */}
-              <article className="-mt-10 sm:-mt-12 bg-white rounded-2xl shadow-lg overflow-hidden mb-8 ring-1 ring-black/5">
+              <article className="-mt-16 sm:-mt-24 bg-white rounded-2xl shadow-xl overflow-hidden mb-8 ring-1 ring-black/5">
                 {coverImage && (
                   <img
                     src={coverImage}
                     alt={post.title}
-                    className="w-full h-56 sm:h-[340px] object-cover"
+                    className="w-full h-60 sm:h-[380px] object-cover"
                   />
                 )}
                 <div className="p-6 sm:p-9">
@@ -462,20 +462,20 @@ export function BlogPost() {
               </article>
 
               {/* Author bio */}
-              <div className="flex items-start gap-4 bg-white rounded-2xl border border-green-100 shadow-sm p-5 sm:p-6 mb-8">
-                <div className="relative shrink-0">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-green-500 via-green-600 to-emerald-700 text-white text-2xl font-bold shadow-lg ring-4 ring-green-50">
-                    {authorInitial}
-                  </div>
-                  <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 ring-2 ring-white">
-                    <svg className="h-2.5 w-2.5 text-white fill-current" viewBox="0 0 12 12"><path d="M10.28 2.28L4 8.56 1.72 6.28A1 1 0 00.28 7.72l3 3a1 1 0 001.44 0l7-7a1 1 0 00-1.44-1.44z"/></svg>
-                  </span>
+              <div className="flex items-center gap-5 bg-white rounded-2xl border border-green-100 shadow-sm p-5 sm:p-6 mb-8">
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-green-500 to-emerald-700 text-white text-2xl font-bold shadow-md ring-4 ring-green-50">
+                  {authorInitial}
                 </div>
-                <div className="min-w-0">
-                  <p className="font-bold text-slate-900 text-base">{post.author}</p>
-                  <p className="text-sm text-green-600 font-semibold mt-0.5">Naturanza Food · Writer</p>
-                  <p className="text-sm text-slate-500 mt-2 leading-relaxed">
-                    We write about natural food, traditional remedies, and healthy living for Pakistani families — practical, honest, and based on real experience.
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-bold text-slate-900 text-base">{post.author}</p>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-semibold text-green-700 border border-green-100">
+                      ✍️ Writer
+                    </span>
+                  </div>
+                  <p className="text-xs text-green-600 font-medium mt-0.5">Naturanza Food</p>
+                  <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
+                    Writing about natural food, traditional remedies, and healthy living for Pakistani families.
                   </p>
                 </div>
               </div>
@@ -543,7 +543,7 @@ export function BlogPost() {
             {/* ── TOC Sidebar (desktop only) ─────────────────────────────── */}
             {hasTOC && (
               <aside className="hidden lg:block">
-                <div className="sticky top-28 space-y-6">
+                <div className="sticky top-24 space-y-6">
                   {/* TOC */}
                   <div className="rounded-2xl border border-green-100 bg-white p-5 shadow-sm">
                     <TOCSidebar items={tocItems} activeId={activeId} onClickItem={scrollToHeading} />
