@@ -164,18 +164,18 @@ function TOCSidebar({ items, activeId, onClickItem }) {
   if (!items.length) return null;
   return (
     <nav aria-label="Table of contents">
-      <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">
-        <List className="h-3.5 w-3.5" /> Contents
+      <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-3 pb-2 border-b border-slate-100">
+        <List className="h-3.5 w-3.5 text-green-600" /> Contents
       </p>
-      <ul className="space-y-1">
+      <ul className="space-y-0.5">
         {items.map((item) => (
-          <li key={item.id} style={{ paddingLeft: item.level > 2 ? '12px' : undefined }}>
+          <li key={item.id} style={{ paddingLeft: item.level > 2 ? '10px' : undefined }}>
             <button
               onClick={() => onClickItem(item.id)}
-              className={`text-left w-full text-sm leading-snug py-1 px-2 rounded-lg transition-colors ${
+              className={`text-left w-full text-[13px] leading-snug py-1.5 px-2.5 rounded-lg transition-all ${
                 activeId === item.id
-                  ? 'bg-green-50 text-green-700 font-semibold'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                  ? 'bg-green-50 text-green-700 font-semibold border-l-2 border-green-500 pl-2'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
               }`}
             >
               {item.text}
@@ -358,7 +358,7 @@ export function BlogPost() {
       <div className="min-h-screen bg-[#faf8f3]">
 
         {/* ── Green header ───────────────────────────────────────────────── */}
-        <div className="relative bg-gradient-to-br from-green-800 via-green-700 to-emerald-600 text-white pt-24 sm:pt-28 pb-20 sm:pb-28 overflow-hidden">
+        <div className="relative bg-gradient-to-br from-green-800 via-green-700 to-emerald-600 text-white pt-24 sm:pt-28 pb-14 sm:pb-16 overflow-hidden">
           <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
           <div className="pointer-events-none absolute bottom-0 left-1/3 h-40 w-40 rounded-full bg-white/5 blur-2xl" />
           <div className="container-custom relative">
@@ -379,7 +379,7 @@ export function BlogPost() {
                   className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3.5 py-1.5 text-sm font-medium text-white/90 backdrop-blur-sm transition hover:bg-white/25"
                   aria-label="Share on WhatsApp"
                 >
-                  <WhatsAppIcon /> Share
+                  <WhatsAppIcon /> WhatsApp
                 </a>
                 <button
                   onClick={handleCopy}
@@ -402,22 +402,24 @@ export function BlogPost() {
               <h1 className="mt-3 font-display text-2xl sm:text-3xl md:text-[2.6rem] md:leading-tight font-bold">
                 {post.title}
               </h1>
-              <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-green-50/90">
+              <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/95">
                 <span className="inline-flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-sm font-bold text-white ring-2 ring-white/30">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/25 text-sm font-bold text-white ring-2 ring-white/40 shadow-sm">
                     {authorInitial}
                   </span>
-                  {post.author}
+                  <span className="font-medium">{post.author}</span>
                 </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <CalendarDays className="h-4 w-4" /> {post.date}
+                <span className="text-white/40">·</span>
+                <span className="inline-flex items-center gap-1.5 text-white/80">
+                  <CalendarDays className="h-3.5 w-3.5" /> {post.date}
                 </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <Clock3 className="h-4 w-4" /> {post.readTime}
+                <span className="text-white/40">·</span>
+                <span className="inline-flex items-center gap-1.5 text-white/80">
+                  <Clock3 className="h-3.5 w-3.5" /> {post.readTime}
                 </span>
                 {readPct > 5 && readPct < 99 && (
-                  <span className="inline-flex items-center gap-1.5 text-green-200">
-                    <BookOpen className="h-4 w-4" />
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-xs font-semibold text-white">
+                    <BookOpen className="h-3.5 w-3.5" />
                     {Math.round(readPct)}% read
                   </span>
                 )}
@@ -432,13 +434,13 @@ export function BlogPost() {
 
             {/* ── Article column ─────────────────────────────────────────── */}
             <div>
-              {/* Article card — overlaps header, cover image attached to top */}
-              <article className="-mt-12 sm:-mt-16 bg-white rounded-2xl shadow-md overflow-hidden mb-8">
+              {/* Article card — overlaps header cleanly, image at top */}
+              <article className="-mt-10 sm:-mt-12 bg-white rounded-2xl shadow-lg overflow-hidden mb-8 ring-1 ring-black/5">
                 {coverImage && (
                   <img
                     src={coverImage}
                     alt={post.title}
-                    className="w-full h-52 sm:h-80 object-cover"
+                    className="w-full h-56 sm:h-[340px] object-cover"
                   />
                 )}
                 <div className="p-6 sm:p-9">
@@ -461,13 +463,18 @@ export function BlogPost() {
 
               {/* Author bio */}
               <div className="flex items-start gap-4 bg-white rounded-2xl border border-green-100 shadow-sm p-5 sm:p-6 mb-8">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-green-600 to-emerald-600 text-white text-xl font-bold shadow-md">
-                  {authorInitial}
+                <div className="relative shrink-0">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-green-500 via-green-600 to-emerald-700 text-white text-2xl font-bold shadow-lg ring-4 ring-green-50">
+                    {authorInitial}
+                  </div>
+                  <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 ring-2 ring-white">
+                    <svg className="h-2.5 w-2.5 text-white fill-current" viewBox="0 0 12 12"><path d="M10.28 2.28L4 8.56 1.72 6.28A1 1 0 00.28 7.72l3 3a1 1 0 001.44 0l7-7a1 1 0 00-1.44-1.44z"/></svg>
+                  </span>
                 </div>
-                <div>
-                  <p className="font-bold text-slate-900">{post.author}</p>
-                  <p className="text-sm text-green-600 font-medium mt-0.5">Naturanza Food</p>
-                  <p className="text-sm text-slate-600 mt-2 leading-relaxed">
+                <div className="min-w-0">
+                  <p className="font-bold text-slate-900 text-base">{post.author}</p>
+                  <p className="text-sm text-green-600 font-semibold mt-0.5">Naturanza Food · Writer</p>
+                  <p className="text-sm text-slate-500 mt-2 leading-relaxed">
                     We write about natural food, traditional remedies, and healthy living for Pakistani families — practical, honest, and based on real experience.
                   </p>
                 </div>
@@ -536,7 +543,7 @@ export function BlogPost() {
             {/* ── TOC Sidebar (desktop only) ─────────────────────────────── */}
             {hasTOC && (
               <aside className="hidden lg:block">
-                <div className="sticky top-24 space-y-6">
+                <div className="sticky top-28 space-y-6">
                   {/* TOC */}
                   <div className="rounded-2xl border border-green-100 bg-white p-5 shadow-sm">
                     <TOCSidebar items={tocItems} activeId={activeId} onClickItem={scrollToHeading} />
