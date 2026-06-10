@@ -237,7 +237,7 @@ export function Hero() {
 
  return (
  <section
- className="relative w-full max-w-full h-[520px] sm:h-[460px] md:h-[550px] lg:h-[600px] overflow-hidden overflow-x-hidden pt-[56px] sm:pt-[60px] md:pt-[68px]"
+ className="relative w-full max-w-full h-[620px] sm:h-[460px] md:h-[550px] lg:h-[600px] overflow-hidden overflow-x-hidden pt-[56px] sm:pt-[60px] md:pt-[68px]"
  onMouseEnter={() => setIsHovered(true)}
  onMouseLeave={() => setIsHovered(false)}
  role="region"
@@ -287,16 +287,16 @@ export function Hero() {
  to keep content above the pagination dots (bottom-3 â‰ˆ 36px).
  Desktop: 2-column grid with items centered.
  */}
-  <div className="flex flex-col justify-start sm:justify-center lg:grid lg:grid-cols-2 lg:gap-12 lg:items-center h-full gap-2 sm:gap-3 pt-2 pb-28 sm:pt-6 sm:pb-10 md:py-8 lg:py-0 px-8 sm:px-10 md:px-12 lg:px-16">
+  <div className="flex flex-col justify-start sm:justify-center lg:grid lg:grid-cols-2 lg:gap-12 lg:items-center h-full gap-2 sm:gap-3 pt-2 pb-16 sm:pt-6 sm:pb-10 md:py-8 lg:py-0 px-8 sm:px-10 md:px-12 lg:px-16">
 
  {/* â”€â”€ Product Image â€” top on mobile, right on desktop â”€â”€ */}
  <div className="flex items-center justify-center order-1 lg:order-2 lg:h-full py-2">
- <div className="relative w-full max-w-[180px] sm:max-w-xs md:max-w-md lg:max-w-lg mx-auto pt-1">
+ <div className="relative w-full max-w-[140px] sm:max-w-xs md:max-w-md lg:max-w-lg mx-auto pt-1">
  <div className={`absolute inset-0 bg-gradient-to-r ${slide.accentColor} opacity-10 blur-3xl rounded-full`} />
  <img
  src={slideImage}
  alt={slide.headline}
- className={`relative z-10 w-full h-auto object-contain drop-shadow-2xl ${slide.imageSizeClass || 'max-h-[200px] sm:max-h-[220px] md:max-h-none'}`}
+ className={`relative z-10 w-full h-auto object-contain drop-shadow-2xl max-h-[150px] sm:max-h-[220px] md:max-h-none`}
  loading={index === 0 ? 'eager' : 'lazy'}
  />
  </div>
@@ -428,7 +428,7 @@ export function Hero() {
  </button>
 
  {/* Pagination Dots â€” above the progress bar, clear of content */}
- <div className="absolute bottom-6 sm:bottom-4 md:bottom-6 lg:bottom-8 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 sm:gap-1.5 md:gap-2 bg-white/80 backdrop-blur-sm px-2 py-1 sm:px-3 sm:py-2 rounded-full shadow-md">
+ <div className="absolute bottom-3 sm:bottom-4 md:bottom-6 lg:bottom-8 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 sm:gap-1.5 md:gap-2 bg-white/80 backdrop-blur-sm px-2 py-1 sm:px-3 sm:py-2 rounded-full shadow-md">
  {slides.map((slide, index) => (
  <button
  key={slide.id}
