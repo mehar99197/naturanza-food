@@ -178,7 +178,7 @@ export function Categories() {
                 style={{ animationDelay: `${index * 100}ms` }}
                 className="group snap-center flex-shrink-0 w-full min-w-full md:w-auto md:min-w-0 relative overflow-hidden rounded-lg md:rounded-xl bg-white border-2 border-green-100 shadow-md md:hover:shadow-2xl md:hover:-translate-y-2 md:hover:border-green-300 transition-all duration-500 ease-out animate-fade-in-up opacity-0 [animation-fill-mode:forwards]"
               >
-                <div className="h-44 sm:h-48 md:h-52 bg-white relative flex items-center justify-center p-3 sm:p-4 md:p-5 overflow-hidden">
+                <div className="h-44 sm:h-48 md:h-64 lg:h-72 bg-white relative flex items-center justify-center p-2 sm:p-3 md:p-4 overflow-hidden">
                   {category.image ? (
                     <img
                       src={category.image}
