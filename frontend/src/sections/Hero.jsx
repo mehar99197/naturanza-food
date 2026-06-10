@@ -374,25 +374,6 @@ export function Hero() {
                         </Link>
                       </motion.div>
 
-                      {/* Pagination Dots — mobile only, in content flow just after CTA buttons */}
-                      {shouldShowNav && (
-                        <div className="flex lg:hidden items-center justify-center gap-1.5 pt-1">
-                          {slides.map((s, i) => (
-                            <button
-                              key={s.id}
-                              onClick={() => goToSlide(i)}
-                              disabled={isAnimating}
-                              className={`transition-all duration-300 rounded-full disabled:cursor-not-allowed ${
-                                i === currentSlide
-                                  ? 'w-4 h-2 bg-green-500 shadow-sm'
-                                  : 'w-2 h-2 bg-gray-300/80 active:scale-110'
-                              }`}
-                              aria-label={`Go to slide ${i + 1}`}
-                              aria-current={i === currentSlide ? 'true' : 'false'}
-                            />
-                          ))}
-                        </div>
-                      )}
                     </motion.div>
                   </div>
                 </div>
@@ -430,8 +411,8 @@ export function Hero() {
             <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-gray-700 md:group-hover:text-green-600 transition-colors duration-300" />
           </button>
 
-          {/* Pagination Dots — desktop only (lg+) */}
-          <div className="hidden lg:flex absolute bottom-8 left-1/2 -translate-x-1/2 z-30 items-center gap-2 bg-white/80 backdrop-blur-sm px-3 py-2 rounded-full shadow-md">
+          {/* Pagination Dots — all screen sizes, outside slides so they never animate with content */}
+          <div className="absolute bottom-4 sm:bottom-4 md:bottom-6 lg:bottom-8 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 sm:gap-2 bg-white/80 backdrop-blur-sm px-2 py-1 sm:px-3 sm:py-2 rounded-full shadow-md">
             {slides.map((slide, index) => (
               <button
                 key={slide.id}
@@ -439,7 +420,7 @@ export function Hero() {
                 disabled={isAnimating}
                 className={`transition-all duration-300 rounded-full disabled:cursor-not-allowed ${
                   index === currentSlide
-                    ? 'w-8 h-2 bg-green-500 shadow-sm'
+                    ? 'w-4 sm:w-6 lg:w-8 h-2 bg-green-500 shadow-sm'
                     : 'w-2 h-2 bg-gray-300/80 hover:bg-gray-400 active:scale-110'
                 }`}
                 aria-label={`Go to slide ${index + 1}`}
