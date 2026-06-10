@@ -1608,7 +1608,7 @@ export function Checkout() {
         <div className="absolute right-[-120px] top-56 h-[280px] w-[280px] rounded-full bg-green-200/20 blur-3xl" />
       </div>
 
-      <div className="container-custom relative px-4 sm:px-6">
+      <div className="container-custom relative px-4 sm:px-6 pt-24 sm:pt-0">
         {/* Header */}
         <div className="mb-6 rounded-2xl border border-white/75 bg-white/85 px-4 py-4 shadow-sm backdrop-blur-xl sm:mb-8 sm:px-5 sm:py-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
