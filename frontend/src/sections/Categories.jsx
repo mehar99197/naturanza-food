@@ -178,12 +178,12 @@ export function Categories() {
                 style={{ animationDelay: `${index * 100}ms` }}
                 className="group snap-center flex-shrink-0 w-full min-w-full md:w-auto md:min-w-0 relative overflow-hidden rounded-lg md:rounded-xl bg-white border-2 border-green-100 shadow-md md:hover:shadow-2xl md:hover:-translate-y-2 md:hover:border-green-300 transition-all duration-500 ease-out animate-fade-in-up opacity-0 [animation-fill-mode:forwards]"
               >
-                <div className="aspect-[16/9] bg-white relative flex items-center justify-center p-3 sm:p-4 md:p-5">
+                <div className="h-44 sm:h-48 md:h-52 bg-white relative flex items-center justify-center p-3 sm:p-4 md:p-5 overflow-hidden">
                   {category.image ? (
                     <img
                       src={category.image}
                       alt={category.name}
-                      className="max-h-[85%] max-w-[85%] h-auto w-auto object-contain transition-transform duration-500 ease-out md:max-h-[88%] md:max-w-[88%] md:group-hover:scale-[1.03]"
+                      className="h-full w-full object-contain transition-transform duration-500 ease-out md:group-hover:scale-[1.03]"
                     />
                   ) : (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-emerald-700/75">
