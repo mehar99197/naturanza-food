@@ -287,7 +287,7 @@ export function Hero() {
  to keep content above the pagination dots (bottom-3 â‰ˆ 36px).
  Desktop: 2-column grid with items centered.
  */}
- <div className="flex flex-col justify-start sm:justify-center lg:grid lg:grid-cols-2 lg:gap-12 lg:items-center h-full gap-2 sm:gap-3 pt-2 pb-20 sm:pt-6 sm:pb-10 md:py-8 lg:py-0 px-8 sm:px-10 md:px-12 lg:px-16">
+  <div className="flex flex-col justify-start sm:justify-center lg:grid lg:grid-cols-2 lg:gap-12 lg:items-center h-full gap-2 sm:gap-3 pt-2 pb-28 sm:pt-6 sm:pb-10 md:py-8 lg:py-0 px-8 sm:px-10 md:px-12 lg:px-16">
 
  {/* â”€â”€ Product Image â€” top on mobile, right on desktop â”€â”€ */}
  <div className="flex items-center justify-center order-1 lg:order-2 lg:h-full py-2">
