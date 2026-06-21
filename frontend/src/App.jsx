@@ -28,6 +28,7 @@ import { AdminLayout } from "@/components/AdminLayout";
 import AnnouncementBar from "@/components/AnnouncementBar";
 import { CursorPollenTrail } from "@/components/CursorPollenTrail";
 import WhatsAppButton from "./components/WhatsAppButton";
+import { DiscountPopup } from "@/components/DiscountPopup";
 import ProfileLayout from "@/components/ProfileLayout";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminProtectedRoute from "@/components/AdminProtectedRoute";
@@ -399,6 +400,7 @@ function AppContent() {
 
       {showFooter && <Footer variant={footerVariant} />}
       {!isAdminRoute && <WhatsAppButton />}
+      {!isAdminRoute && <DiscountPopup />}
     </div>
   );
 }

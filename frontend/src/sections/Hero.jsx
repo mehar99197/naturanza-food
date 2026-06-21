@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { fadeIn, slideUp, staggerContainer, buttonTap } from '@/lib/animations';
 import { productAPI } from '@/services/api';
 import { getAbsoluteImageUrl } from '@/lib/imageUtils';
-import { formatPrice } from '@/lib/utils';
+import { formatPrice, getProductPricing } from '@/lib/utils';
 import { useSettings } from '@/context/SettingsContext';
 
 const highlightedHeadlineWords = new Set([
@@ -56,16 +56,34 @@ const isHoneyProduct = (product) => {
   return text.includes('honey');
 };
 
-const buildSlideChips = (slide, currency) => {
+const buildSlideChips = (slide, settings) => {
+  const currency = settings?.currency || 'PKR';
   const chips = [];
+  const pricing = getProductPricing(slide, settings);
 
   if (Number.isFinite(slide.price) && slide.price > 0) {
-    chips.push({
-      key: 'price',
-      label: `From ${formatPrice(slide.price, currency)}`,
-      classes: 'border-emerald-200 bg-white/80 text-emerald-800',
-      Icon: Tag,
-    });
+    if (pricing.onSale) {
+      // Store sale active — lead with the discount, then the sale price.
+      chips.push({
+        key: 'sale',
+        label: `${pricing.effectivePct}% OFF`,
+        classes: 'border-rose-300 bg-gradient-to-r from-rose-500 to-red-600 text-white font-bold',
+        Icon: Tag,
+      });
+      chips.push({
+        key: 'price',
+        label: `Now ${formatPrice(pricing.salePrice, currency)}`,
+        classes: 'border-emerald-200 bg-white/80 text-emerald-800',
+        Icon: Tag,
+      });
+    } else {
+      chips.push({
+        key: 'price',
+        label: `From ${formatPrice(slide.price, currency)}`,
+        classes: 'border-emerald-200 bg-white/80 text-emerald-800',
+        Icon: Tag,
+      });
+    }
   }
 
   if (Number.isFinite(slide.rating) && slide.rating > 0) {
@@ -161,6 +179,7 @@ export function Hero() {
               accentColor: accents[idx % accents.length],
               imageSizeClass: "max-h-[200px] sm:max-h-[220px] md:max-h-none",
               price: Number.isFinite(numericPrice) ? numericPrice : null,
+              discount_percentage: Number(p?.discount_percentage) || 0,
               rating: Number.isFinite(ratingValue) ? ratingValue : 0,
               reviewCount: Number.isFinite(reviewCount) ? reviewCount : 0,
               category: categoryLabel,
@@ -215,8 +234,8 @@ export function Hero() {
   const shouldShowNav = slides.length > 1;
   const currentSlideData = hasSlides ? slides[currentSlide] : null;
   const slideChips = useMemo(
-    () => buildSlideChips(currentSlideData || {}, settings?.currency || 'PKR'),
-    [currentSlideData, settings?.currency],
+    () => buildSlideChips(currentSlideData || {}, settings),
+    [currentSlideData, settings],
   );
 
   return (
