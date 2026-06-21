@@ -28,6 +28,7 @@ import {
   UserRound,
   Wallet,
   Megaphone,
+  Info,
   X,
 } from "lucide-react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
@@ -55,6 +56,7 @@ const navItems = [
   { path: "/admin/announcements", label: "Announcements", icon: Megaphone },
   { path: "/admin/blog", label: "Blog", icon: Newspaper },
   { path: "/admin/team", label: "Team", icon: UserRound },
+  { path: "/admin/about", label: "About Page", icon: Info },
   { path: "/admin/payments", label: "Payments", icon: Wallet },
   { path: "/admin/messages", label: "Messages", icon: MessageSquare },
   { path: "/admin/subscribers", label: "Subscribers", icon: Mail },

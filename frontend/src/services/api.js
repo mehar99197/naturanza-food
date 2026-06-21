@@ -876,6 +876,31 @@ export const teamAPI = {
   },
 };
 
+// About-page content API
+export const aboutAPI = {
+  // Public: storefront About page content
+  getContent: async () => {
+    const response = await axiosInstance.get("/about");
+    return response.data;
+  },
+  // Admin: read (auth) + save
+  getAdminContent: async () => {
+    const response = await axiosInstance.get("/admin/about");
+    return response.data;
+  },
+  updateContent: async (content) => {
+    const response = await axiosInstance.put("/admin/about", content);
+    return response.data;
+  },
+  // Reuse the blog image uploader for the story image (returns { imageUrl })
+  uploadImage: async (file) => {
+    const formData = new FormData();
+    formData.append("blog_image", file);
+    const response = await axiosInstance.post("/blog/upload-image", formData);
+    return response.data;
+  },
+};
+
 // Admin APIs
 export const adminAPI = {
   // Super-admin gate only. Backend rejects accounts whose admin_role !== 'super_admin'.

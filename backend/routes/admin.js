@@ -8,6 +8,7 @@ const { restrictBody } = require("../middleware/security");
 const { issueAccessToken, verifyAccessToken, toExpiryDate } = require("../utils/jwtTokens");
 const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/tokenStore");
 const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
+const { getAboutContent, updateAboutContent } = require("../utils/aboutContent");
 const { getClientIp } = require("../utils/clientIp");
 const asyncHandler = require("../middleware/asyncHandler");
 const newsletterController = require("../controllers/newsletterController");
@@ -911,6 +912,25 @@ router.put("/settings", restrictBody('storeName', 'storeEmail', 'storePhone', 'c
     res.json(settings);
   } catch (error) {
     res.status(500).json({ error: "Could not update settings" });
+  }
+});
+
+// About-page content management
+router.get("/about", async (req, res) => {
+  try {
+    const content = await getAboutContent(db.promise());
+    res.json(content);
+  } catch (error) {
+    res.status(500).json({ error: "Could not load About content" });
+  }
+});
+
+router.put("/about", restrictBody('hero', 'story', 'stats', 'values', 'team', 'certifications', 'sections'), async (req, res) => {
+  try {
+    const content = await updateAboutContent(db.promise(), req.body || {});
+    res.json(content);
+  } catch (error) {
+    res.status(500).json({ error: "Could not update About content" });
   }
 });
 

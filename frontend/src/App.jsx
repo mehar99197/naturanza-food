@@ -89,6 +89,7 @@ const AdminCategories = lazy(() => import("@/pages/AdminCategories"));
 const AdminAnnouncements = lazy(() => import("@/pages/AdminAnnouncements"));
 const AdminBlog = lazy(() => import("@/pages/AdminBlog"));
 const AdminTeam = lazy(() => import("@/pages/AdminTeam"));
+const AdminAbout = lazy(() => import("@/pages/AdminAbout"));
 const Profile = lazy(() => import("@/pages/Profile"));
 const ProfileWishlist = lazy(() => import("@/pages/ProfileWishlist"));
 const ProfileOrders = lazy(() => import("@/pages/ProfileOrders"));
@@ -387,6 +388,7 @@ function AppContent() {
               <Route path="announcements" element={<RequirePermission feature="announcements"><AdminAnnouncements /></RequirePermission>} />
               <Route path="blog" element={<RequirePermission feature="blog"><AdminBlog /></RequirePermission>} />
               <Route path="team" element={<RequirePermission feature="team"><AdminTeam /></RequirePermission>} />
+              <Route path="about" element={<RequireSuperAdmin><AdminAbout /></RequireSuperAdmin>} />
               <Route path="categories" element={<RequirePermission feature="categories"><AdminCategories /></RequirePermission>} />
               <Route path="settings" element={<RequireSuperAdmin><AdminSettings /></RequireSuperAdmin>} />
             </Route>
