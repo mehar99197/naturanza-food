@@ -40,7 +40,10 @@ export function CartDrawer() {
   // Use getAbsoluteImageUrl to convert relative URLs to absolute backend URLs
   return getAbsoluteImageUrl(imageValue, { defaultFolder: 'products' });
  };
- const getUnitPrice = (item) => getProductPricing(item, settings).salePrice;
+ const getUnitPrice = (item) => {
+ const pricing = getProductPricing(item, settings);
+ return pricing.onSale ? pricing.salePrice : (item.final_price ?? item.price);
+ };
  const getItemName = (item) => item.name || item.product_name || 'Product';
  const getCategoryLabel = (item) => item.category_name || item.category || 'Naturanza Essentials';
  const getItemKey = (item, index) => {

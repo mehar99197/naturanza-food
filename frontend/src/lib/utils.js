@@ -68,11 +68,15 @@ export function formatPrice(amount, currency = 'PKR') {
 const clampPercent = (value) => Math.min(Math.max(Number(value) || 0, 0), 90);
 
 /**
- * Effective pricing for a single product. The discount is the BIGGER of the
- * product's own discount_percentage and the active store-wide sale %, so a
- * product already on a deeper discount is never crushed by a smaller store
- * sale. salePrice ALWAYS reflects this (it equals the product's final_price
- * when no store sale is active), so it is safe to use for money everywhere.
+ * Display pricing for a single product. Only an active store-wide sale changes
+ * the shown price (per-product discounts keep their current, quiet treatment so
+ * the storefront looks unchanged when no sale is running). During a sale the
+ * effective discount is the BIGGER of the product's own discount_percentage and
+ * the store sale %, so a product already on a deeper discount is never crushed.
+ *
+ * When no sale is active: salePrice === base (product shows its normal price,
+ * onSale false). For cart/checkout MONEY use the item's final_price for the
+ * no-sale case and computeStoreSaleDiscount() for the sale reduction.
  *
  * Returns: { base, salePrice, effectivePct, onSale, saved, label }
  */
@@ -81,8 +85,8 @@ export function getProductPricing(product, settings) {
   const perProductPct = clampPercent(product?.discount_percentage);
   const saleActive = Boolean(settings?.storeDiscountActive);
   const storePct = saleActive ? clampPercent(settings?.storeDiscountPercentage) : 0;
-  const effectivePct = Math.max(perProductPct, storePct);
-  const salePrice = base - (base * effectivePct) / 100;
+  const effectivePct = storePct > 0 ? Math.max(perProductPct, storePct) : 0;
+  const salePrice = effectivePct > 0 ? base - (base * effectivePct) / 100 : base;
   return {
     base,
     salePrice,
