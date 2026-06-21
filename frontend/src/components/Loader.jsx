@@ -1,5 +1,5 @@
-// Naturanza Food — branded leaf-pulse loader.
-// A breathing leaf inside two expanding green rings. Used project-wide:
+// Naturanza Food — branded orbiting-dots loader.
+// Three brand-green dots orbit a center and pulse. Used project-wide:
 //   <Loader />                         full-screen (default) — app boot, route guards, Suspense
 //   <Loader fullScreen={false} />      inline section loader
 //   <Loader fullScreen={false} label="Loading articles..." />
@@ -7,32 +7,32 @@ export function Loader({ fullScreen = true, label = '' }) {
   const inner = (
     <>
       <style>{`
-        @keyframes nz-pulse-ring {
-          0%   { transform: scale(0.6); opacity: 0.8; }
-          60%  { transform: scale(1.3); opacity: 0;   }
-          100% { transform: scale(0.6); opacity: 0;   }
+        @keyframes nz-orbit-rot { to { transform: rotate(360deg); } }
+        @keyframes nz-orbit-fade {
+          0%, 100% { opacity: 0.3; scale: 0.7; }
+          50%      { opacity: 1;   scale: 1.2; }
         }
-        @keyframes nz-pulse-ring2 {
-          0%   { transform: scale(0.6); opacity: 0.5; }
-          60%  { transform: scale(1.15); opacity: 0;  }
-          100% { transform: scale(0.6); opacity: 0;   }
+        .nz-orbit {
+          position: relative; width: 80px; height: 80px;
+          animation: nz-orbit-rot 1.4s linear infinite;
         }
-        @keyframes nz-leaf-breathe {
-          0%, 100% { transform: scale(1)    rotate(-4deg); }
-          50%      { transform: scale(1.15) rotate(4deg);  }
+        .nz-orbit-dot {
+          position: absolute; width: 14px; height: 14px; border-radius: 50%;
+          top: 50%; left: 50%; margin: -7px;
         }
-        .nz-ring1 { animation: nz-pulse-ring  1.8s ease-out infinite; }
-        .nz-ring2 { animation: nz-pulse-ring2 1.8s ease-out 0.35s infinite; }
-        .nz-leaf  { animation: nz-leaf-breathe 1.8s ease-in-out infinite; }
+        .nz-orbit-dot:nth-child(1) { background: #166534; transform: rotate(0deg)   translateX(33px); animation: nz-orbit-fade 1.4s ease-in-out infinite; }
+        .nz-orbit-dot:nth-child(2) { background: #22c55e; transform: rotate(120deg) translateX(33px); animation: nz-orbit-fade 1.4s ease-in-out 0.46s infinite; }
+        .nz-orbit-dot:nth-child(3) { background: #86efac; transform: rotate(240deg) translateX(33px); animation: nz-orbit-fade 1.4s ease-in-out 0.93s infinite; }
         @media (prefers-reduced-motion: reduce) {
-          .nz-ring1, .nz-ring2, .nz-leaf { animation: none; }
+          .nz-orbit { animation-duration: 3s; }
+          .nz-orbit-dot { animation: none; }
         }
       `}</style>
-      <div className="flex flex-col items-center gap-3">
-        <div className="relative flex h-20 w-20 items-center justify-center">
-          <span className="nz-ring1 absolute inset-0 rounded-full border-2 border-emerald-500/50" />
-          <span className="nz-ring2 absolute inset-2 rounded-full border-2 border-emerald-400/40" />
-          <span className="nz-leaf relative z-10 text-4xl select-none">🌿</span>
+      <div className="flex flex-col items-center gap-4">
+        <div className="nz-orbit">
+          <span className="nz-orbit-dot" />
+          <span className="nz-orbit-dot" />
+          <span className="nz-orbit-dot" />
         </div>
         {label ? (
           <p className="text-sm font-medium text-emerald-700/75 tracking-wide">{label}</p>
