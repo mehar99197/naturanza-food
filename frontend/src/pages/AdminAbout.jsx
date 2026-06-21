@@ -164,7 +164,7 @@ export function AdminAbout() {
 
   return (
     <AdminLayout>
-      <div className="mx-auto w-full max-w-[1100px] space-y-5 pb-24">
+      <div className="mx-auto w-full max-w-[1100px] space-y-5 pb-10">
         {toast && (
           <div className="fixed right-4 top-4 z-50 flex items-center gap-3 rounded-2xl bg-emerald-700 px-5 py-3.5 text-white shadow-2xl animate-slide-in">
             <CheckCircle className="h-5 w-5" />
@@ -356,18 +356,6 @@ export function AdminAbout() {
           </div>
           <button onClick={addCertItem} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:text-emerald-700"><Plus className="h-3.5 w-3.5" /> Add certification</button>
         </Card>
-
-        {/* Sticky save */}
-        <div className="sticky bottom-4 flex justify-end">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 px-7 text-sm font-bold text-white shadow-xl shadow-emerald-500/40 transition hover:from-emerald-600 hover:to-green-700 disabled:opacity-60"
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Save Changes
-          </button>
-        </div>
       </div>
     </AdminLayout>
   );
