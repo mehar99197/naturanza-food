@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, X, TrendingUp, Package } from 'lucide-react';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useSettings } from '@/context/SettingsContext';
-import { formatPrice } from '@/lib/utils';
+import { formatPrice, getProductPricing } from '@/lib/utils';
 import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 
 const getSearchResultImage = (product) => {
@@ -221,9 +221,21 @@ export function SearchBar({ value, onChange, products = [], placeholder = 'Searc
  {highlightMatch(product?.name || '', normalizedValue)}
  </p>
  <div className="flex items-center gap-2 mt-1">
+ {(() => {
+ const pr = getProductPricing(product, settings);
+ return (
+ <span className="flex items-center gap-1.5">
  <span className="text-sm text-[#3d7a3d] font-semibold">
- {formatPrice(product.price, settings.currency)}
+ {formatPrice(pr.salePrice, settings.currency)}
  </span>
+ {pr.onSale && (
+ <span className="text-xs text-gray-400 line-through">
+ {formatPrice(pr.base, settings.currency)}
+ </span>
+ )}
+ </span>
+ );
+ })()}
  <span className="text-xs text-[#6b7a6b] capitalize">
  {String(product.category_name || product.category || 'General').replace(/-/g, ' ')}
  </span>

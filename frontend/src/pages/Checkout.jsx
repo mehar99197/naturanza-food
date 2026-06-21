@@ -23,7 +23,7 @@ import { useCart } from "@/context/CartContext";
 import { useOrders } from "@/context/OrderContext";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
-import { formatPrice } from "@/lib/utils";
+import { formatPrice, computeStoreSaleDiscount } from "@/lib/utils";
 import api, { paymentAPI, settingsAPI, cartAPI } from "@/services/api";
 import { NoIndexSEO } from "@/components/SEO";
 
@@ -707,9 +707,15 @@ export function Checkout() {
     setCouponError("");
   };
 
-  // Calculate totals with coupon
+  // Calculate totals. A store-wide sale (admin setting) takes priority over
+  // coupons: when active, coupons are disabled and the discount is the store
+  // sale reduction. When inactive, the coupon discount applies as before.
   const subtotal = totalPrice;
-  const discount = parseFloat(appliedCoupon?.discount_amount) || 0;
+  const storeSaleActive =
+    Boolean(settings.storeDiscountActive) && (Number(settings.storeDiscountPercentage) || 0) > 0;
+  const storeSaleDiscount = storeSaleActive ? computeStoreSaleDiscount(items, settings) : 0;
+  const couponDiscount = parseFloat(appliedCoupon?.discount_amount) || 0;
+  const discount = storeSaleActive ? storeSaleDiscount : couponDiscount;
   const selectedCityData = shippingCities.find(c => c.city_name === shippingData.city);
   const freeShippingThreshold = Number(settings.shippingFree) || 5000;
   const isShippingFree = paymentMethod !== 'cod' && (subtotal - discount) >= freeShippingThreshold;
@@ -2336,7 +2342,18 @@ export function Checkout() {
                 ))}
               </div>
               <div className="space-y-3 border-t border-slate-200 pt-4 sm:space-y-4">
-                {/* Coupon Input */}
+                {/* Coupon Input — hidden while a store-wide sale is active
+                    (sale and coupons cannot be combined) */}
+                {storeSaleActive ? (
+                  <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-xs text-rose-700 sm:text-sm">
+                    <Tag className="mt-0.5 h-4 w-4 flex-shrink-0 text-rose-500" />
+                    <span>
+                      <span className="font-semibold">{settings.storeDiscountLabel} is live</span> —
+                      a {Math.round(Number(settings.storeDiscountPercentage) || 0)}% discount is already
+                      applied to every item. Coupon codes can’t be combined with the sale.
+                    </span>
+                  </div>
+                ) : (
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="block text-xs font-medium text-slate-700 sm:text-sm">
@@ -2462,6 +2479,7 @@ export function Checkout() {
                     </>
                   )}
                 </div>
+                )}
 
                 {/* Price Breakdown */}
                 <div className="space-y-2.5 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:space-y-3 sm:p-4">
@@ -2476,7 +2494,9 @@ export function Checkout() {
                       <span className="flex items-center gap-1 flex-1 min-w-0">
                         <Tag className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                         <span className="truncate">
-                          Discount ({appliedCoupon?.code})
+                          {storeSaleActive
+                            ? `${settings.storeDiscountLabel} (${Math.round(Number(settings.storeDiscountPercentage) || 0)}%)`
+                            : `Discount (${appliedCoupon?.code})`}
                         </span>
                       </span>
                       <span className="ml-2 flex-shrink-0">

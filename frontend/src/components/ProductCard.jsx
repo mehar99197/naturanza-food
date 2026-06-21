@@ -5,7 +5,7 @@ import { useSettings } from '@/context/SettingsContext';
 import { useAuth } from '@/context/AuthContext';
 import { useReviews } from '@/context/ReviewContext';
 import { useWishlist } from '@/context/WishlistContext';
-import { formatPrice } from '@/lib/utils';
+import { formatPrice, getProductPricing } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import { buttonTap } from '@/lib/animations';
 import { OptimizedImage } from '@/components/OptimizedImage';
@@ -105,6 +105,7 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  const productId = product?.id ?? product?.product_id;
  const isWishlisted = isInWishlist(productId);
  const isWishlistUpdating = isUpdating(productId);
+ const pricing = getProductPricing(product, settings);
 
  const handleAddToCart = async (e) => {
  e.preventDefault();
@@ -199,12 +200,17 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  <div className="flex items-center justify-between gap-3">
  <div className="flex items-center gap-2 min-w-0">
  <span className="text-sm font-semibold text-green-600 whitespace-nowrap">
- {formatPrice(product.price, settings.currency)}
+ {formatPrice(pricing.salePrice, settings.currency)}
  </span>
- {product.originalPrice && (
+ {pricing.onSale && (
+ <>
  <span className="text-xs text-gray-400 line-through whitespace-nowrap">
- {formatPrice(product.originalPrice, settings.currency)}
+ {formatPrice(pricing.base, settings.currency)}
  </span>
+ <span className="text-[10px] font-bold text-rose-600 bg-rose-50 rounded px-1 py-0.5 whitespace-nowrap">
+ {pricing.effectivePct}% OFF
+ </span>
+ </>
  )}
  </div>
 
@@ -234,13 +240,20 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  >
  <Link to={`/product/${productId}`} className="block">
  <div className="relative">
+ <div className="absolute top-3 left-3 z-10 flex flex-col items-start gap-1.5">
+ {pricing.onSale && (
+ <span className="rounded-full px-2.5 py-1 text-xs font-bold text-white shadow-md bg-gradient-to-r from-rose-500 to-red-600">
+ {pricing.effectivePct}% OFF
+ </span>
+ )}
  {product.badge && (
  <span
- className={`absolute top-3 left-3 z-10 rounded-full px-3 py-1 text-xs font-bold text-white shadow-md ${badgeColors[product.badge] || 'bg-orange-500'}`}
+ className={`rounded-full px-3 py-1 text-xs font-bold text-white shadow-md ${badgeColors[product.badge] || 'bg-orange-500'}`}
  >
  {product.badge}
  </span>
  )}
+ </div>
 
  <motion.button
  onClick={handleWishlistToggle}
@@ -291,11 +304,11 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  <div className="flex items-center justify-between gap-2 mt-auto min-w-0">
  <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
  <span className={`${compact ? 'text-sm sm:text-base' : 'text-base sm:text-lg'} font-extrabold text-green-600 truncate`}>
- {formatPrice(product.price, settings.currency)}
+ {formatPrice(pricing.salePrice, settings.currency)}
  </span>
- {product.originalPrice && (
+ {pricing.onSale && (
  <span className={`${compact ? 'text-xs' : 'text-xs sm:text-sm'} text-gray-400 line-through truncate`}>
- {formatPrice(product.originalPrice, settings.currency)}
+ {formatPrice(pricing.base, settings.currency)}
  </span>
  )}
  </div>

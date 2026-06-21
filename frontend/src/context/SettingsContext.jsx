@@ -30,6 +30,9 @@ const DEFAULT_SETTINGS = {
  mapLatitude: 31.5204,
  mapLongitude: 74.3587,
  mapLocationLabel: 'Pakistan, Lahore',
+ storeDiscountActive: false,
+ storeDiscountPercentage: 0,
+ storeDiscountLabel: 'Store Sale',
 };
 
 const DEFAULT_EXCHANGE_RATES = {
@@ -72,6 +75,11 @@ const normalizeSettings = (payload = {}) => {
       ? Number(next.mapLongitude)
       : DEFAULT_SETTINGS.mapLongitude,
     mapLocationLabel: String(next.mapLocationLabel ?? DEFAULT_SETTINGS.mapLocationLabel),
+    storeDiscountActive: Boolean(next.storeDiscountActive),
+    storeDiscountPercentage: Number.isFinite(Number(next.storeDiscountPercentage))
+      ? Number(next.storeDiscountPercentage)
+      : 0,
+    storeDiscountLabel: String(next.storeDiscountLabel ?? DEFAULT_SETTINGS.storeDiscountLabel),
   };
 };
 

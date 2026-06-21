@@ -24,6 +24,9 @@ const DEFAULT_ADMIN_SETTINGS = {
   mapLongitude: 74.3587,
   mapLocationLabel: "Pakistan, Lahore",
   newsletterWelcomePromoCode: "",
+  storeDiscountActive: false,
+  storeDiscountPercentage: 0,
+  storeDiscountLabel: "Store Sale",
 };
 
 const toBoolean = (value, fallback = false) => {
@@ -105,6 +108,18 @@ const normalizeSettingsRow = (row = {}) => ({
     row.newsletter_welcome_promo_code == null
       ? ""
       : String(row.newsletter_welcome_promo_code),
+  storeDiscountActive: toBoolean(
+    row.store_discount_active,
+    DEFAULT_ADMIN_SETTINGS.storeDiscountActive,
+  ),
+  storeDiscountPercentage: toNumber(
+    row.store_discount_percentage,
+    DEFAULT_ADMIN_SETTINGS.storeDiscountPercentage,
+  ),
+  storeDiscountLabel:
+    row.store_discount_label == null
+      ? DEFAULT_ADMIN_SETTINGS.storeDiscountLabel
+      : String(row.store_discount_label),
 });
 
 const getAdminSettings = async (connection = null) => {
@@ -123,8 +138,9 @@ const getAdminSettings = async (connection = null) => {
       email_notifications, order_notifications, low_stock_alerts, low_stock_threshold,
       address, support_hours, facebook_url, instagram_url, twitter_url, youtube_url,
       whatsapp_number, whatsapp_enabled, map_latitude, map_longitude, map_location_label,
-      newsletter_welcome_promo_code)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      newsletter_welcome_promo_code, store_discount_active, store_discount_percentage,
+      store_discount_label)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE id = id`,
     [
       defaults.storeName,
@@ -150,6 +166,9 @@ const getAdminSettings = async (connection = null) => {
       defaults.mapLongitude,
       defaults.mapLocationLabel,
       defaults.newsletterWelcomePromoCode,
+      defaults.storeDiscountActive,
+      defaults.storeDiscountPercentage,
+      defaults.storeDiscountLabel,
     ],
   );
 
@@ -230,6 +249,21 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
             .slice(0, 40),
         }
       : {}),
+    ...(hasOwn("storeDiscountActive")
+      ? { storeDiscountActive: toBoolean(updates.storeDiscountActive, current.storeDiscountActive) }
+      : {}),
+    ...(hasOwn("storeDiscountPercentage")
+      ? {
+          storeDiscountPercentage: clamp(
+            toNumber(updates.storeDiscountPercentage, current.storeDiscountPercentage),
+            0,
+            90,
+          ),
+        }
+      : {}),
+    ...(hasOwn("storeDiscountLabel")
+      ? { storeDiscountLabel: toTrimmedString(updates.storeDiscountLabel, current.storeDiscountLabel).slice(0, 60) }
+      : {}),
   };
 
   // Default currency to PKR if not set
@@ -261,7 +295,10 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
          map_latitude = ?,
          map_longitude = ?,
          map_location_label = ?,
-         newsletter_welcome_promo_code = ?
+         newsletter_welcome_promo_code = ?,
+         store_discount_active = ?,
+         store_discount_percentage = ?,
+         store_discount_label = ?
      WHERE id = 1`,
     [
       next.storeName,
@@ -287,6 +324,9 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
       next.mapLongitude,
       next.mapLocationLabel,
       next.newsletterWelcomePromoCode,
+      next.storeDiscountActive,
+      next.storeDiscountPercentage,
+      next.storeDiscountLabel,
     ],
   );
 
@@ -319,6 +359,9 @@ const toPublicSettings = (settings) => ({
   mapLatitude: settings.mapLatitude,
   mapLongitude: settings.mapLongitude,
   mapLocationLabel: settings.mapLocationLabel,
+  storeDiscountActive: settings.storeDiscountActive,
+  storeDiscountPercentage: settings.storeDiscountPercentage,
+  storeDiscountLabel: settings.storeDiscountLabel,
 });
 
 module.exports = {

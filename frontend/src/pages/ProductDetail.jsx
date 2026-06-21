@@ -27,7 +27,7 @@ import { useSettings } from '@/context/SettingsContext';
 import { useReviews } from '@/context/ReviewContext';
 import { reviewAPI } from '@/services/api';
 import { useWishlist } from '@/context/WishlistContext';
-import { formatPrice } from '@/lib/utils';
+import { formatPrice, getProductPricing } from '@/lib/utils';
 import { convertFromPkr, hasExchangeRate } from '@/lib/exchangeRates';
 import { getAbsoluteImageUrl, getApiBaseUrl } from '@/lib/imageUtils';
 import { getProductContentDefaults, getProductContentText } from '@/lib/productContentDefaults';
@@ -365,10 +365,11 @@ export function ProductDetail() {
   const maxAllowedQty =
     Number.isFinite(stockQuantity) && stockQuantity > 0 ? stockQuantity : null;
 
-  const currentPrice = Number(product?.price || 0);
-  const originalPrice = Number(product?.originalPrice || product?.original_price || 0);
-  const hasDiscount = originalPrice > currentPrice;
-  const savedAmount = hasDiscount ? originalPrice - currentPrice : 0;
+  const pricing = getProductPricing(product, settings);
+  const currentPrice = pricing.salePrice;
+  const originalPrice = pricing.base;
+  const hasDiscount = pricing.onSale;
+  const savedAmount = pricing.saved;
   const currencyCode = String(settings.currency || 'PKR').toUpperCase();
   const hasRate = hasExchangeRate(currencyCode);
   const seoCurrency = hasRate ? currencyCode : 'PKR';
@@ -825,12 +826,20 @@ export function ProductDetail() {
                     <span className="text-base text-gray-400 line-through">
                       {formatPrice(originalPrice, settings.currency)}
                     </span>
+                    <span className="rounded-full bg-gradient-to-r from-rose-500 to-red-600 px-2.5 py-0.5 text-xs font-bold text-white">
+                      {pricing.effectivePct}% OFF
+                    </span>
                     <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">
                       Save {formatPrice(savedAmount, settings.currency)}
                     </span>
                   </>
                 ) : null}
               </div>
+              {hasDiscount && settings.storeDiscountActive ? (
+                <p className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-rose-600">
+                  🎉 {settings.storeDiscountLabel} — limited time
+                </p>
+              ) : null}
 
               <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
                 {hasStock ? <Check className="h-3.5 w-3.5" /> : <Package className="h-3.5 w-3.5" />}
@@ -1082,6 +1091,9 @@ export function ProductDetail() {
                       <>
                         <span className="text-lg text-gray-400 line-through">
                           {formatPrice(originalPrice, settings.currency)}
+                        </span>
+                        <span className="rounded-full bg-gradient-to-r from-rose-500 to-red-600 px-2.5 py-1 text-xs font-bold text-white">
+                          {pricing.effectivePct}% OFF
                         </span>
                         <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-600">
                           Save {formatPrice(savedAmount, settings.currency)}

@@ -17,7 +17,8 @@ import {
  Instagram,
  Twitter,
  Youtube,
- MessageCircle
+ MessageCircle,
+ Percent
 } from 'lucide-react';
 
 const DEFAULT_SETTINGS = {
@@ -41,7 +42,10 @@ const DEFAULT_SETTINGS = {
   whatsappEnabled: true,
   mapLatitude: 31.5204,
   mapLongitude: 74.3587,
-  mapLocationLabel: 'Pakistan, Lahore'
+  mapLocationLabel: 'Pakistan, Lahore',
+  storeDiscountActive: false,
+  storeDiscountPercentage: 0,
+  storeDiscountLabel: 'Store Sale'
 };
 
 const isValidHttpsUrl = (value) => {
@@ -127,6 +131,13 @@ export function AdminSettings() {
  delete newErrors[field];
  }
  break;
+ case 'storeDiscountPercentage':
+ if (parseFloat(value) < 0 || parseFloat(value) > 90) {
+ newErrors.storeDiscountPercentage = 'Discount must be between 0 and 90';
+ } else {
+ delete newErrors.storeDiscountPercentage;
+ }
+ break;
  case 'facebookUrl':
  case 'instagramUrl':
  case 'twitterUrl':
@@ -202,6 +213,9 @@ export function AdminSettings() {
  mapLatitude: Number(settings.mapLatitude) || 0,
  mapLongitude: Number(settings.mapLongitude) || 0,
  mapLocationLabel: settings.mapLocationLabel || '',
+ storeDiscountActive: Boolean(settings.storeDiscountActive),
+ storeDiscountPercentage: Number(settings.storeDiscountPercentage) || 0,
+ storeDiscountLabel: settings.storeDiscountLabel || 'Store Sale',
  };
 
  const savedSettings = await adminAPI.updateSettings(payload);
@@ -295,6 +309,7 @@ export function AdminSettings() {
  {[
  { key: 'store', label: 'Store' },
  { key: 'currency', label: 'Currency' },
+ { key: 'sale', label: 'Sale' },
  { key: 'contact', label: 'Contact' },
  { key: 'notifications', label: 'Notify' }
  ].map((item) => (
@@ -430,6 +445,81 @@ export function AdminSettings() {
  </select>
  </div>
  </div>
+ </div>
+
+ {/* Store-Wide Sale */}
+ <div className={`${mobileSection !== 'sale' ? 'hidden md:block' : 'block'} rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6`}>
+ <div className="flex items-center gap-3 mb-3 sm:mb-6">
+ <div className="w-10 h-10 bg-rose-100 rounded-xl flex items-center justify-center">
+ <Percent className="w-5 h-5 text-rose-600" />
+ </div>
+ <div>
+ <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Store-Wide Sale</h2>
+ <p className="text-xs text-slate-500">A discount applied automatically to every product.</p>
+ </div>
+ </div>
+
+ {/* Toggle */}
+ <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-3.5 cursor-pointer">
+ <div>
+ <p className="text-sm font-semibold text-slate-800">Activate sale</p>
+ <p className="text-xs text-slate-500">When ON, every product shows the discounted price &amp; an OFF badge. Coupons are disabled during the sale.</p>
+ </div>
+ <input
+ type="checkbox"
+ checked={Boolean(settings.storeDiscountActive)}
+ onChange={(e) => handleChange('storeDiscountActive', e.target.checked)}
+ className="peer sr-only"
+ />
+ <span className="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full bg-slate-300 transition-colors peer-checked:bg-emerald-500 after:absolute after:left-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:after:translate-x-5" />
+ </label>
+
+ <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+ <div>
+ <label className="mb-2 block text-sm font-semibold text-slate-700">
+ Discount percentage
+ </label>
+ <div className="relative">
+ <input
+ type="number"
+ min="0"
+ max="90"
+ step="1"
+ value={settings.storeDiscountPercentage ?? 0}
+ onChange={(e) => handleChange('storeDiscountPercentage', e.target.value)}
+ disabled={!settings.storeDiscountActive}
+ className={`w-full rounded-xl border px-4 py-2.5 pr-9 text-slate-700 outline-none transition-all duration-200 focus:ring-4 ${errors.storeDiscountPercentage ? 'border-rose-300 focus:border-rose-400 focus:ring-rose-100' : 'border-emerald-100 focus:border-emerald-400 focus:ring-emerald-100'} disabled:bg-slate-100 disabled:text-slate-400`}
+ />
+ <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-400">%</span>
+ </div>
+ {errors.storeDiscountPercentage && (
+ <p className="mt-1 text-xs text-rose-600">{errors.storeDiscountPercentage}</p>
+ )}
+ </div>
+ <div>
+ <label className="mb-2 block text-sm font-semibold text-slate-700">
+ Sale label
+ </label>
+ <input
+ type="text"
+ maxLength={60}
+ value={settings.storeDiscountLabel ?? 'Store Sale'}
+ onChange={(e) => handleChange('storeDiscountLabel', e.target.value)}
+ disabled={!settings.storeDiscountActive}
+ placeholder="e.g. Eid Sale"
+ className="w-full rounded-xl border border-emerald-100 bg-white px-4 py-2.5 text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 disabled:bg-slate-100 disabled:text-slate-400"
+ />
+ </div>
+ </div>
+
+ {settings.storeDiscountActive && (Number(settings.storeDiscountPercentage) || 0) > 0 && (
+ <div className="mt-3 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-700">
+ <Percent className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+ <span>
+ Live: every product is <span className="font-bold">{Math.round(Number(settings.storeDiscountPercentage) || 0)}% off</span> across the storefront, cart, checkout and invoices. Products already on a deeper discount keep their lower price.
+ </span>
+ </div>
+ )}
  </div>
 
  {/* Contact & Social */}

@@ -546,6 +546,9 @@ CREATE TABLE IF NOT EXISTS admin_settings (
     map_longitude DECIMAL(10, 7) NOT NULL DEFAULT 74.3587000,
     map_location_label VARCHAR(120) NOT NULL DEFAULT 'Pakistan, Lahore',
     newsletter_welcome_promo_code VARCHAR(40) NOT NULL DEFAULT '',
+    store_discount_active BOOLEAN NOT NULL DEFAULT FALSE,
+    store_discount_percentage DECIMAL(5, 2) NOT NULL DEFAULT 0,
+    store_discount_label VARCHAR(60) NOT NULL DEFAULT 'Store Sale',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 

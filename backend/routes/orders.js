@@ -714,7 +714,27 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     // fee table — the same sources the storefront reads, so totals match.
     const tax = 0;
     let discountAmount = 0;
-    if (couponCode) {
+
+    // Store-wide sale (admin setting) takes priority over coupons. When active,
+    // every item is reduced to store_discount_percentage off its BASE price, but
+    // only beyond any larger per-product discount it already has (max of the two)
+    // — so a product already at 20% off isn't crushed by a 15% store sale. The
+    // extra reduction is recorded as the order's discount_amount and coupons are
+    // disabled for the order. When inactive, the existing coupon flow runs.
+    const storeDiscountPercentage = adminSettings.storeDiscountActive
+      ? Math.min(Math.max(safeNumber(adminSettings.storeDiscountPercentage, 0), 0), 90)
+      : 0;
+    let effectiveCouponCode = couponCode;
+
+    if (storeDiscountPercentage > 0) {
+      effectiveCouponCode = null;
+      discountAmount = cartItems.reduce((sum, item) => {
+        const base = safeNumber(item.price, 0);
+        const perProductPct = safeNumber(item.discount_percentage, 0);
+        const extraPct = Math.max(0, storeDiscountPercentage - perProductPct);
+        return sum + (base * safeNumber(item.quantity) * extraPct) / 100;
+      }, 0);
+    } else if (couponCode) {
       const [[coupon]] = await connection.query(
         `SELECT discount_type, discount_value, min_order_amount, max_discount, usage_limit, used_count
            FROM coupons
@@ -735,6 +755,8 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
         } else {
           discountAmount = safeNumber(coupon.discount_value);
         }
+      } else {
+        effectiveCouponCode = null;
       }
     }
     discountAmount = Math.min(Math.max(0, discountAmount), subtotal);
@@ -769,7 +791,7 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
         discountAmount,
         tax,
         shippingCost,
-        couponCode,
+        effectiveCouponCode,
         paymentMethod,
         paymentStatus,
         paymentDetailsPayload ? JSON.stringify(paymentDetailsPayload) : null,

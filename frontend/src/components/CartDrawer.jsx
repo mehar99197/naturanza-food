@@ -13,7 +13,7 @@ import {
 import { useEffect } from 'react';
 import { useCart } from '@/context/CartContext';
 import { useSettings } from '@/context/SettingsContext';
-import { formatPrice } from '@/lib/utils';
+import { formatPrice, getProductPricing, computeStoreSaleDiscount } from '@/lib/utils';
 import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -40,7 +40,7 @@ export function CartDrawer() {
   // Use getAbsoluteImageUrl to convert relative URLs to absolute backend URLs
   return getAbsoluteImageUrl(imageValue, { defaultFolder: 'products' });
  };
- const getUnitPrice = (item) => item.final_price ?? item.price;
+ const getUnitPrice = (item) => getProductPricing(item, settings).salePrice;
  const getItemName = (item) => item.name || item.product_name || 'Product';
  const getCategoryLabel = (item) => item.category_name || item.category || 'Naturanza Essentials';
  const getItemKey = (item, index) => {
@@ -51,6 +51,9 @@ export function CartDrawer() {
  };
 
  const normalizedTotalPrice = Number(totalPrice) || 0;
+ // Store-wide sale: extra reduction beyond per-product discounts (already in totalPrice).
+ const storeSaleDiscount = computeStoreSaleDiscount(items, settings);
+ const discountedTotal = Math.max(0, normalizedTotalPrice - storeSaleDiscount);
 
  const handleImageError = (event) => {
  event.currentTarget.src = '/images/products/honey.webp';
@@ -243,8 +246,8 @@ export function CartDrawer() {
  {/* Free shipping progress — advance payment only (not COD) */}
  {(() => {
    const threshold = Number(settings.shippingFree) || 5000;
-   const remaining = Math.max(0, threshold - normalizedTotalPrice);
-   const pct = Math.min(100, (normalizedTotalPrice / threshold) * 100);
+   const remaining = Math.max(0, threshold - discountedTotal);
+   const pct = Math.min(100, (discountedTotal / threshold) * 100);
    const qualified = remaining === 0;
    return (
      <div className="mb-3.5 rounded-xl border border-emerald-200/60 bg-emerald-50/60 px-3 py-2.5">
@@ -277,10 +280,22 @@ export function CartDrawer() {
  {totalItems} item{totalItems === 1 ? '' : 's'} ready for checkout
  </p>
  </div>
- <p className="font-display text-xl font-bold text-slate-800">
+ <div className="text-right">
+ {storeSaleDiscount > 0 && (
+ <p className="text-xs text-slate-400 line-through">
  {formatPrice(normalizedTotalPrice, settings.currency)}
  </p>
+ )}
+ <p className="font-display text-xl font-bold text-slate-800">
+ {formatPrice(discountedTotal, settings.currency)}
+ </p>
  </div>
+ </div>
+ {storeSaleDiscount > 0 && (
+ <p className="mt-2 text-center text-[11px] font-semibold text-rose-600">
+ 🎉 {settings.storeDiscountLabel}: you save {formatPrice(storeSaleDiscount, settings.currency)}
+ </p>
+ )}
  </div>
 
  <div className="mb-3.5 flex items-center gap-2 text-[11px] text-slate-500">
