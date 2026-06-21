@@ -301,13 +301,13 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  <span className="ml-1 text-xs text-gray-400">({effectiveReviewCount})</span>
  </div>
 
- <div className="flex items-center justify-between gap-2 mt-auto min-w-0">
- <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
- <span className={`${compact ? 'text-sm sm:text-base' : 'text-base sm:text-lg'} font-extrabold text-green-600 truncate`}>
+ <div className="flex items-end justify-between gap-2 mt-auto min-w-0">
+ <div className="flex flex-col min-w-0">
+ <span className={`${compact ? 'text-sm sm:text-base' : 'text-base sm:text-lg'} font-extrabold text-green-600 whitespace-nowrap leading-tight`}>
  {formatPrice(pricing.salePrice, settings.currency)}
  </span>
  {pricing.onSale && (
- <span className={`${compact ? 'text-xs' : 'text-xs sm:text-sm'} text-gray-400 line-through truncate`}>
+ <span className={`${compact ? 'text-[10px]' : 'text-[11px] sm:text-xs'} text-gray-400 line-through whitespace-nowrap leading-tight`}>
  {formatPrice(pricing.base, settings.currency)}
  </span>
  )}
@@ -316,7 +316,7 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  <motion.button
  onClick={handleAddToCart}
  {...buttonTap}
- className={`shop-hit-target w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-green-600 text-white flex items-center justify-center shadow-sm ${compact ? 'text-xs' : 'text-sm'}`}
+ className={`shop-hit-target shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-green-600 text-white flex items-center justify-center shadow-sm ${compact ? 'text-xs' : 'text-sm'}`}
  aria-label="Add to Cart"
  >
  <ShoppingCart className={`${compact ? 'w-3.5 h-3.5' : 'w-4 h-4'}`} />
