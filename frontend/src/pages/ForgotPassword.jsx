@@ -21,7 +21,6 @@ const ForgotPassword = () => {
   const { forgotPassword } = useAuth();
 
   const [generalError, setGeneralError] = useState("");
-  const [adminPortalLink, setAdminPortalLink] = useState("");
   const [submittedEmail, setSubmittedEmail] = useState("");
 
   const {
@@ -38,7 +37,6 @@ const ForgotPassword = () => {
 
   const onSubmit = async (values) => {
     setGeneralError("");
-    setAdminPortalLink("");
 
     const response = await forgotPassword(values.email.trim().toLowerCase());
     if (response.success) {
@@ -47,15 +45,11 @@ const ForgotPassword = () => {
     }
 
     setGeneralError(response.message || "Unable to send reset link. Please try again.");
-    if (response.isAdmin) {
-      setAdminPortalLink(response.redirect || "/admin/forgot-password");
-    }
   };
 
   const handleTryAnotherEmail = () => {
     setSubmittedEmail("");
     setGeneralError("");
-    setAdminPortalLink("");
     reset();
   };
 
@@ -102,17 +96,7 @@ const ForgotPassword = () => {
                 {generalError ? (
                   <div className="mt-5 flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700">
                     <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                    <span>
-                      {generalError}
-                      {adminPortalLink ? (
-                        <Link
-                          to={adminPortalLink}
-                          className="mt-1 block font-semibold underline"
-                        >
-                          Go to admin password reset
-                        </Link>
-                      ) : null}
-                    </span>
+                    <span>{generalError}</span>
                   </div>
                 ) : null}
 

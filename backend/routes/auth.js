@@ -103,18 +103,23 @@ const isAdminAccount = (user) =>
 // pages must never create, or hand out a reset link for, an admin account —
 // otherwise anyone who knows an admin's address can drive an admin password
 // reset from the storefront.
-const ADMIN_SIGNUP_BLOCKED = {
+//
+// These refusals deliberately carry no `redirect` and never name the admin
+// panel. An unauthenticated visitor typing an address into a public form has
+// proven nothing, so pointing them at the panel would just hand a guesser the
+// door to attack. The portal is disclosed only once the person has proven the
+// account is theirs — correct password, valid Google token, or a verified email
+// code — which is why the login / google / verify-email paths still redirect.
+const ADMIN_EMAIL_SIGNUP_BLOCKED = {
   error:
-    "This email belongs to an administrator account. Customer accounts cannot be created with an admin email — sign in from the admin portal instead.",
-  isAdmin: true,
-  redirect: "/admin/login",
+    "This email address can't be used to create a customer account. Please use a different email address.",
+  code: "EMAIL_NOT_AVAILABLE",
 };
 
-const ADMIN_RESET_BLOCKED = {
+const ADMIN_EMAIL_RECOVERY_BLOCKED = {
   error:
-    "This email belongs to an administrator account. Admin passwords can only be reset from the admin portal.",
-  isAdmin: true,
-  redirect: "/admin/forgot-password",
+    "This email address can't be used to recover a customer account. Please use a different email address, or contact support if you need help.",
+  code: "EMAIL_NOT_AVAILABLE",
 };
 
 const getAllowedGoogleClientIds = () => {
@@ -490,7 +495,7 @@ router.post("/register", async (req, res) => {
 
     if (existingUsers.length > 0) {
       if (isAdminAccount(existingUsers[0])) {
-        return res.status(403).json(ADMIN_SIGNUP_BLOCKED);
+        return res.status(403).json(ADMIN_EMAIL_SIGNUP_BLOCKED);
       }
 
       // A prior signup that was never verified: steer them to verification
@@ -611,7 +616,7 @@ router.post("/resend-verification", async (req, res) => {
 
     const normalizedEmail = String(parsedBody.data.email).trim().toLowerCase();
     const [users] = await db.promise().query(
-      "SELECT id, name, email_verified FROM users WHERE email = ? LIMIT 1",
+      "SELECT id, name, role, email_verified FROM users WHERE email = ? LIMIT 1",
       [normalizedEmail],
     );
 
@@ -623,6 +628,12 @@ router.post("/resend-verification", async (req, res) => {
 
     if (!users.length || users[0].email_verified) {
       return genericOk();
+    }
+
+    // An admin row that was never marked verified would otherwise let the
+    // storefront mail a signup code to an admin address on demand.
+    if (isAdminAccount(users[0])) {
+      return res.status(403).json(ADMIN_EMAIL_SIGNUP_BLOCKED);
     }
 
     const user = users[0];
@@ -1763,7 +1774,7 @@ router.post("/forgot-password", async (req, res) => {
     // that the address is an admin one — an accepted trade for not leaving a
     // customer-side path to an admin password.
     if (isAdminAccount(user)) {
-      return res.status(403).json(ADMIN_RESET_BLOCKED);
+      return res.status(403).json(ADMIN_EMAIL_RECOVERY_BLOCKED);
     }
 
     // Check if user account is active
@@ -1847,7 +1858,7 @@ router.post("/reset-password", async (req, res) => {
     // passwords change only through POST /api/admin/reset-password.
     if (userRows.length && isAdminAccount(userRows[0])) {
       release();
-      return res.status(403).json({ ...ADMIN_RESET_BLOCKED, success: false });
+      return res.status(403).json({ ...ADMIN_EMAIL_RECOVERY_BLOCKED, success: false });
     }
 
     if (userRows.length && userRows[0].password) {
