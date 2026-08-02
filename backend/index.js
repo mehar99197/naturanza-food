@@ -98,7 +98,9 @@ app.use(
         fontSrc: ["'self'", "https:", "data:"],
         objectSrc: ["'none'"],
         mediaSrc: ["'self'"],
-        frameSrc: ["'self'", "https://accounts.google.com"],
+        // The Contact page embeds the OpenStreetMap iframe.
+        frameSrc: ["'self'", "https://accounts.google.com", "https://www.openstreetmap.org"],
+        workerSrc: ["'self'", "blob:"],
       },
     },
     crossOriginEmbedderPolicy: false,
@@ -148,6 +150,34 @@ const csrfTokenLimiter = rateLimit({
   message: {
     error: "Too many requests from this IP, please try again later.",
     retryAfter: "15 minutes",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === "OPTIONS",
+});
+
+// Password recovery is unauthenticated and sends mail to an address the caller
+// names, so without its own cap it is both a reset-email flood aimed at any
+// customer and a free relay against our SMTP reputation.
+const passwordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number.parseInt(process.env.PASSWORD_RESET_RATE_LIMIT_MAX || "10", 10) || 10,
+  message: {
+    error: "Too many password reset requests. Please try again in 15 minutes.",
+    retryAfter: "15 minutes",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === "OPTIONS",
+});
+
+// Public forms that put a message in someone's inbox.
+const publicFormLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: Number.parseInt(process.env.PUBLIC_FORM_RATE_LIMIT_MAX || "15", 10) || 15,
+  message: {
+    error: "Too many submissions from this IP. Please try again later.",
+    retryAfter: "1 hour",
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -406,6 +436,20 @@ if (ENABLE_RATE_LIMITS) {
   app.use("/api/auth/refresh", refreshLimiter);
   app.use("/api/auth/refresh-token", refreshLimiter);
   app.use("/api/admin/login", authLimiter);
+  // The staff gate is a login endpoint too — it sat at the general 2000/15min
+  // budget, which is a password-spraying window across every staff account.
+  app.use("/api/admin/staff-login", authLimiter);
+
+  app.use("/api/auth/forgot-password", passwordResetLimiter);
+  app.use("/api/auth/reset-password", passwordResetLimiter);
+  app.use("/api/admin/forgot-password", passwordResetLimiter);
+  app.use("/api/admin/reset-password", passwordResetLimiter);
+
+  // POST only: the same prefix carries the admin Messages screen (GET/PUT/
+  // DELETE), which an admin working through the inbox would blow past.
+  app.use("/api/contact", (req, res, next) =>
+    req.method === "POST" ? publicFormLimiter(req, res, next) : next(),
+  );
 
   app.use("/api/csrf-token", csrfTokenLimiter);
 

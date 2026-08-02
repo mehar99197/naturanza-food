@@ -850,9 +850,10 @@ export function Checkout() {
         phone: shippingData.phone,
         city: shippingData.city,
         payment_method: paymentMethod,
-        payment_status: isOfflinePayment ? "pending" : "paid",
-        shipping_cost: Number(deliveryFee) || 0,
-        discount_amount: Number(discount) || 0,
+        // No payment_status / shipping_cost / discount_amount here on purpose:
+        // the server derives the payment status from the method and recomputes
+        // every money field from the cart, the coupon table and the city fee
+        // table. Sending them suggested the client had a say in the total.
         coupon_code: appliedCoupon?.code || null,
       };
 
@@ -1063,12 +1064,10 @@ export function Checkout() {
             phone: shippingData.phone,
             city: shippingData.city,
             payment_method: paymentMethod,
-            payment_status: "pending",
-            // Server recomputes the subtotal from cart prices, but it stores
-            // these values as-is. The verification step later reads
-            // shipping_cost off the order, so it MUST be non-zero for COD.
-            shipping_cost: Number(deliveryFee) || 0,
-            discount_amount: Number(discount) || 0,
+            // Money fields are the server's to decide — see the note on the
+            // other create call above. The COD advance step reads shipping_cost
+            // back off the stored order, which the server sets from the city
+            // fee table for the city sent above.
             coupon_code: appliedCoupon?.code || null,
           };
 

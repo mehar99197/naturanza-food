@@ -43,6 +43,20 @@ const escapeAttr = (value) =>
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 
+// JSON.stringify leaves `<` and `/` alone, so a product name containing
+// "</script>" would close the JSON-LD block and everything after it would be
+// parsed as markup — stored XSS on the product page, sourced from a DB field.
+// The escapes below are inert inside JSON string literals (a JSON parser reads
+// < as "<") while being impossible for the HTML parser to mistake for a
+// tag. U+2028/U+2029 are legal in JSON but break JavaScript string literals.
+const serializeJsonLd = (value) =>
+  JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+
 const truncate = (text, max = 160) => {
   const clean = String(text || "").replace(/\s+/g, " ").trim();
   if (clean.length <= max) return clean;
@@ -92,7 +106,7 @@ const applyMeta = (template, meta) => {
   }
 
   if (meta.jsonLd) {
-    const block = `<script type="application/ld+json">${JSON.stringify(meta.jsonLd)}</script>`;
+    const block = `<script type="application/ld+json">${serializeJsonLd(meta.jsonLd)}</script>`;
     html = html.replace("</head>", `    ${block}\n  </head>`);
   }
 

@@ -1037,45 +1037,43 @@ router.put("/profile", authenticateToken, restrictBody('name', 'email', 'phone',
     return res.status(400).json({ error: "Name and email are required" });
   }
 
-  const emailCheckQuery =
-    "SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1";
-  db.query(emailCheckQuery, [email, req.user.id], (emailErr, emailResults) => {
-    if (emailErr) {
-      return res.status(500).json({ error: "Database error" });
+  // The address of record is where password-reset mail goes, and nothing here
+  // proves the caller owns the new one — this endpoint would happily move an
+  // account onto an unverified address (and let it squat an address someone
+  // else has not registered yet). The profile form ships the field read-only
+  // ("Cannot be changed"), so accept the current value and reject a change;
+  // moving an email is a support action, not a self-service one.
+  if (email !== String(req.user.email || "").trim().toLowerCase()) {
+    return res.status(400).json({
+      error:
+        "Email address cannot be changed here. Please contact support to update it.",
+      code: "EMAIL_CHANGE_NOT_ALLOWED",
+    });
+  }
+
+  const updateQuery =
+    "UPDATE users SET name = ?, phone = ?, address = ? WHERE id = ?";
+  db.query(updateQuery, [name, phone, address, req.user.id], (updateErr) => {
+    if (updateErr) {
+      return res.status(500).json({ error: "Error updating profile" });
     }
 
-    if (emailResults.length > 0) {
-      return res.status(409).json({ error: "Email is already in use" });
-    }
+    const profileQuery =
+      "SELECT id, name, email, phone, address, role, profile_image, signup_provider, password_set_by_user, created_at FROM users WHERE id = ?";
+    db.query(profileQuery, [req.user.id], (profileErr, profileResults) => {
+      if (profileErr) {
+        return res.status(500).json({ error: "Database error" });
+      }
 
-    const updateQuery =
-      "UPDATE users SET name = ?, email = ?, phone = ?, address = ? WHERE id = ?";
-    db.query(
-      updateQuery,
-      [name, email, phone, address, req.user.id],
-      (updateErr) => {
-        if (updateErr) {
-          return res.status(500).json({ error: "Error updating profile" });
-        }
+      if (profileResults.length === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
 
-        const profileQuery =
-          "SELECT id, name, email, phone, address, role, profile_image, signup_provider, password_set_by_user, created_at FROM users WHERE id = ?";
-        db.query(profileQuery, [req.user.id], (profileErr, profileResults) => {
-          if (profileErr) {
-            return res.status(500).json({ error: "Database error" });
-          }
-
-          if (profileResults.length === 0) {
-            return res.status(404).json({ error: "User not found" });
-          }
-
-          return res.json({
-            message: "Profile updated successfully",
-            user: profileResults[0],
-          });
-        });
-      },
-    );
+      return res.json({
+        message: "Profile updated successfully",
+        user: profileResults[0],
+      });
+    });
   });
 });
 

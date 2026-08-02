@@ -10,6 +10,12 @@ const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/
 const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
 const { getAboutContent, updateAboutContent } = require("../utils/aboutContent");
 const { getClientIp } = require("../utils/clientIp");
+const { logAdminAction } = require("../utils/adminHelpers");
+
+// Admin records are managed only through /api/admin-management. Anything on the
+// Customers screen operates on customer rows, never on an admin row.
+const isSuperAdminUser = (user) =>
+  String(user?.admin_role || "").trim().toLowerCase() === "super_admin";
 const { buildInternalEan13 } = require("../utils/barcode");
 const asyncHandler = require("../middleware/asyncHandler");
 const newsletterController = require("../controllers/newsletterController");
@@ -1124,7 +1130,11 @@ router.delete("/reviews/:id", async (req, res) => {
 // Get all users
 router.get("/users", async (req, res) => {
   try {
-    const includeAdmins = req.query.include_admins === "true";
+    // Only a super admin may list admin rows. The ids and emails this returns
+    // are exactly what the write endpoints below key on, so handing the admin
+    // roster to any admin token is the first half of a takeover chain.
+    const includeAdmins =
+      req.query.include_admins === "true" && isSuperAdminUser(req.user);
     const [rows] = await db.promise().query(
       `SELECT
                 u.id,
@@ -1226,13 +1236,35 @@ router.put("/users/:id", restrictBody('name', 'email', 'phone', 'address'), asyn
       return res.status(400).json({ error: "Name and email are required" });
     }
 
+    // Customer rows only. Without this the Customers screen rewrote ANY row it
+    // was given an id for — set the super admin's email to an attacker's
+    // address, then run POST /api/admin/forgot-password and the reset link
+    // lands in their inbox. Admin records are managed through
+    // /api/admin-management, which is super-admin gated.
+    const [[target]] = await db.promise().query(
+      "SELECT id, role, email FROM users WHERE id = ? LIMIT 1",
+      [userId],
+    );
+
+    if (!target) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (String(target.role || "").trim().toLowerCase() !== "customer") {
+      return res
+        .status(403)
+        .json({ error: "Administrator accounts cannot be edited from the Customers screen" });
+    }
+
+    const nextEmail = String(email).trim().toLowerCase();
+
     const [result] = await db.promise().query(
       `UPDATE users
              SET name = ?, email = ?, phone = ?, address = ?
-             WHERE id = ?`,
+             WHERE id = ? AND role = 'customer'`,
       [
         String(name).trim(),
-        String(email).trim().toLowerCase(),
+        nextEmail,
         toNullableString(phone),
         toNullableString(address),
         userId,
@@ -1241,6 +1273,16 @@ router.put("/users/:id", restrictBody('name', 'email', 'phone', 'address'), asyn
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "User not found" });
+    }
+
+    // Moving a customer's address of record redirects their password-reset
+    // mail, so it gets an audit trail even though it is a valid support action.
+    if (target.email !== nextEmail) {
+      await logAdminAction(
+        req.user.id,
+        `Changed email for customer ${userId}: ${target.email} -> ${nextEmail}`,
+        getClientIp(req),
+      );
     }
 
     const [rows] = await db.promise().query(
@@ -1277,10 +1319,28 @@ router.patch("/users/:id/status", restrictBody('is_active'), async (req, res) =>
         .json({ error: "Cannot change your own active status" });
     }
 
+    // Customer rows only — see PUT /users/:id. Deactivating an admin from here
+    // locked the super admin out of the panel entirely (middleware/auth.js
+    // rejects any token whose user is not is_active).
+    const [[target]] = await db.promise().query(
+      "SELECT id, role FROM users WHERE id = ? LIMIT 1",
+      [userId],
+    );
+
+    if (!target) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (String(target.role || "").trim().toLowerCase() !== "customer") {
+      return res
+        .status(403)
+        .json({ error: "Administrator accounts cannot be changed from the Customers screen" });
+    }
+
     const nextActive = toBoolean(req.body?.is_active, true);
     const [result] = await db
       .promise()
-      .query("UPDATE users SET is_active = ? WHERE id = ?", [
+      .query("UPDATE users SET is_active = ? WHERE id = ? AND role = 'customer'", [
         nextActive,
         userId,
       ]);

@@ -3,6 +3,7 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 const { optimizeProductImage } = require('../utils/imageOptimizer');
+const { sanitizeObject } = require('./security');
 
 // Ensure upload directories exist
 const ensureDir = (dir) => {
@@ -85,6 +86,14 @@ const uploadAndCompress = (fieldName, folder = 'products', options = {}) => {
             // Clean up: remove the file field from req.body to avoid clashes with restrictBody
             if (req.body && req.body[fieldName] !== undefined) {
                 delete req.body[fieldName];
+            }
+
+            // The app-wide sanitizeRequestBody in index.js runs BEFORE routing,
+            // when a multipart body has not been parsed yet — so every text
+            // field arriving alongside an upload skipped it entirely while the
+            // rest of the codebase assumed all input had been scrubbed.
+            if (req.body && typeof req.body === 'object') {
+                req.body = sanitizeObject(req.body);
             }
 
             if (err) {

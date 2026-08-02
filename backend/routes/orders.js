@@ -623,6 +623,15 @@ const getOrderWithAuthorization = async (connection, orderId, user) => {
 
 // Create order from cart
 router.post('/create', authenticateToken, restrictBody('shipping_address', 'phone', 'discount_amount', 'tax', 'shipping_cost', 'payment_method', 'payment_status', 'customer_name', 'customer_email', 'city', 'coupon_code', 'notes', 'address_id', 'estimated_delivery', 'payment_details'), async (req, res) => {
+  // Still accepted by restrictBody above so an already-loaded checkout tab keeps
+  // working, but every one of them is recomputed from the cart, the coupon table
+  // and the city fee table below. Drop them so no later change to this handler
+  // can read a client-supplied total back in.
+  delete req.body.payment_status;
+  delete req.body.discount_amount;
+  delete req.body.tax;
+  delete req.body.shipping_cost;
+
   const shippingAddress = String(req.body?.shipping_address || '').trim();
   const phone = String(req.body?.phone || '').trim();
 
