@@ -71,6 +71,9 @@
     "web-vitals": "^5.2.0",
     "zod": "^4.3.5"
   },
+  "overrides": {
+    "esbuild": "^0.28.1"
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@vitejs/plugin-react-swc": "^4.3.0",
@@ -92,13 +95,13 @@
   "main": "index.html",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mehar99197/Naturanzafood-Frontend-Backend.git"
+    "url": "git+https://github.com/mehar99197/naturanza-food.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/mehar99197/Naturanzafood-Frontend-Backend/issues"
+    "url": "https://github.com/mehar99197/naturanza-food/issues"
   },
-  "homepage": "https://github.com/mehar99197/Naturanzafood-Frontend-Backend#readme"
+  "homepage": "https://github.com/mehar99197/naturanza-food#readme"
 }
