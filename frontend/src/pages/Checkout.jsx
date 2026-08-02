@@ -985,6 +985,9 @@ export function Checkout() {
   if (step === "verification") {
     // For COD, use advance fee (delivery fee); for others, use full total
     const verificationTotal = paymentMethod === "cod" ? (confirmedAdvanceFee || deliveryFee) : (confirmedTotal || finalTotal);
+    // Grand total of the order (subtotal - discount + shipping). Once the order
+    // is placed the server-confirmed amount takes over.
+    const orderTotal = confirmedTotal || finalTotal;
     const selectedVerificationAccount = activeAccountsByType.get(verificationPaymentMethod);
     const isCod = paymentMethod === "cod";
     const verificationMethodLabel = verificationPaymentMethod === "easypaisa" ? "EasyPaisa" : "JazzCash";
@@ -1139,7 +1142,7 @@ export function Checkout() {
               </h1>
               <p className="text-sm sm:text-base text-gray-600">
                 {isCod
-                  ? `Pay ${formatPrice(verificationTotal, settings.currency)} delivery fee in advance to confirm your order. The remaining ${formatPrice(Math.max(0, (confirmedTotal || finalTotal) - verificationTotal), settings.currency)} will be collected as cash on delivery.`
+                  ? `Pay ${formatPrice(verificationTotal, settings.currency)} delivery fee in advance to confirm your order. The remaining ${formatPrice(Math.max(0, orderTotal - verificationTotal), settings.currency)} will be collected as cash on delivery.`
                   : "Please upload your payment screenshot to confirm your order."}
               </p>
             </div>
@@ -1346,7 +1349,7 @@ export function Checkout() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Subtotal:</span>
-                  <span className="font-medium text-gray-800">{formatPrice(subtotal - discount, settings.currency)}</span>
+                  <span className="font-medium text-gray-800">{formatPrice(subtotal, settings.currency)}</span>
                 </div>
                 {discount > 0 && (
                   <div className="flex justify-between">
@@ -1354,9 +1357,17 @@ export function Checkout() {
                     <span className="font-medium text-emerald-600">-{formatPrice(discount, settings.currency)}</span>
                   </div>
                 )}
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Shipping:</span>
+                  <span className="font-medium text-gray-800">
+                    {deliveryFee > 0
+                      ? formatPrice(deliveryFee, settings.currency)
+                      : <span className="text-emerald-600 font-semibold">Free</span>}
+                  </span>
+                </div>
                 <div className="flex justify-between border-t border-slate-200 pt-2">
                   <span className="text-gray-600 font-semibold">Order Total:</span>
-                  <span className="font-bold text-gray-800">{formatPrice(finalTotal, settings.currency)}</span>
+                  <span className="font-bold text-gray-800">{formatPrice(orderTotal, settings.currency)}</span>
                 </div>
                 {isCod && (
                   <>
@@ -1366,13 +1377,13 @@ export function Checkout() {
                     </div>
                     <div className="flex justify-between bg-amber-50 p-2 rounded-lg">
                       <span className="text-amber-700 font-medium">Pending (COD):</span>
-                      <span className="font-bold text-amber-700">{formatPrice(Math.max(0, finalTotal - verificationTotal), settings.currency)}</span>
+                      <span className="font-bold text-amber-700">{formatPrice(Math.max(0, orderTotal - verificationTotal), settings.currency)}</span>
                     </div>
                   </>
                 )}
                 {!isCod && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-600 font-semibold">Total:</span>
+                  <div className="flex justify-between bg-emerald-50 p-2 rounded-lg mt-2">
+                    <span className="text-emerald-700 font-medium">Amount to Pay:</span>
                     <span className="font-bold text-emerald-700">{formatPrice(verificationTotal, settings.currency)}</span>
                   </div>
                 )}
