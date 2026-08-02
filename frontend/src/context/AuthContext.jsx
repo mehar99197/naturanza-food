@@ -560,17 +560,9 @@ export const AuthProvider = ({ children }) => {
       await userAPI.forgotPassword({ email });
       return { success: true, message: "Reset link sent to your email" };
     } catch (err) {
-      const responseData = err.response?.data || {};
-      const message = responseData.error || "Failed to send reset link";
+      const message = err.response?.data?.error || "Failed to send reset link";
       setError(message);
-      // An admin address is refused here on purpose; pass the flag through so
-      // the page can point them at the admin portal instead of dead-ending.
-      return {
-        success: false,
-        message,
-        isAdmin: Boolean(responseData.isAdmin),
-        redirect: responseData.redirect || null,
-      };
+      return { success: false, message };
     }
   };
 
