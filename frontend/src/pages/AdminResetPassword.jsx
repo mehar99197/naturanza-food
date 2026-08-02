@@ -2,8 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, CheckCircle2, Eye, EyeOff, Lock } from "lucide-react";
 import { useForm } from "react-hook-form";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+import { adminAPI } from "@/services/api";
 
 const AdminResetPassword = () => {
   const navigate = useNavigate();
@@ -75,19 +74,11 @@ const AdminResetPassword = () => {
     }
 
     try {
-      const response = await fetch(`${API_URL}/admin/reset-password`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          token,
-          password: values.password,
-          confirmPassword: values.confirmPassword,
-        }),
+      const data = await adminAPI.resetPasswordWithToken({
+        token,
+        password: values.password,
+        confirmPassword: values.confirmPassword,
       });
-
-      const data = await response.json();
 
       if (data.success) {
         const nextPath =
@@ -105,7 +96,8 @@ const AdminResetPassword = () => {
       const friendlyError = getResetErrorMessage(data.error);
       setGeneralError(friendlyError || "Failed to reset password. Please try again.");
     } catch (error) {
-      setGeneralError("Failed to reset password. Please try again.");
+      const friendlyError = getResetErrorMessage(error?.response?.data?.error);
+      setGeneralError(friendlyError || "Failed to reset password. Please try again.");
     }
   };
 

@@ -513,6 +513,13 @@ export const productAPI = {
     return response.data;
   },
 
+  uploadImage: async (file) => {
+    const formData = new FormData();
+    formData.append("product_image", file);
+    const response = await axiosInstance.post("/products/upload-image", formData);
+    return response.data;
+  },
+
   getById: async (id) => {
     const response = await axiosInstance.get(`/products/${id}`);
     return response.data;
@@ -922,6 +929,19 @@ export const adminAPI = {
       setAdminAccessToken(response.data.token);
       emitAuthSessionSync("admin-login");
     }
+    return response.data;
+  },
+
+  // Admin-side password recovery. Distinct from userAPI.forgotPassword (which
+  // targets the storefront /auth routes) and from resetPassword below (which is
+  // a super-admin forcing a reset on someone else's account).
+  forgotPassword: async (email) => {
+    const response = await axiosInstance.post("/admin/forgot-password", { email });
+    return response.data;
+  },
+
+  resetPasswordWithToken: async (payload) => {
+    const response = await axiosInstance.post("/admin/reset-password", payload);
     return response.data;
   },
 

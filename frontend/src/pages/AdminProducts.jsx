@@ -24,7 +24,7 @@ import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
 import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 import { ProductBarcode } from "@/components/ProductBarcode";
-import { adminAPI } from "@/services/api";
+import { adminAPI, productAPI } from "@/services/api";
 
 const initialFormState = {
   name: "",
@@ -413,33 +413,21 @@ export function AdminProducts() {
   };
 
   // Uploads one file to the product image endpoint and resolves to its stored URL.
+  // Goes through the shared axios instance so the request carries the CSRF token
+  // and admin auth header — a bare fetch() skips both and is rejected with 403
+  // in production, which silently left products with no image.
   const uploadImageFile = async (file) => {
-    const uploadFormData = new FormData();
-    uploadFormData.append('product_image', file);
-
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/products/upload-image`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminAccessToken') || localStorage.getItem('token')}`
-      },
-      body: uploadFormData,
-      credentials: 'include'
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorMessage = 'Failed to upload image';
-      try {
-        errorMessage = JSON.parse(errorText).error || errorMessage;
-      } catch (e) {
-        errorMessage = errorText || errorMessage;
-      }
-      throw new Error(errorMessage);
+    let data;
+    try {
+      data = await productAPI.uploadImage(file);
+    } catch (requestError) {
+      throw new Error(
+        requestError?.response?.data?.error || "Failed to upload image",
+      );
     }
 
-    const data = await response.json();
-    if (!data.imageUrl) {
-      throw new Error('Upload did not return an image URL');
+    if (!data?.imageUrl) {
+      throw new Error("Upload did not return an image URL");
     }
     return data.imageUrl;
   };

@@ -2,8 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertCircle, ArrowLeft, CheckCircle2, Mail } from "lucide-react";
 import { useForm } from "react-hook-form";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+import { adminAPI } from "@/services/api";
 
 const AdminForgotPassword = () => {
   const [generalError, setGeneralError] = useState("");
@@ -25,17 +24,7 @@ const AdminForgotPassword = () => {
     setGeneralError("");
 
     try {
-      const response = await fetch(`${API_URL}/admin/forgot-password`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: values.email.trim().toLowerCase(),
-        }),
-      });
-
-      const data = await response.json();
+      const data = await adminAPI.forgotPassword(values.email.trim().toLowerCase());
 
       if (data.success) {
         setSubmittedEmail(values.email.trim());
@@ -44,7 +33,9 @@ const AdminForgotPassword = () => {
 
       setGeneralError(data.error || "Unable to send reset link. Please try again.");
     } catch (error) {
-      setGeneralError("Unable to send reset link. Please try again.");
+      setGeneralError(
+        error?.response?.data?.error || "Unable to send reset link. Please try again.",
+      );
     }
   };
 
