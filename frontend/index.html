@@ -4,6 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
+    <!--
+      Content Security Policy.
+
+      The Node server already sends this policy as a header (helmet, see
+      backend/index.js), but the CDN in front of production replaces the
+      Content-Security-Policy header with its own "upgrade-insecure-requests",
+      so the policy never reached a browser. A meta-equivalent policy is
+      delivered inside the document itself and cannot be rewritten at the edge.
+
+      Mirrors the header directives; frame-ancestors is header-only (ignored in
+      meta) and stays covered by X-Frame-Options: SAMEORIGIN.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://accounts.google.com https://apis.google.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https: http:; font-src 'self' https: data:; connect-src 'self' https://www.google-analytics.com https://accounts.google.com https://apis.google.com https://www.googletagmanager.com; media-src 'self'; frame-src 'self' https://accounts.google.com https://www.openstreetmap.org; worker-src 'self' blob:"
+    />
+
     <!-- Primary Meta Tags -->
     <title>Naturanza Food - Premium Organic & Natural Products | Buy Online in Pakistan</title>
     <meta name="title" content="Naturanza Food - Premium Organic & Natural Products | Buy Online in Pakistan" />

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/requirePermission');
+const { requirePermission, hasPermission } = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
 const { createInvoicePdfBuffer } = require('../utils/invoicePdf');
@@ -615,15 +615,35 @@ const getOrderWithAuthorization = async (connection, orderId, user) => {
   }
 
   const order = orderRows[0];
-  if (order.user_id !== user.id && user.role !== 'admin') {
-    return { error: { code: 403, message: 'Access denied' } };
+  if (order.user_id === user.id) {
+    return { order };
   }
 
-  return { order };
+  // Someone else's order: `role === 'admin'` alone is not enough. Every staff
+  // admin satisfies that, so the old check handed the full order record —
+  // customer name, email, phone, shipping address, line items, and the invoice
+  // built from them — to an admin whose only grant might be Blog. Reading
+  // another customer's order requires the Orders grant, the same one that
+  // guards GET /api/orders/admin/all.
+  if (String(user.role || '').trim().toLowerCase() === 'admin' &&
+      hasPermission(user, 'manage_orders')) {
+    return { order };
+  }
+
+  return { error: { code: 403, message: 'Access denied' } };
 };
 
 // Create order from cart
 router.post('/create', authenticateToken, restrictBody('shipping_address', 'phone', 'discount_amount', 'tax', 'shipping_cost', 'payment_method', 'payment_status', 'customer_name', 'customer_email', 'city', 'coupon_code', 'notes', 'address_id', 'estimated_delivery', 'payment_details'), async (req, res) => {
+  // These four are still accepted by restrictBody above so an already-loaded
+  // checkout tab keeps working, but every one of them is recomputed from the
+  // cart, the coupon table and the city fee table below. Drop them here so no
+  // later change to this handler can read a client-supplied total back in.
+  delete req.body.payment_status;
+  delete req.body.discount_amount;
+  delete req.body.tax;
+  delete req.body.shipping_cost;
+
   const shippingAddress = String(req.body?.shipping_address || '').trim();
   const phone = String(req.body?.phone || '').trim();
 

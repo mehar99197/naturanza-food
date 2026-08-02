@@ -5,13 +5,18 @@ const { db } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
 const requireSuperAdmin = require("../middleware/requireSuperAdmin");
 const { createConnectionReleaser } = require("../utils/dbConnection");
-const { requirePermission, requireAnyPermission } = require("../middleware/requirePermission");
+const {
+  requirePermission,
+  requireAnyPermission,
+  isSuperAdmin,
+} = require("../middleware/requirePermission");
 const { restrictBody } = require("../middleware/security");
 const { issueAccessToken, verifyAccessToken, toExpiryDate } = require("../utils/jwtTokens");
 const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/tokenStore");
 const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
 const { getAboutContent, updateAboutContent } = require("../utils/aboutContent");
 const { getClientIp } = require("../utils/clientIp");
+const { logAdminAction } = require("../utils/adminHelpers");
 const { buildInternalEan13 } = require("../utils/barcode");
 const asyncHandler = require("../middleware/asyncHandler");
 const newsletterController = require("../controllers/newsletterController");
@@ -880,8 +885,10 @@ router.get("/dashboard/stats", async (req, res) => {
   }
 });
 
-// Recent orders
-router.get("/dashboard/recent-orders", async (req, res) => {
+// Recent orders. Every row carries a customer's name and email, so this feed is
+// gated like the rest of the order/report surface rather than being open to any
+// admin token. The dashboard degrades this widget on 403 (see AdminDashboard).
+router.get("/dashboard/recent-orders", requireAnyPermission("manage_orders", "view_reports", "view_analytics"), async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
     const [results] = await db.promise().query(`
@@ -1129,7 +1136,12 @@ router.delete("/reviews/:id", requirePermission("manage_reviews"), async (req, r
 // Get all users
 router.get("/users", requirePermission("manage_customers"), async (req, res) => {
   try {
-    const includeAdmins = req.query.include_admins === "true";
+    // Only a super admin may list admin rows. For everyone else this endpoint
+    // is the Customers screen and must stay customer-only: the ids and emails
+    // it returns are exactly what the write endpoints below key on, so leaking
+    // the admin roster here is the first half of an account-takeover chain.
+    const includeAdmins =
+      req.query.include_admins === "true" && isSuperAdmin(req.user);
 
     // Pagination is OPT-IN. The Customers screen fetches this list in full and
     // derives its totals (customer count, active/blocked split) client-side, so
@@ -1244,13 +1256,35 @@ router.put("/users/:id", requirePermission("manage_customers"), restrictBody('na
       return res.status(400).json({ error: "Name and email are required" });
     }
 
+    // This is the Customers screen, and `manage_customers` is a staff grant.
+    // Without the role check the same handler would rewrite an ADMIN row —
+    // set the super admin's email to an attacker-controlled address, then run
+    // POST /api/admin/forgot-password and take the account over. Admin records
+    // are managed only through /api/admin-management.
+    const [[target]] = await db.promise().query(
+      "SELECT id, role, email FROM users WHERE id = ? LIMIT 1",
+      [userId],
+    );
+
+    if (!target) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (String(target.role || "").trim().toLowerCase() !== "customer") {
+      return res
+        .status(403)
+        .json({ error: "Administrator accounts cannot be edited from the Customers screen" });
+    }
+
+    const nextEmail = String(email).trim().toLowerCase();
+
     const [result] = await db.promise().query(
       `UPDATE users
              SET name = ?, email = ?, phone = ?, address = ?
-             WHERE id = ?`,
+             WHERE id = ? AND role = 'customer'`,
       [
         String(name).trim(),
-        String(email).trim().toLowerCase(),
+        nextEmail,
         toNullableString(phone),
         toNullableString(address),
         userId,
@@ -1259,6 +1293,17 @@ router.put("/users/:id", requirePermission("manage_customers"), restrictBody('na
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "User not found" });
+    }
+
+    // Changing a customer's address of record redirects their password-reset
+    // mail, so it is worth an audit trail even though it is a legitimate
+    // support action.
+    if (target.email !== nextEmail) {
+      await logAdminAction(
+        req.user.id,
+        `Changed email for customer ${userId}: ${target.email} -> ${nextEmail}`,
+        getClientIp(req),
+      );
     }
 
     const [rows] = await db.promise().query(
@@ -1295,10 +1340,28 @@ router.patch("/users/:id/status", requirePermission("manage_customers"), restric
         .json({ error: "Cannot change your own active status" });
     }
 
+    // Customer rows only — see PUT /users/:id. Deactivating an admin from here
+    // let a staff admin lock the super admin out of the panel entirely
+    // (middleware/auth.js rejects any token whose user is not is_active).
+    const [[target]] = await db.promise().query(
+      "SELECT id, role FROM users WHERE id = ? LIMIT 1",
+      [userId],
+    );
+
+    if (!target) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (String(target.role || "").trim().toLowerCase() !== "customer") {
+      return res
+        .status(403)
+        .json({ error: "Administrator accounts cannot be changed from the Customers screen" });
+    }
+
     const nextActive = toBoolean(req.body?.is_active, true);
     const [result] = await db
       .promise()
-      .query("UPDATE users SET is_active = ? WHERE id = ?", [
+      .query("UPDATE users SET is_active = ? WHERE id = ? AND role = 'customer'", [
         nextActive,
         userId,
       ]);

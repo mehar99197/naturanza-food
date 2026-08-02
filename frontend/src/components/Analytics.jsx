@@ -136,18 +136,15 @@ export function AnalyticsTracker() {
     script.src = `https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`;
     document.head.appendChild(script);
 
-    const inlineScript = document.createElement('script');
-    inlineScript.textContent = `
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', '${GA_MEASUREMENT_ID}');
-    `;
-    document.head.appendChild(inlineScript);
+    // The bootstrap runs as module code, not as an injected inline <script>.
+    // An inline script is exactly what the site's CSP forbids (script-src has
+    // no 'unsafe-inline'), so the old version would have been blocked outright
+    // the moment a measurement ID was configured. initAnalytics does the same
+    // dataLayer/gtag setup directly.
+    initAnalytics();
 
     return () => {
       document.head.removeChild(script);
-      document.head.removeChild(inlineScript);
     };
   }, []);
 

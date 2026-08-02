@@ -1,6 +1,22 @@
 const express = require('express');
 const router = express.Router();
 
+// Every value that reaches these handlers comes from a client-controlled source
+// (a query param or a forwarded header), and it is interpolated into an outbound
+// URL. Accept only something that is actually an IP address, so the request path
+// sent to the geo provider can never be steered by the caller.
+const IPV4_REGEX = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+const IPV6_REGEX = /^[0-9a-f:]+$/i;
+
+const asValidIp = (value) => {
+  const candidate = String(value || '').trim();
+  if (!candidate) return null;
+  if (IPV4_REGEX.test(candidate)) {
+    return candidate.split('.').every((part) => Number(part) <= 255) ? candidate : null;
+  }
+  return IPV6_REGEX.test(candidate) && candidate.includes(':') ? candidate : null;
+};
+
 // Currency mapping for countries
 const CURRENCY_MAP = {
   'US': 'USD',
@@ -52,6 +68,8 @@ router.get('/currency', async (req, res) => {
     if (userIP && userIP.includes('::ffff:')) {
       userIP = userIP.split('::ffff:')[1];
     }
+
+    userIP = asValidIp(userIP);
 
     // For localhost/development, use a default or skip IP lookup
     if (!userIP || userIP === '127.0.0.1' || userIP === '::1' || userIP.startsWith('192.168.') || userIP.startsWith('10.')) {
@@ -139,6 +157,10 @@ router.get('/info', async (req, res) => {
       userIP = userIP.split('::ffff:')[1];
     }
 
+    // Anything that is not a bare IP is treated as absent — it must never reach
+    // the outbound URL below.
+    userIP = asValidIp(userIP);
+
     if (!userIP || userIP === '127.0.0.1' || userIP === '::1' || userIP.startsWith('192.168.') || userIP.startsWith('10.')) {
       return res.json({
         ip: userIP,
@@ -152,7 +174,10 @@ router.get('/info', async (req, res) => {
       });
     }
 
-    const response = await fetch(`https://ipapi.co/${userIP}/json/`);
+    const response = await fetch(
+      `https://ipapi.co/${encodeURIComponent(userIP)}/json/`,
+      { signal: AbortSignal.timeout(4000) },
+    );
     const data = await response.json();
     
     res.json({
