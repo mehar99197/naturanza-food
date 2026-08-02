@@ -94,6 +94,29 @@ setInterval(() => {
   }
 }, LOCATION_CACHE_TTL_MS);
 
+// Super admins and staff admins are both stored as role = 'admin' (admin_role
+// only distinguishes the two), so this single check covers every admin account.
+const isAdminAccount = (user) =>
+  String(user?.role || "").trim().toLowerCase() === "admin";
+
+// Admin credentials are managed entirely through the admin portal. The customer
+// pages must never create, or hand out a reset link for, an admin account —
+// otherwise anyone who knows an admin's address can drive an admin password
+// reset from the storefront.
+const ADMIN_SIGNUP_BLOCKED = {
+  error:
+    "This email belongs to an administrator account. Customer accounts cannot be created with an admin email — sign in from the admin portal instead.",
+  isAdmin: true,
+  redirect: "/admin/login",
+};
+
+const ADMIN_RESET_BLOCKED = {
+  error:
+    "This email belongs to an administrator account. Admin passwords can only be reset from the admin portal.",
+  isAdmin: true,
+  redirect: "/admin/forgot-password",
+};
+
 const getAllowedGoogleClientIds = () => {
   const configuredIds = [
     process.env.GOOGLE_CLIENT_ID,
@@ -463,9 +486,13 @@ router.post("/register", async (req, res) => {
 
     const [existingUsers] = await db
       .promise()
-      .query("SELECT id, email_verified FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
+      .query("SELECT id, role, email_verified FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
 
     if (existingUsers.length > 0) {
+      if (isAdminAccount(existingUsers[0])) {
+        return res.status(403).json(ADMIN_SIGNUP_BLOCKED);
+      }
+
       // A prior signup that was never verified: steer them to verification
       // instead of a dead-end "already registered" error.
       if (!existingUsers[0].email_verified) {
@@ -544,7 +571,7 @@ router.post("/verify-email", async (req, res) => {
       return res.status(403).json({ error: "Account is not available. Please contact support." });
     }
 
-    if (String(user.role || "").trim().toLowerCase() === "admin") {
+    if (isAdminAccount(user)) {
       return res.status(403).json({
         error: "Admin accounts must use the admin login page.",
         isAdmin: true,
@@ -721,7 +748,7 @@ router.post("/login", async (req, res) => {
     await resetLoginFailuresAtomic(connection, user.id);
     release();
 
-    if (String(user.role || "").trim().toLowerCase() === "admin") {
+    if (isAdminAccount(user)) {
       void recordLoginHistorySafely({
         req,
         userId: user.id,
@@ -864,7 +891,7 @@ router.post("/google", async (req, res) => {
         });
       }
 
-      if (String(existingUser.role || "").trim().toLowerCase() === "admin") {
+      if (isAdminAccount(existingUser)) {
         return res.status(403).json({
           error: "Admin accounts must use the admin login page.",
           isAdmin: true,
@@ -1720,7 +1747,7 @@ router.post("/forgot-password", async (req, res) => {
     // Find user by email
     const [users] = await db
       .promise()
-      .query("SELECT id, name, email, is_active FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
+      .query("SELECT id, name, email, role, is_active FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
 
     // If no user found, return success (security: don't reveal email existence)
     if (!users.length) {
@@ -1728,6 +1755,16 @@ router.post("/forgot-password", async (req, res) => {
     }
 
     const user = users[0];
+
+    // An admin address must never receive a customer reset link: that link
+    // points at the customer reset page, which would let an admin password be
+    // changed from the storefront. Say so plainly rather than silently doing
+    // nothing, so the admin knows to use the admin portal. This does disclose
+    // that the address is an admin one — an accepted trade for not leaving a
+    // customer-side path to an admin password.
+    if (isAdminAccount(user)) {
+      return res.status(403).json(ADMIN_RESET_BLOCKED);
+    }
 
     // Check if user account is active
     if (!user.is_active) {
@@ -1801,9 +1838,17 @@ router.post("/reset-password", async (req, res) => {
     await ensurePasswordHistoryTable(connection);
 
     const [userRows] = await connection.query(
-      "SELECT password FROM users WHERE id = ?",
+      "SELECT password, role FROM users WHERE id = ?",
       [tokenValidation.userId]
     );
+
+    // Reset links issued to an admin before the check above existed — and any
+    // admin link opened on the customer page by mistake — stop here. Admin
+    // passwords change only through POST /api/admin/reset-password.
+    if (userRows.length && isAdminAccount(userRows[0])) {
+      release();
+      return res.status(403).json({ ...ADMIN_RESET_BLOCKED, success: false });
+    }
 
     if (userRows.length && userRows[0].password) {
       const isSamePassword = await bcrypt.compare(newPassword, userRows[0].password);
