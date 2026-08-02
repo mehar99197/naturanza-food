@@ -2,8 +2,6 @@ import path from "path"
 import react from "@vitejs/plugin-react-swc"
 import { defineConfig } from "vite"
 
-const exposeToNetwork = process.env.VITE_HOST_NETWORK === 'true'
-
 export default defineConfig({
   base: '/',
   plugins: [react()],
@@ -13,7 +11,9 @@ export default defineConfig({
     },
   },
   server: {
-    host: exposeToNetwork ? true : '0.0.0.0',
+    // Both branches of the old `exposeToNetwork ? true : '0.0.0.0'` bound to all
+    // interfaces, so the VITE_HOST_NETWORK flag never changed anything.
+    host: '0.0.0.0',
     port: 5173,
     strictPort: true, // Keep frontend fixed to 5173
     open: false,

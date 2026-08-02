@@ -539,19 +539,25 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
       const totalLabelWidth = 112;
       const totalValueWidth = 104;
       const totalRowGap = 18;
-      const totalsBoxHeight = amountPaid != null ? 182 : 128;
-
-      if (y + totalsBoxHeight > pageHeight - 110) {
-        doc.addPage();
-        drawPageBackground(doc, pageWidth, pageHeight, margin, logoPath);
-        y = margin + 20;
-      }
 
       const subtotal = safeNumber(order.subtotal, 0);
       const tax = safeNumber(order.tax, 0);
       const shipping = safeNumber(order.shipping_cost, 0);
       const discount = safeNumber(order.discount_amount, 0);
       const grandTotal = safeNumber(order.total_amount, 0);
+
+      // The store does not charge tax, so this row was printing "Tax  Rs. 0" on
+      // every invoice. Render it only when an order actually carries a tax
+      // amount (legacy rows), and shrink the box by one row when it doesn't.
+      const showTaxRow = tax > 0;
+      const totalsBoxHeight =
+        (amountPaid != null ? 182 : 128) - (showTaxRow ? 0 : totalRowGap);
+
+      if (y + totalsBoxHeight > pageHeight - 110) {
+        doc.addPage();
+        drawPageBackground(doc, pageWidth, pageHeight, margin, logoPath);
+        y = margin + 20;
+      }
 
       // Special instructions / notes (rendered on the left, beside the totals box).
       const blockTop = y;
@@ -602,7 +608,9 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
       };
 
       drawTotalRow('Subtotal', formatMoney(subtotal, currency), { color: MUTED_TEXT });
-      drawTotalRow('Tax', formatMoney(tax, currency), { color: MUTED_TEXT });
+      if (showTaxRow) {
+        drawTotalRow('Tax', formatMoney(tax, currency), { color: MUTED_TEXT });
+      }
       drawTotalRow(
         'Shipping',
         shipping === 0 ? 'Free' : formatMoney(shipping, currency),

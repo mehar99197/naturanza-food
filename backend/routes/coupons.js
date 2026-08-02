@@ -1,13 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
 
 const VALID_DISCOUNT_TYPES = new Set(['percentage', 'fixed']);
 
 // Get all coupons (Admin only)
-router.get('/', authenticateToken, isAdmin, (req, res) => {
+router.get('/', authenticateToken, isAdmin, requirePermission("manage_coupons"), (req, res) => {
     const query = 'SELECT * FROM coupons ORDER BY created_at DESC';
     
     db.query(query, (err, results) => {
@@ -38,7 +39,7 @@ router.get('/active', (req, res) => {
 });
 
 // Get coupon by ID (Admin only)
-router.get('/:id', authenticateToken, isAdmin, (req, res) => {
+router.get('/:id', authenticateToken, isAdmin, requirePermission("manage_coupons"), (req, res) => {
     db.query('SELECT * FROM coupons WHERE id = ?', [req.params.id], (err, results) => {
         if (err) {
             return res.status(500).json({ error: 'Database error' });
@@ -116,7 +117,7 @@ router.post('/validate', restrictBody('code', 'orderAmount'), (req, res) => {
 });
 
 // Create coupon (Admin only)
-router.post('/', authenticateToken, isAdmin, restrictBody('code', 'description', 'discount_type', 'discount_value', 'min_order_amount', 'max_discount', 'usage_limit', 'expiry_date'), (req, res) => {
+router.post('/', authenticateToken, isAdmin, requirePermission("manage_coupons"), restrictBody('code', 'description', 'discount_type', 'discount_value', 'min_order_amount', 'max_discount', 'usage_limit', 'expiry_date'), (req, res) => {
     const { 
         code, description, discount_type, discount_value, 
         min_order_amount, max_discount, usage_limit, expiry_date 
@@ -175,7 +176,7 @@ router.post('/', authenticateToken, isAdmin, restrictBody('code', 'description',
 });
 
 // Update coupon (Admin only)
-router.put('/:id', authenticateToken, isAdmin, restrictBody('code', 'description', 'discount_type', 'discount_value', 'min_order_amount', 'max_discount', 'usage_limit', 'expiry_date', 'is_active'), (req, res) => {
+router.put('/:id', authenticateToken, isAdmin, requirePermission("manage_coupons"), restrictBody('code', 'description', 'discount_type', 'discount_value', 'min_order_amount', 'max_discount', 'usage_limit', 'expiry_date', 'is_active'), (req, res) => {
     const { 
         code, description, discount_type, discount_value, 
         min_order_amount, max_discount, usage_limit, expiry_date, is_active 
@@ -216,7 +217,7 @@ router.put('/:id', authenticateToken, isAdmin, restrictBody('code', 'description
 });
 
 // Delete coupon (Admin only)
-router.delete('/:id', authenticateToken, isAdmin, (req, res) => {
+router.delete('/:id', authenticateToken, isAdmin, requirePermission("manage_coupons"), (req, res) => {
     db.query('DELETE FROM coupons WHERE id = ?', [req.params.id], (err, result) => {
         if (err) {
             return res.status(500).json({ error: 'Error deleting coupon' });
@@ -231,7 +232,7 @@ router.delete('/:id', authenticateToken, isAdmin, (req, res) => {
 });
 
 // Toggle coupon status (Admin only)
-router.patch('/:id/toggle', authenticateToken, isAdmin, (req, res) => {
+router.patch('/:id/toggle', authenticateToken, isAdmin, requirePermission("manage_coupons"), (req, res) => {
     db.query('UPDATE coupons SET is_active = NOT is_active WHERE id = ?', 
         [req.params.id], 
         (err, result) => {
@@ -251,7 +252,7 @@ router.patch('/:id/toggle', authenticateToken, isAdmin, (req, res) => {
 // Increment usage count — Admin only.
 // NOTE: In normal flow, coupon usage is incremented inside the order creation transaction.
 // This endpoint exists only for manual admin correction.
-router.post('/:id/use', authenticateToken, isAdmin, (req, res) => {
+router.post('/:id/use', authenticateToken, isAdmin, requirePermission("manage_coupons"), (req, res) => {
     db.query('UPDATE coupons SET used_count = used_count + 1 WHERE id = ?', 
         [req.params.id], 
         (err, result) => {

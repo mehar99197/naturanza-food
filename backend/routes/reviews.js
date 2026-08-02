@@ -21,6 +21,14 @@ router.post('/', authenticateToken, restrictBody('product_id', 'rating', 'commen
       return res.status(400).json({ error: 'Rating must be an integer between 1 and 5' });
     }
 
+    const trimmedComment = comment === null || comment === undefined
+      ? null
+      : String(comment).trim();
+
+    if (trimmedComment && trimmedComment.length > 2000) {
+      return res.status(400).json({ error: 'Review comment cannot exceed 2000 characters' });
+    }
+
     // Check if product exists
     const [product] = await db.promise().query(
       'SELECT id FROM products WHERE id = ?',
@@ -29,6 +37,26 @@ router.post('/', authenticateToken, restrictBody('product_id', 'rating', 'commen
 
     if (product.length === 0) {
       return res.status(404).json({ error: 'Product not found' });
+    }
+
+    // Verified purchase only. Without this, any logged-in account could rate any
+    // product it never bought, which makes the star ratings trivially gameable.
+    const [purchases] = await db.promise().query(
+      `SELECT 1
+         FROM order_items oi
+         JOIN orders o ON o.id = oi.order_id
+        WHERE o.user_id = ?
+          AND oi.product_id = ?
+          AND o.status NOT IN ('cancelled', 'returned')
+        LIMIT 1`,
+      [user_id, parsedProductId]
+    );
+
+    if (purchases.length === 0) {
+      return res.status(403).json({
+        error: 'You can only review products you have purchased.',
+        code: 'PURCHASE_REQUIRED',
+      });
     }
 
     // Check if user already reviewed this product
@@ -45,7 +73,7 @@ router.post('/', authenticateToken, restrictBody('product_id', 'rating', 'commen
     const [result] = await db.promise().query(
       `INSERT INTO reviews (user_id, product_id, rating, comment, is_approved, created_at)
        VALUES (?, ?, ?, ?, 1, NOW())`,
-      [user_id, parsedProductId, parsedRating, comment || null]
+      [user_id, parsedProductId, parsedRating, trimmedComment || null]
     );
 
     // Get the created review with user and product details

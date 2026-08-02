@@ -13,7 +13,6 @@ const DEFAULT_SETTINGS = {
  storeEmail: 'support@naturanzafood.com',
  storePhone: '+92340 9502646',
  currency: 'PKR',
- taxRate: '18',
  shippingFlat: '250',
  shippingFree: '5000',
  emailNotifications: true,
@@ -54,7 +53,6 @@ const normalizeSettings = (payload = {}) => {
   return {
     ...next,
     currency: normalizeCurrency(next.currency),
-    taxRate: String(next.taxRate ?? DEFAULT_SETTINGS.taxRate),
     shippingFlat: String(next.shippingFlat ?? DEFAULT_SETTINGS.shippingFlat),
     shippingFree: String(next.shippingFree ?? DEFAULT_SETTINGS.shippingFree),
     emailNotifications: Boolean(next.emailNotifications),

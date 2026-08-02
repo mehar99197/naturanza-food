@@ -4,6 +4,8 @@ const bcrypt = require("bcryptjs");
 const { db } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
 const requireSuperAdmin = require("../middleware/requireSuperAdmin");
+const { createConnectionReleaser } = require("../utils/dbConnection");
+const { requirePermission, requireAnyPermission } = require("../middleware/requirePermission");
 const { restrictBody } = require("../middleware/security");
 const { issueAccessToken, verifyAccessToken, toExpiryDate } = require("../utils/jwtTokens");
 const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/tokenStore");
@@ -13,7 +15,6 @@ const { getClientIp } = require("../utils/clientIp");
 const { buildInternalEan13 } = require("../utils/barcode");
 const asyncHandler = require("../middleware/asyncHandler");
 const newsletterController = require("../controllers/newsletterController");
-const { syncDefaultAdminPassword } = require("../utils/envSync");
 const {
   createUserSession,
   revokeSessionByToken,
@@ -305,6 +306,7 @@ const ALLOWED_PAYMENT_METHOD_CODES = new Set([
 // gateLabel         : string         used in failure-reason logs ('super_admin' | 'staff')
 async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
   const connection = await db.promise().getConnection();
+  const release = createConnectionReleaser(connection);
 
   try {
     const { email, password } = req.body;
@@ -317,7 +319,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         status: "failed",
         failureReason: "Missing credentials",
       });
-      connection.release();
+      release();
       return res.status(400).json({
         success: false,
         error: "Email and password are required",
@@ -336,7 +338,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         status: "failed",
         failureReason: "Email not found",
       });
-      connection.release();
+      release();
       return res.status(401).json({
         success: false,
         error: "Invalid email or password",
@@ -353,7 +355,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         status: "failed",
         failureReason: "Account disabled",
       });
-      connection.release();
+      release();
       return res.status(403).json({
         success: false,
         error: "Account is disabled. Contact super admin.",
@@ -362,7 +364,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
 
     const lockStatus = await checkAccountLockout(connection, user.id);
     if (lockStatus.locked) {
-      connection.release();
+      release();
       return res.status(423).json({
         success: false,
         error: "Account temporarily locked due to multiple failed attempts.",
@@ -377,7 +379,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         status: "failed",
         failureReason: "Not an admin",
       });
-      connection.release();
+      release();
       return res.status(403).json({
         success: false,
         error: "Access denied. Admin privileges required.",
@@ -396,7 +398,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         status: "failed",
         failureReason: `Wrong gate: ${user.admin_role || 'none'} not allowed via ${gateLabel}`,
       });
-      connection.release();
+      release();
       // Generic 403 — don't leak which gate the user belongs to.
       return res.status(403).json({
         success: false,
@@ -419,7 +421,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         failureReason: "Invalid password",
       });
 
-      connection.release();
+      release();
 
       if (newLockStatus.locked) {
         return res.status(423).json({
@@ -436,7 +438,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
     }
 
     await resetLoginFailuresAtomic(connection, user.id);
-    connection.release();
+    release();
 
     const accessToken = issueAccessToken(user);
     const token = accessToken.token;
@@ -488,7 +490,6 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       },
     });
   } catch (error) {
-    try { connection.release(); } catch {}
     void recordAdminLoginHistorySafely({
       req,
       attemptedEmail: String(req.body?.email || "")
@@ -501,6 +502,8 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       success: false,
       error: "Login failed due to a server error.",
     });
+  } finally {
+    release();
   }
 }
 
@@ -663,6 +666,10 @@ router.post("/forgot-password", restrictBody('email'), async (req, res) => {
 // /admin/staff-login for staff). Super admin login URL must not be revealed
 // to staff users.
 router.post("/reset-password", restrictBody('token', 'password', 'confirmPassword'), async (req, res) => {
+  // Assigned once the pooled connection is acquired; the `finally` below always
+  // runs it so a throw mid-flow can never leak the connection.
+  let release = () => {};
+
   try {
     const { token, password, confirmPassword } = req.body;
 
@@ -707,6 +714,7 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
     }
 
     const connection = await db.promise().getConnection();
+    release = createConnectionReleaser(connection);
     await ensurePasswordHistoryTable(connection);
 
     const [users] = await connection.query(
@@ -721,7 +729,7 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
     const isActiveAdmin = isAdminUser && userRow?.is_active;
 
     if (!userRow || !isActiveAdmin) {
-      connection.release();
+      release();
       return res.status(400).json({
         success: false,
         error: "Invalid reset link. Please request a new password reset.",
@@ -731,7 +739,7 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
     if (users[0].password) {
       const isSamePassword = await bcrypt.compare(password, users[0].password);
       if (isSamePassword) {
-        connection.release();
+        release();
         return res.status(400).json({
           success: false,
           error: "New password must be different from your current password.",
@@ -741,7 +749,7 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
 
     const reusedPassword = await hasReusedPassword(connection, tokenValidation.userId, password, 5);
     if (reusedPassword) {
-      connection.release();
+      release();
       return res.status(400).json({
         success: false,
         error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
@@ -757,16 +765,7 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
 
     await addPasswordToHistory(connection, tokenValidation.userId, password);
 
-    connection.release();
-
-    // Only mirror the super admin password back into the .env shim — staff
-    // admin passwords are not stored there.
-    if (userAdminRole === "super_admin") {
-      try {
-        await syncDefaultAdminPassword(userRow.email, password);
-      } catch (envError) {
-      }
-    }
+    release();
 
     await markTokenAsUsed(db.promise(), tokenValidation.tokenId);
     await invalidateAllUserTokens(db.promise(), tokenValidation.userId);
@@ -794,6 +793,8 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
       success: false,
       error: "An error occurred. Please try again later.",
     });
+  } finally {
+    release();
   }
 });
 
@@ -907,7 +908,7 @@ router.get("/settings", async (req, res) => {
   }
 });
 
-router.put("/settings", restrictBody('storeName', 'storeEmail', 'storePhone', 'currency', 'taxRate', 'shippingFlat', 'shippingFree', 'emailNotifications', 'orderNotifications', 'lowStockAlerts', 'lowStockThreshold', 'address', 'supportHours', 'facebookUrl', 'instagramUrl', 'twitterUrl', 'youtubeUrl', 'whatsappNumber', 'whatsappEnabled', 'mapLatitude', 'mapLongitude', 'mapLocationLabel', 'newsletterWelcomePromoCode', 'storeDiscountActive', 'storeDiscountPercentage', 'storeDiscountLabel'), async (req, res) => {
+router.put("/settings", requireSuperAdmin, restrictBody('storeName', 'storeEmail', 'storePhone', 'currency', 'shippingFlat', 'shippingFree', 'emailNotifications', 'orderNotifications', 'lowStockAlerts', 'lowStockThreshold', 'address', 'supportHours', 'facebookUrl', 'instagramUrl', 'twitterUrl', 'youtubeUrl', 'whatsappNumber', 'whatsappEnabled', 'mapLatitude', 'mapLongitude', 'mapLocationLabel', 'newsletterWelcomePromoCode', 'storeDiscountActive', 'storeDiscountPercentage', 'storeDiscountLabel'), async (req, res) => {
   try {
     const settings = await updateAdminSettings(db.promise(), req.body || {});
     res.json(settings);
@@ -917,7 +918,7 @@ router.put("/settings", restrictBody('storeName', 'storeEmail', 'storePhone', 'c
 });
 
 // About-page content management
-router.get("/about", async (req, res) => {
+router.get("/about", requireSuperAdmin, async (req, res) => {
   try {
     const content = await getAboutContent(db.promise());
     res.json(content);
@@ -926,7 +927,7 @@ router.get("/about", async (req, res) => {
   }
 });
 
-router.put("/about", restrictBody('hero', 'story', 'stats', 'values', 'team', 'certifications', 'sections'), async (req, res) => {
+router.put("/about", requireSuperAdmin, restrictBody('hero', 'story', 'stats', 'values', 'team', 'certifications', 'sections'), async (req, res) => {
   try {
     const content = await updateAboutContent(db.promise(), req.body || {});
     res.json(content);
@@ -935,7 +936,7 @@ router.put("/about", restrictBody('hero', 'story', 'stats', 'values', 'team', 'c
   }
 });
 
-router.post("/settings/test-email", restrictBody('email'), async (req, res) => {
+router.post("/settings/test-email", requireSuperAdmin, restrictBody('email'), async (req, res) => {
   try {
     const settings = await getAdminSettings(db.promise());
     const targetEmail = String(req.body?.email || settings.storeEmail || "").trim();
@@ -972,28 +973,32 @@ router.post("/settings/test-email", restrictBody('email'), async (req, res) => {
 // Newsletter subscribers (admin)
 router.get(
   "/newsletter/subscribers",
+  requirePermission("manage_subscribers"),
   asyncHandler(newsletterController.listSubscribers),
 );
 
 router.delete(
   "/newsletter/subscribers/:id",
+  requirePermission("manage_subscribers"),
   asyncHandler(newsletterController.deleteSubscriber),
 );
 
 router.post(
   "/newsletter/broadcast",
+  requirePermission("manage_subscribers"),
   restrictBody("subject", "message"),
   asyncHandler(newsletterController.broadcast),
 );
 
 router.post(
   "/newsletter/welcome-promo",
+  requirePermission("manage_subscribers"),
   restrictBody("code"),
   asyncHandler(newsletterController.setWelcomePromo),
 );
 
 // Sales report
-router.get("/reports/sales", async (req, res) => {
+router.get("/reports/sales", requireAnyPermission("view_reports", "view_analytics"), async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     let query = `
@@ -1023,7 +1028,7 @@ router.get("/reports/sales", async (req, res) => {
 });
 
 // Product sales report
-router.get("/reports/products", async (req, res) => {
+router.get("/reports/products", requireAnyPermission("view_reports", "view_analytics"), async (req, res) => {
   try {
     const [results] = await db.promise().query(`
       SELECT 
@@ -1048,7 +1053,7 @@ router.get("/reports/products", async (req, res) => {
 });
 
 // Reviews management
-router.get("/reviews", async (req, res) => {
+router.get("/reviews", requirePermission("manage_reviews"), async (req, res) => {
   try {
     const status = String(req.query.status || "all").trim().toLowerCase();
     const limit = Math.min(
@@ -1097,7 +1102,7 @@ router.get("/reviews", async (req, res) => {
 
 
 // DELETE review
-router.delete("/reviews/:id", async (req, res) => {
+router.delete("/reviews/:id", requirePermission("manage_reviews"), async (req, res) => {
   try {
     const reviewId = Number(req.params.id);
     if (!Number.isInteger(reviewId)) {
@@ -1122,9 +1127,20 @@ router.delete("/reviews/:id", async (req, res) => {
 });
 
 // Get all users
-router.get("/users", async (req, res) => {
+router.get("/users", requirePermission("manage_customers"), async (req, res) => {
   try {
     const includeAdmins = req.query.include_admins === "true";
+
+    // Pagination is OPT-IN. The Customers screen fetches this list in full and
+    // derives its totals (customer count, active/blocked split) client-side, so
+    // a default LIMIT would silently truncate the table AND report wrong stats.
+    // Callers that want a page must ask for one explicitly.
+    const hasLimit = req.query.limit !== undefined;
+    const limit = hasLimit
+      ? Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 500)
+      : null;
+    const offset = Math.max(Number.parseInt(req.query.offset, 10) || 0, 0);
+
     const [rows] = await db.promise().query(
       `SELECT
                 u.id,
@@ -1141,7 +1157,9 @@ router.get("/users", async (req, res) => {
              LEFT JOIN orders o ON o.user_id = u.id
                ${includeAdmins ? "" : "WHERE u.role = 'customer'"}
              GROUP BY u.id, u.name, u.email, u.phone, u.address, u.role, u.is_active, u.created_at
-             ORDER BY u.created_at DESC`,
+             ORDER BY u.created_at DESC
+             ${hasLimit ? "LIMIT ? OFFSET ?" : ""}`,
+      hasLimit ? [limit, offset] : [],
     );
 
     res.json(rows);
@@ -1213,7 +1231,7 @@ router.post("/users", requireSuperAdmin, restrictBody('name', 'email', 'password
 });
 
 // Update user profile details
-router.put("/users/:id", restrictBody('name', 'email', 'phone', 'address'), async (req, res) => {
+router.put("/users/:id", requirePermission("manage_customers"), restrictBody('name', 'email', 'phone', 'address'), async (req, res) => {
   try {
     const userId = Number(req.params.id);
     if (!Number.isInteger(userId)) {
@@ -1264,7 +1282,7 @@ router.put("/users/:id", restrictBody('name', 'email', 'phone', 'address'), asyn
 });
 
 // Activate/deactivate user
-router.patch("/users/:id/status", restrictBody('is_active'), async (req, res) => {
+router.patch("/users/:id/status", requirePermission("manage_customers"), restrictBody('is_active'), async (req, res) => {
   try {
     const userId = Number(req.params.id);
     if (!Number.isInteger(userId)) {
@@ -1341,7 +1359,7 @@ router.delete("/users/:id", requireSuperAdmin, async (req, res) => {
 });
 
 // Low stock alert
-router.get("/inventory/low-stock", async (req, res) => {
+router.get("/inventory/low-stock", requireSuperAdmin, async (req, res) => {
   try {
     const threshold = req.query.threshold || 10;
     const [results] = await db.promise().query(`
@@ -1358,7 +1376,7 @@ router.get("/inventory/low-stock", async (req, res) => {
 });
 
 // Inventory movement history
-router.get("/inventory/movements", async (req, res) => {
+router.get("/inventory/movements", requireSuperAdmin, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
     const productId = req.query.product_id
@@ -1401,161 +1419,8 @@ router.get("/inventory/movements", async (req, res) => {
   }
 });
 
-// Tax rates
-router.get("/tax-rates", async (req, res) => {
-  try {
-    const [rows] = await db
-      .promise()
-      .query(
-        "SELECT * FROM tax_rates ORDER BY is_default DESC, updated_at DESC",
-      );
-    res.json(rows);
-  } catch (error) {
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-router.post("/tax-rates", restrictBody('name', 'rate_percent', 'country', 'state', 'is_default', 'is_active'), async (req, res) => {
-  try {
-    const {
-      name,
-      rate_percent,
-      country = "Pakistan",
-      state = null,
-      is_default = false,
-      is_active = true,
-    } = req.body || {};
-
-    if (!name || rate_percent === undefined || rate_percent === null) {
-      return res
-        .status(400)
-        .json({ error: "Tax rate name and rate_percent are required" });
-    }
-
-    if (Number(is_default)) {
-      await db
-        .promise()
-        .query("UPDATE tax_rates SET is_default = FALSE WHERE country = ?", [
-          country,
-        ]);
-    }
-
-    const [result] = await db.promise().query(
-      `INSERT INTO tax_rates (name, rate_percent, country, state, is_default, is_active)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        String(name).trim(),
-        Number(rate_percent),
-        country,
-        state,
-        Boolean(is_default),
-        Boolean(is_active),
-      ],
-    );
-
-    const [rows] = await db
-      .promise()
-      .query("SELECT * FROM tax_rates WHERE id = ?", [result.insertId]);
-
-    res.status(201).json({
-      message: "Tax rate created successfully",
-      taxRate: rows[0],
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Error creating tax rate" });
-  }
-});
-
-router.put("/tax-rates/:id", restrictBody('name', 'rate_percent', 'country', 'state', 'is_default', 'is_active'), async (req, res) => {
-  try {
-    const {
-      name,
-      rate_percent,
-      country = "Pakistan",
-      state = null,
-      is_default = false,
-      is_active = true,
-    } = req.body || {};
-
-    if (!name || rate_percent === undefined || rate_percent === null) {
-      return res
-        .status(400)
-        .json({ error: "Tax rate name and rate_percent are required" });
-    }
-
-    if (Number(is_default)) {
-      await db
-        .promise()
-        .query(
-          "UPDATE tax_rates SET is_default = FALSE WHERE country = ? AND id != ?",
-          [country, req.params.id],
-        );
-    }
-
-    const [result] = await db.promise().query(
-      `UPDATE tax_rates
-             SET name = ?, rate_percent = ?, country = ?, state = ?, is_default = ?, is_active = ?
-             WHERE id = ?`,
-      [
-        String(name).trim(),
-        Number(rate_percent),
-        country,
-        state,
-        Boolean(is_default),
-        Boolean(is_active),
-        req.params.id,
-      ],
-    );
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: "Tax rate not found" });
-    }
-
-    const [rows] = await db
-      .promise()
-      .query("SELECT * FROM tax_rates WHERE id = ?", [req.params.id]);
-
-    res.json({
-      message: "Tax rate updated successfully",
-      taxRate: rows[0],
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Error updating tax rate" });
-  }
-});
-
-router.delete("/tax-rates/:id", async (req, res) => {
-  try {
-    const taxRateId = Number(req.params.id);
-    if (!Number.isInteger(taxRateId)) {
-      return res.status(400).json({ error: "Invalid tax rate id" });
-    }
-
-    const [rows] = await db
-      .promise()
-      .query("SELECT is_default FROM tax_rates WHERE id = ? LIMIT 1", [
-        taxRateId,
-      ]);
-
-    if (!rows.length) {
-      return res.status(404).json({ error: "Tax rate not found" });
-    }
-
-    if (rows[0].is_default) {
-      return res.status(400).json({
-        error: "Default tax rate cannot be deleted. Set another default first.",
-      });
-    }
-
-    await db.promise().query("DELETE FROM tax_rates WHERE id = ?", [taxRateId]);
-    res.json({ message: "Tax rate deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ error: "Error deleting tax rate" });
-  }
-});
-
 // Payment methods management
-router.get("/payment-methods", async (req, res) => {
+router.get("/payment-methods", requireSuperAdmin, async (req, res) => {
   try {
     const [rows] = await db.promise().query(
       `SELECT *
@@ -1569,7 +1434,7 @@ router.get("/payment-methods", async (req, res) => {
   }
 });
 
-router.post("/payment-methods", restrictBody('code', 'label', 'description', 'sort_order', 'supports_online', 'is_active'), async (req, res) => {
+router.post("/payment-methods", requireSuperAdmin, restrictBody('code', 'label', 'description', 'sort_order', 'supports_online', 'is_active'), async (req, res) => {
   try {
     const {
       code,
@@ -1632,7 +1497,7 @@ router.post("/payment-methods", restrictBody('code', 'label', 'description', 'so
   }
 });
 
-router.put("/payment-methods/:id", restrictBody('code', 'label', 'description', 'sort_order', 'supports_online', 'is_active'), async (req, res) => {
+router.put("/payment-methods/:id", requireSuperAdmin, restrictBody('code', 'label', 'description', 'sort_order', 'supports_online', 'is_active'), async (req, res) => {
   try {
     const paymentMethodId = Number(req.params.id);
     if (!Number.isInteger(paymentMethodId)) {
@@ -1710,7 +1575,7 @@ router.put("/payment-methods/:id", restrictBody('code', 'label', 'description', 
   }
 });
 
-router.delete("/payment-methods/:id", async (req, res) => {
+router.delete("/payment-methods/:id", requireSuperAdmin, async (req, res) => {
   try {
     const paymentMethodId = Number(req.params.id);
     if (!Number.isInteger(paymentMethodId)) {
@@ -1732,7 +1597,7 @@ router.delete("/payment-methods/:id", async (req, res) => {
 });
 
 // Returns management
-router.get("/returns", async (req, res) => {
+router.get("/returns", requirePermission("manage_returns"), async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
     const status = req.query.status ? String(req.query.status).trim() : null;
@@ -1761,7 +1626,7 @@ router.get("/returns", async (req, res) => {
   }
 });
 
-router.put("/returns/:id/status", restrictBody('status', 'note', 'refund_amount', 'method', 'reference_number'), async (req, res) => {
+router.put("/returns/:id/status", requirePermission("manage_returns"), restrictBody('status', 'note', 'refund_amount', 'method', 'reference_number'), async (req, res) => {
   const { status, note, refund_amount, method, reference_number } =
     req.body || {};
   const allowedStatuses = new Set([
@@ -1869,7 +1734,7 @@ router.put("/returns/:id/status", restrictBody('status', 'note', 'refund_amount'
 });
 
 // Barcode data for a product — feeds the printable label in the admin panel.
-router.get("/products/:id/barcode-data", async (req, res) => {
+router.get("/products/:id/barcode-data", requirePermission("manage_products"), async (req, res) => {
   try {
     const productId = Number(req.params.id);
     if (!Number.isInteger(productId)) {

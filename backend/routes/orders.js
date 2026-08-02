@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
 const { createInvoicePdfBuffer } = require('../utils/invoicePdf');
@@ -638,7 +639,8 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     await connection.beginTransaction();
 
     const [cartItems] = await connection.query(
-      `SELECT c.product_id, c.quantity, p.name, p.image_url, p.price, p.stock_quantity, p.discount_percentage,
+      `SELECT c.product_id, c.quantity, p.name, p.image_url, p.price, p.stock_quantity,
+              p.reserved_stock, p.discount_percentage,
               (p.price - (p.price * p.discount_percentage / 100)) AS final_price
        FROM cart c
        JOIN products p ON c.product_id = p.id
@@ -652,8 +654,15 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       return res.status(400).json({ error: 'Cart is empty' });
     }
 
+    // Availability is stock_quantity MINUS reserved_stock — units already held
+    // for pending COD/wallet orders awaiting verification. Comparing against the
+    // raw stock_quantity let a prepaid order resell inventory that a pending
+    // order was holding (utils/stockReservations.js uses the same formula).
     for (const item of cartItems) {
-      if (safeNumber(item.stock_quantity, 0) < safeNumber(item.quantity, 0)) {
+      const availableStock =
+        safeNumber(item.stock_quantity, 0) - safeNumber(item.reserved_stock, 0);
+
+      if (availableStock < safeNumber(item.quantity, 0)) {
         await connection.rollback();
         return res.status(400).json({
           error: `Insufficient stock for ${item.name}`,
@@ -725,6 +734,9 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       ? Math.min(Math.max(safeNumber(adminSettings.storeDiscountPercentage, 0), 0), 90)
       : 0;
     let effectiveCouponCode = couponCode;
+    // Set when a coupon is actually applied, so its used_count can be bumped
+    // inside this same transaction (see below).
+    let redeemedCouponId = null;
 
     if (storeDiscountPercentage > 0) {
       effectiveCouponCode = null;
@@ -735,11 +747,15 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
         return sum + (base * safeNumber(item.quantity) * extraPct) / 100;
       }, 0);
     } else if (couponCode) {
+      // FOR UPDATE holds the coupon row for the rest of this transaction so two
+      // concurrent checkouts cannot both read used_count = usage_limit - 1 and
+      // both redeem the last use.
       const [[coupon]] = await connection.query(
-        `SELECT discount_type, discount_value, min_order_amount, max_discount, usage_limit, used_count
+        `SELECT id, discount_type, discount_value, min_order_amount, max_discount, usage_limit, used_count
            FROM coupons
           WHERE code = ? AND is_active = TRUE
-            AND (expiry_date IS NULL OR expiry_date > NOW())`,
+            AND (expiry_date IS NULL OR expiry_date > NOW())
+          FOR UPDATE`,
         [couponCode],
       );
       if (
@@ -755,6 +771,7 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
         } else {
           discountAmount = safeNumber(coupon.discount_value);
         }
+        redeemedCouponId = coupon.id;
       } else {
         effectiveCouponCode = null;
       }
@@ -817,6 +834,29 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
        VALUES ?`,
       [orderItemsValues],
     );
+
+    // Record the redemption. Without this, used_count never moved and
+    // usage_limit was unenforceable — a single-use coupon could be redeemed an
+    // unlimited number of times. The WHERE clause re-checks the limit so the
+    // update is a no-op if the coupon was exhausted after we read it; the row is
+    // already locked FOR UPDATE, so that can only happen across transactions.
+    if (redeemedCouponId) {
+      const [couponUpdate] = await connection.query(
+        `UPDATE coupons
+            SET used_count = used_count + 1
+          WHERE id = ?
+            AND (usage_limit IS NULL OR used_count < usage_limit)`,
+        [redeemedCouponId],
+      );
+
+      if (!couponUpdate.affectedRows) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: 'This coupon has just reached its usage limit. Please remove it and try again.',
+          code: 'COUPON_EXHAUSTED',
+        });
+      }
+    }
 
     // Stock policy:
     //   - paymentStatus === 'paid'    : prepaid (card/online). Hard-deduct now, customer is committed.
@@ -1032,7 +1072,7 @@ router.get('/my-orders', authenticateToken, async (req, res) => {
 });
 
 // Get all orders (Admin only)
-router.get('/admin/all', authenticateToken, isAdmin, async (req, res) => {
+router.get('/admin/all', authenticateToken, isAdmin, requirePermission("manage_orders"), async (req, res) => {
   const status = req.query.status ? String(req.query.status).trim() : null;
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
@@ -1342,7 +1382,7 @@ router.put('/:id/cancel', authenticateToken, restrictBody(), async (req, res) =>
 });
 
 // Update shipment details (Admin only)
-router.put('/:id/shipment', authenticateToken, isAdmin, restrictBody('courier_name', 'tracking_number', 'shipment_status', 'estimated_delivery', 'metadata'), async (req, res) => {
+router.put('/:id/shipment', authenticateToken, isAdmin, requirePermission("manage_orders"), restrictBody('courier_name', 'tracking_number', 'shipment_status', 'estimated_delivery', 'metadata'), async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId)) {
     return res.status(400).json({ error: 'Invalid order id' });
@@ -1415,7 +1455,7 @@ router.put('/:id/shipment', authenticateToken, isAdmin, restrictBody('courier_na
 });
 
 // Update order status (Admin only)
-router.put('/:id/status', authenticateToken, isAdmin, restrictBody('status', 'payment_status', 'note', 'courier_name', 'tracking_number', 'estimated_delivery'), async (req, res) => {
+router.put('/:id/status', authenticateToken, isAdmin, requirePermission("manage_orders"), restrictBody('status', 'payment_status', 'note', 'courier_name', 'tracking_number', 'estimated_delivery'), async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId)) {
     return res.status(400).json({ error: 'Invalid order id' });
@@ -1610,7 +1650,7 @@ router.put('/:id/status', authenticateToken, isAdmin, restrictBody('status', 'pa
 });
 
 // Delete order (Admin only)
-router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
+router.delete('/:id', authenticateToken, isAdmin, requirePermission("manage_orders"), async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId)) {
     return res.status(400).json({ error: 'Invalid order id' });

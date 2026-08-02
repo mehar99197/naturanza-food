@@ -2,7 +2,7 @@ const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
-const { optimizeProductImage } = require('../utils/imageOptimizer');
+const crypto = require('crypto');
 
 // Ensure upload directories exist
 const ensureDir = (dir) => {
@@ -108,10 +108,12 @@ const uploadAndCompress = (fieldName, folder = 'products', options = {}) => {
                 const uploadDir = path.join(UPLOADS_IMAGES_DIR, folder);
                 ensureDir(uploadDir);
 
-                // Generate unique filename (use WebP extension)
-                const timestamp = Date.now();
-                const randomString = Math.random().toString(36).substring(2, 8);
-                const filename = `${timestamp}-${randomString}.webp`;
+                // Unguessable filename. `Date.now()` + `Math.random()` was both
+                // predictable and only ~36 bits of entropy — for the
+                // payment-verification folder (bank screenshots with account
+                // numbers and amounts) the filename is part of the access
+                // control, so it must be cryptographically random.
+                const filename = `${crypto.randomBytes(24).toString('hex')}.webp`;
                 const filepath = path.join(uploadDir, filename);
 
                 // Compress the image (default to WebP)

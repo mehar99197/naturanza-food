@@ -13,11 +13,9 @@ const { getJwtRuntimeInfo } = require("./utils/jwtTokens");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const {
   csrfMiddleware,
-  generateToken,
-  createSignedToken,
   verifySignedToken,
+  issueCsrfCookie,
   CSRF_COOKIE_NAME,
-  CSRF_COOKIE_MAX_AGE,
 } = require("./middleware/csrf");
 
 if (!process.env.GOOGLE_CLIENT_ID) {
@@ -32,10 +30,10 @@ const jwtRuntime = getJwtRuntimeInfo();
 const normalizedRateLimitFlag = String(
   process.env.ENABLE_RATE_LIMITS || "",
 ).trim().toLowerCase();
-const ENABLE_RATE_LIMITS =
-  normalizedRateLimitFlag === "false"
-    ? false
-    : normalizedRateLimitFlag === "true" || process.env.NODE_ENV === "production" || true;
+// Rate limiting is ON everywhere unless explicitly disabled with
+// ENABLE_RATE_LIMITS=false. (The previous expression ended in `|| true`, which
+// made the NODE_ENV term dead code while reading as if it mattered.)
+const ENABLE_RATE_LIMITS = normalizedRateLimitFlag !== "false";
 const DEFAULT_ADMIN_EMAIL =
   String(process.env.DEFAULT_ADMIN_EMAIL || "")
     .trim()
@@ -86,19 +84,38 @@ if (ENFORCE_HTTPS && process.env.NODE_ENV === "production") {
 
 // Security Middleware - Apply BEFORE other middleware
 // 1. Helmet - Set security headers
+// The previous policy allowed `'unsafe-inline'` plus a blanket `https:` for
+// script-src, which permits any inline script and any script from any HTTPS host
+// — i.e. it stopped nothing an XSS would attempt. The SPA ships no inline
+// executable JS (the only inline <script> blocks are `application/ld+json` data
+// blocks, which CSP does not govern), so script-src can be an explicit allowlist:
+// self, Google Analytics, and Google Identity Services.
+//
+// style-src keeps 'unsafe-inline' because Radix and framer-motion set inline
+// style attributes at runtime.
+const GOOGLE_SCRIPT_HOSTS = [
+  "https://accounts.google.com",
+  "https://apis.google.com",
+  "https://www.googletagmanager.com",
+];
+
 app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https:"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https:"],
-        imgSrc: ["'self'", "data:", "https:", "http:"],
-        connectSrc: ["'self'", "https:", "http:"],
+        scriptSrc: ["'self'", ...GOOGLE_SCRIPT_HOSTS],
+        scriptSrcElem: ["'self'", ...GOOGLE_SCRIPT_HOSTS],
+        imgSrc: ["'self'", "data:", "blob:", "https:", "http:"],
+        connectSrc: ["'self'", "https://www.google-analytics.com", ...GOOGLE_SCRIPT_HOSTS],
         fontSrc: ["'self'", "https:", "data:"],
         objectSrc: ["'none'"],
         mediaSrc: ["'self'"],
         frameSrc: ["'self'", "https://accounts.google.com"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"],
       },
     },
     crossOriginEmbedderPolicy: false,
@@ -200,6 +217,15 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 // Persistent user uploads first — these live outside the git-deployed tree so
 // they survive redeploys (payment screenshots, uploaded product/category images).
 const { UPLOADS_IMAGES_DIR } = require("./middleware/upload");
+
+// Payment verification screenshots hold customer bank details and must never be
+// reachable from the public image mount. They are served only through
+// GET /api/admin/payments/verifications/:id/screenshot, which enforces admin
+// auth + the manage_payments grant.
+app.use("/images/payment-verifications", (req, res) => {
+  res.status(404).type("txt").send("Not Found");
+});
+
 app.use("/images", express.static(UPLOADS_IMAGES_DIR));
 app.use(
   "/images",
@@ -324,19 +350,14 @@ app.use(preventSQLInjection);
 // Apply CSRF protection (skip in development if explicitly disabled)
 const csrfEnabled = String(process.env.ENABLE_CSRF_PROTECTION || "true").toLowerCase();
 if (csrfEnabled !== "false" && process.env.NODE_ENV !== "development") {
-  app.use(csrfMiddleware({
-    excludePaths: [
-      "/api/health",
-      "/api/products",           // GET requests only
-      "/api/categories",         // GET requests only
-      "/api/geolocation",
-      "/api/announcements/active",
-    ],
-  }));
+  // No path exclusions: every excluded path was a GET-only endpoint that
+  // SAFE_METHODS already skips, while the exact-path match also waved through
+  // the admin POST/PUT/DELETE handlers mounted on the same prefixes
+  // (e.g. POST /api/products).
+  app.use(csrfMiddleware());
 }
 
 // Routes
-const { authRouter } = require("./src/modules/auth/auth.routes");
 const legacyAuthRoutes = require("./routes/auth");
 const profileRoutes = require("./routes/profile");
 const productRoutes = require("./routes/products");
@@ -372,7 +393,6 @@ if (ENABLE_RATE_LIMITS) {
   app.use("/api/auth/verify-email", authLimiter);
   app.use("/api/auth/resend-verification", authLimiter);
   app.use("/api/auth/refresh", refreshLimiter);
-  app.use("/api/auth/refresh-token", refreshLimiter);
   app.use("/api/admin/login", authLimiter);
 
   // Apply general rate limiting to all API routes (except auth which has its own limits)
@@ -386,14 +406,13 @@ if (ENABLE_RATE_LIMITS) {
   });
 } else {
   console.warn(
-    "Rate limiting is disabled (development mode). Set ENABLE_RATE_LIMITS=true to enable it.",
+    "Rate limiting is DISABLED via ENABLE_RATE_LIMITS=false. Unset it to re-enable.",
   );
 }
 
 // Mount routes
 // Keep legacy auth endpoints first so overlapping auth flows remain consistent.
 app.use("/api/auth", legacyAuthRoutes);
-app.use("/api/auth", authRouter);
 app.use("/api/profile", profileRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/categories", categoryRoutes);
@@ -418,7 +437,6 @@ app.use("/api/announcements", announcementsRoutes);
 app.use("/api/team", teamRoutes);
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api", sitemapRoutes);
-app.use("/api/shipping", shippingRoutes);
 app.use("/api/admin/shipping", adminShippingRoutes);
 
 // Health check route
@@ -428,26 +446,14 @@ app.get("/api/health", (req, res) => {
 
 // CSRF token endpoint for frontend
 app.get("/api/csrf-token", (req, res) => {
+  // Reuse the browser's existing cookie value so the client-held token and the
+  // cookie stay identical — the middleware compares the two.
   const existingToken = req.cookies?.[CSRF_COOKIE_NAME];
-  if (existingToken) {
-    const verification = verifySignedToken(existingToken);
-    if (verification.valid) {
-      return res.json({ csrfToken: existingToken });
-    }
+  if (existingToken && verifySignedToken(existingToken).valid) {
+    return res.json({ csrfToken: existingToken });
   }
 
-  const rawToken = req.csrfToken || generateToken();
-  const signedToken = createSignedToken(rawToken);
-
-  res.cookie(CSRF_COOKIE_NAME, signedToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
-    maxAge: CSRF_COOKIE_MAX_AGE,
-    path: "/",
-  });
-
-  return res.json({ csrfToken: signedToken });
+  return res.json({ csrfToken: issueCsrfCookie(res) });
 });
 
 // Serve React frontend in production
@@ -558,4 +564,18 @@ process.on("unhandledRejection", (reason) => {
 
 process.on("uncaughtException", (error) => {
   console.error("Uncaught Exception:", error);
+
+  // After an uncaught exception the process state is undefined — connections,
+  // transactions and in-flight requests may all be half-finished. Continuing to
+  // serve traffic from here risks corrupt writes, so drain and let the process
+  // manager restart us. Matches the unhandledRejection policy above.
+  if (process.env.NODE_ENV === "production") {
+    if (server) {
+      server.close(() => process.exit(1));
+      // Don't wait forever for in-flight requests to drain.
+      setTimeout(() => process.exit(1), 10_000).unref();
+    } else {
+      process.exit(1);
+    }
+  }
 });

@@ -498,10 +498,14 @@ export function ProfileOrders() {
                 {formatPrice(Number(selectedOrder.subtotal || 0), settings.currency)}
               </span>
             </div>
-            <div className="flex justify-between text-sm sm:text-base text-gray-600">
-              <span>Tax</span>
-              <span>{formatPrice(Number(selectedOrder.tax || 0), settings.currency)}</span>
-            </div>
+            {/* The store does not charge tax; the row shows only for legacy
+                orders that carry an amount. */}
+            {Number(selectedOrder.tax || 0) > 0 && (
+              <div className="flex justify-between text-sm sm:text-base text-gray-600">
+                <span>Tax</span>
+                <span>{formatPrice(Number(selectedOrder.tax), settings.currency)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm sm:text-base text-gray-600">
               <span>Shipping</span>
               <span>

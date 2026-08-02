@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS orders (
     total_amount DECIMAL(10, 2) NOT NULL,
     subtotal DECIMAL(10, 2) DEFAULT 0,
     discount_amount DECIMAL(10, 2) DEFAULT 0,
+    -- Always 0: the store charges no tax. Kept for historical order rows.
     tax DECIMAL(10, 2) DEFAULT 0,
     shipping_cost DECIMAL(10, 2) DEFAULT 0,
     coupon_code VARCHAR(50),
@@ -529,7 +530,6 @@ CREATE TABLE IF NOT EXISTS admin_settings (
     store_email VARCHAR(120) NOT NULL,
     store_phone VARCHAR(30) DEFAULT '',
     currency VARCHAR(10) DEFAULT 'PKR',
-    tax_rate DECIMAL(5, 2) DEFAULT 18.00,
     shipping_flat DECIMAL(10, 2) DEFAULT 250.00,
     shipping_free DECIMAL(10, 2) DEFAULT 5000.00,
     email_notifications BOOLEAN DEFAULT TRUE,
@@ -610,19 +610,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     SET NULL,
         INDEX idx_audit_logs_action_time (action, created_at),
         INDEX idx_audit_logs_actor (actor_user_id, created_at)
-);
--- Tax configuration
-CREATE TABLE IF NOT EXISTS tax_rates (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    name VARCHAR(120) NOT NULL,
-    rate_percent DECIMAL(5, 2) NOT NULL,
-    country VARCHAR(100) DEFAULT 'Pakistan',
-    state VARCHAR(100),
-    is_default BOOLEAN DEFAULT FALSE,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_tax_rates_active_default (is_active, is_default)
 );
 -- Payment methods configuration
 CREATE TABLE IF NOT EXISTS payment_methods (

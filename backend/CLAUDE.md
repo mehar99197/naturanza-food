@@ -50,7 +50,10 @@ HTTP → routes/ → middleware (auth, restrictBody, asyncHandler) → controlle
 
 ## Domain notes
 
-- Payments: `cod`, `card`, `online`, `easypaisa`, `jazzcash`. Currency **PKR**, default tax 18%, per-city delivery fees.
+- Payments: `cod`, `card`, `online`, `easypaisa`, `jazzcash`. Currency **PKR**, per-city delivery fees.
+- **No tax is charged.** Order totals are `subtotal - discount + shipping`; `orders.tax` is always
+  `0` and exists only for historical rows. There is deliberately no tax-rate setting — don't
+  reintroduce one without a pricing decision (tax-inclusive vs exclusive) first.
 - Roles: customer / admin, with `admin_role` (super_admin, staff_admin) + JSON `admin_permissions`. Admin-only routes use `isAdmin`; super-admin use `requireSuperAdmin`.
 - Stock has `stock_quantity` + `reserved_stock` (COD holds); a reservation sweeper runs on an interval.
 

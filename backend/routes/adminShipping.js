@@ -2,10 +2,12 @@ const express = require("express");
 const router = express.Router();
 const { dbPool } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const { requirePermission } = require("../middleware/requirePermission");
 
-// All routes require authentication and admin role
+// All routes require authentication, admin role, and the Shipping Cities grant.
 router.use(authenticateToken);
 router.use(isAdmin);
+router.use(requirePermission("manage_shipping_cities"));
 
 // GET /api/admin/shipping/city-fees - fetch all cities
 router.get("/city-fees", async (req, res) => {

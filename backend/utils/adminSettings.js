@@ -5,7 +5,6 @@ const DEFAULT_ADMIN_SETTINGS = {
   storeEmail: process.env.BUSINESS_SUPPORT_EMAIL || "support@naturanzafood.com",
   storePhone: process.env.BUSINESS_SUPPORT_PHONE || "+92340 9502646",
   currency: "PKR",
-  taxRate: 18,
   shippingFlat: 250,
   shippingFree: 5000,
   emailNotifications: true,
@@ -68,7 +67,6 @@ const normalizeSettingsRow = (row = {}) => ({
   storeEmail: row.store_email || DEFAULT_ADMIN_SETTINGS.storeEmail,
   storePhone: row.store_phone || DEFAULT_ADMIN_SETTINGS.storePhone,
   currency: row.currency || DEFAULT_ADMIN_SETTINGS.currency,
-  taxRate: toNumber(row.tax_rate, DEFAULT_ADMIN_SETTINGS.taxRate),
   shippingFlat: toNumber(row.shipping_flat, DEFAULT_ADMIN_SETTINGS.shippingFlat),
   shippingFree: toNumber(row.shipping_free, DEFAULT_ADMIN_SETTINGS.shippingFree),
   emailNotifications: toBoolean(
@@ -134,20 +132,19 @@ const getAdminSettings = async (connection = null) => {
 
   await db.query(
     `INSERT INTO admin_settings
-     (id, store_name, store_email, store_phone, currency, tax_rate, shipping_flat, shipping_free,
+     (id, store_name, store_email, store_phone, currency, shipping_flat, shipping_free,
       email_notifications, order_notifications, low_stock_alerts, low_stock_threshold,
       address, support_hours, facebook_url, instagram_url, twitter_url, youtube_url,
       whatsapp_number, whatsapp_enabled, map_latitude, map_longitude, map_location_label,
       newsletter_welcome_promo_code, store_discount_active, store_discount_percentage,
       store_discount_label)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE id = id`,
     [
       defaults.storeName,
       defaults.storeEmail,
       defaults.storePhone,
       defaults.currency,
-      defaults.taxRate,
       defaults.shippingFlat,
       defaults.shippingFree,
       defaults.emailNotifications,
@@ -197,9 +194,6 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
       : {}),
     ...(hasOwn("currency")
       ? { currency: String(updates.currency || "PKR").trim().toUpperCase() }
-      : {}),
-    ...(hasOwn("taxRate")
-      ? { taxRate: toNumber(updates.taxRate, current.taxRate) }
       : {}),
     ...(hasOwn("shippingFlat")
       ? { shippingFlat: toNumber(updates.shippingFlat, current.shippingFlat) }
@@ -277,7 +271,6 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
          store_email = ?,
          store_phone = ?,
          currency = ?,
-         tax_rate = ?,
          shipping_flat = ?,
          shipping_free = ?,
          email_notifications = ?,
@@ -305,7 +298,6 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
       next.storeEmail,
       next.storePhone,
       next.currency,
-      next.taxRate,
       next.shippingFlat,
       next.shippingFree,
       next.emailNotifications,
@@ -341,7 +333,6 @@ const toPublicSettings = (settings) => ({
   storeEmail: settings.storeEmail,
   storePhone: settings.storePhone,
   currency: settings.currency || "PKR",
-  taxRate: settings.taxRate,
   shippingFlat: settings.shippingFlat,
   shippingFree: settings.shippingFree,
   emailNotifications: settings.emailNotifications,

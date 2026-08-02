@@ -26,7 +26,6 @@ const DEFAULT_SETTINGS = {
   storeEmail: 'support@naturanzafood.com',
   storePhone: '+92340 9502646',
   currency: 'PKR',
-  taxRate: '18',
   shippingFlat: '250',
   shippingFree: '5000',
   emailNotifications: true,
@@ -116,13 +115,6 @@ export function AdminSettings() {
  delete newErrors.storePhone;
  }
  break;
- case 'taxRate':
- if (parseFloat(value) < 0 || parseFloat(value) > 100) {
- newErrors.taxRate = 'Tax rate must be between 0 and 100';
- } else {
- delete newErrors.taxRate;
- }
- break;
  case 'shippingFlat':
  case 'shippingFree':
  if (parseFloat(value) < 0) {
@@ -195,7 +187,6 @@ export function AdminSettings() {
  storeEmail: settings.storeEmail,
  storePhone: settings.storePhone,
  currency: settings.currency,
- taxRate: Number(settings.taxRate) || 0,
  shippingFlat: Number(settings.shippingFlat) || 0,
  shippingFree: Number(settings.shippingFree) || 0,
  emailNotifications: settings.emailNotifications,

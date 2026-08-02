@@ -5,14 +5,12 @@ const { db } = require('../config/db');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 const { restrictBody } = require('../middleware/security');
 const requireSuperAdmin = require('../middleware/requireSuperAdmin');
-const upload = require('../middleware/uploadConfig');
 const { uploadProfileImage } = require('../middleware/upload');
 const { generateSecurePassword, logAdminAction, getClientIP } = require('../utils/adminHelpers');
 const { createPasswordResetToken } = require('../utils/passwordResetTokens');
 const { sendPasswordResetEmail } = require('../utils/emailService');
 const { revokeSessionsByUserId, touchSessionByToken } = require('../utils/sessionManager');
 const { revokeRefreshTokensByUserId } = require('../utils/tokenStore');
-const { syncDefaultAdminPassword } = require('../utils/envSync');
 const { hasReusedPassword, addPasswordToHistory } = require('../utils/passwordHistory');
 
 const parseEnumValues = (enumDefinition = "") => {
@@ -113,7 +111,7 @@ router.get('/admins', authenticateToken, isAdmin, async (req, res) => {
 });
 
 // POST /api/admin-management/admins - Create new admin
-router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, upload.single('profile_picture'), async (req, res) => {
+router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, uploadProfileImage, async (req, res) => {
   try {
 
     const { full_name, email, phone, role, permissions } = req.body;
@@ -149,10 +147,9 @@ router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, upload.sin
     const password = generateSecurePassword();
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    let profilePicture = null;
-    if (req.file) {
-      profilePicture = `/uploads/admins/${req.file.filename}`;
-    }
+    // req.file.url points at the persistent uploads volume (outside the
+    // git-deployed tree), so the avatar survives a redeploy.
+    const profilePicture = req.file?.url || null;
 
     let adminPermissions = null;
     if (permissions) {
@@ -401,6 +398,18 @@ router.delete('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin,
 router.get('/admins/:id/logs', authenticateToken, isAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+
+    // An admin may read their own trail; only a super admin may read anyone
+    // else's (audit logs reveal other admins' actions and client IPs).
+    const targetId = Number(id);
+    const isSelf = Number.isInteger(targetId) && targetId === req.user.id;
+    const isSuperAdmin =
+      String(req.user.admin_role || '').trim().toLowerCase() === 'super_admin';
+
+    if (!isSelf && !isSuperAdmin) {
+      return res.status(403).json({ error: 'You can only view your own activity logs' });
+    }
+
     const limit = parseInt(req.query.limit) || 20;
 
     const [logs] = await db.promise().query(
@@ -488,11 +497,6 @@ router.patch('/admins/:id/change-password', authenticateToken, isAdmin, restrict
 
     await addPasswordToHistory(db.promise(), id, new_password);
 
-    try {
-      await syncDefaultAdminPassword(user[0]?.email, new_password);
-    } catch (envError) {
-    }
-
     const currentSession = req.token
       ? await touchSessionByToken(db.promise(), req.token)
       : null;
@@ -529,58 +533,63 @@ router.post('/admins/:id/reset-password', authenticateToken, isAdmin, requireSup
       return res.status(404).json({ error: 'Admin not found' });
     }
 
-    // Generate new password
-    const newPassword = generateSecurePassword();
-    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    // Burn the current password by replacing it with a random value nobody
+    // holds, then let the admin choose a new one through a one-time reset link.
+    //
+    // The previous implementation emailed the freshly generated password in
+    // plaintext, which leaves a working credential sitting in an inbox forever
+    // (CWE-256/319). The create-admin flow a few handlers up already uses the
+    // reset-link pattern — this now matches it.
+    const throwawayPassword = generateSecurePassword();
+    const hashedPassword = await bcrypt.hash(throwawayPassword, 12);
 
-    // Update password in database
     await db.promise().query(
       'UPDATE users SET password = ? WHERE id = ?',
       [hashedPassword, id]
     );
 
-    await addPasswordToHistory(db.promise(), id, newPassword);
-
     await revokeSessionsByUserId(db.promise(), id);
     await revokeRefreshTokensByUserId(db.promise(), id, 'password_reset');
 
-    // Send email with new password
-    const transporter = require('nodemailer').createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: process.env.SMTP_PORT || 587,
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-
-    const mailOptions = {
-      from: `"Naturanza Food Admin" <${process.env.SMTP_USER || 'noreply@naturanza.com'}>`,
-      to: admin[0].email,
-      subject: 'Your Naturanza Admin Password Has Been Reset',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #16a34a;">Password Reset</h2>
-          <p>Hello ${admin[0].name},</p>
-          <p>Your password was reset by an administrator. Here is your new temporary password:</p>
-          <div style="background-color: #f0f8f2; padding: 15px; border-left: 4px solid #16a34a; margin: 20px 0;">
-            <p><strong>New Password:</strong> <code style="background: #fff; padding: 2px 6px; border-radius: 3px;">${newPassword}</code></p>
-          </div>
-          <p><strong>Please login and change it immediately for security purposes.</strong></p>
-          <p><a href="${process.env.ADMIN_URL || 'http://localhost:5173/admin/login'}" style="color: #16a34a;">Login to Admin Panel</a></p>
-        </div>
-      `,
-    };
+    let emailStatus = 'sent';
+    let emailError = null;
 
     try {
-      await transporter.sendMail(mailOptions);
-    } catch (emailError) {
+      const tokenData = await createPasswordResetToken(
+        db.promise(),
+        Number(id),
+        admin[0].email,
+      );
+
+      if (!tokenData?.token) {
+        throw new Error('Failed to generate reset token');
+      }
+
+      const emailResult = await sendPasswordResetEmail(
+        admin[0].email,
+        admin[0].name,
+        tokenData.token,
+        true,
+      );
+
+      if (!emailResult?.success) {
+        throw new Error(emailResult?.error || 'Failed to send reset email');
+      }
+    } catch (error) {
+      emailStatus = 'failed';
+      emailError = error.message;
     }
 
     await logAdminAction(req.user.id, `Reset password for admin ${admin[0].name} (${admin[0].email})`, getClientIP(req));
 
-    res.json({ message: `Password reset and emailed to ${admin[0].email}` });
+    res.json({
+      message:
+        emailStatus === 'sent'
+          ? `Password reset. A reset link was emailed to ${admin[0].email}.`
+          : `Password reset, but the reset email failed to send. The admin must use "Forgot password".`,
+      emailStatus,
+      emailError,
+    });
   } catch (error) {
     res.status(500).json({ error: 'Failed to reset password' });
   }

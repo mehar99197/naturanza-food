@@ -46,7 +46,6 @@ router.post(
     "customer_phone",
     "amount",
     "payment_method",
-    "screenshot_url",
     "transaction_id",
     "verification_screenshot",
   ),
@@ -58,8 +57,11 @@ router.post(
       const paymentMethod = String(req.body.payment_method || "")
         .trim()
         .toLowerCase();
-      const screenshotUrl =
-        toNullableString(req.body.screenshot_url) || req.file?.url || null;
+      // Only the freshly uploaded file counts. Previously a client-supplied
+      // `screenshot_url` was accepted as a fallback, which let a customer submit
+      // a verification with no upload at all — pointing at an arbitrary URL, or
+      // at another order's screenshot.
+      const screenshotUrl = req.file?.url || null;
 
       const rawTid = toNullableString(req.body.transaction_id);
       const transactionId = rawTid ? rawTid.replace(/\D/g, "").slice(0, 11) : null;

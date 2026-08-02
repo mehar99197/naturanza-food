@@ -62,10 +62,20 @@ const JS_PROTOCOL_REGEX = /^\s*javascript\s*:/i;
 const DATA_PROTOCOL_REGEX = /^\s*data\s*:/i;
 const VBSCRIPT_PROTOCOL_REGEX = /^\s*vbscript\s*:/i;
 const EVENT_HANDLER_REGEX = /\bon\w+\s*=/gi;
-const SVG_SCRIPT_REGEX = /<svg[^>]*>(.*?)<\/svg>/gi;
 const EXPRESSION_REGEX = /expression\s*\(/gi;
-const URL_ENCODED_INJECTION_REGEX = /%[0-9a-f]{2}/gi;
 
+/**
+ * Defence-in-depth scrubbing of markup-flavoured input.
+ *
+ * NOTE: this function must never DECODE anything. A previous version ran a
+ * `decodeURIComponent` pass over every `%XX` sequence AFTER stripping angle
+ * brackets, which meant a percent-encoded payload passed every filter and was
+ * then decoded back into live markup — the sanitizer manufactured the exact
+ * string it exists to block:
+ *   "%3Cscript%3Ealert(1)%3C%2Fscript%3E"  ->  "<script>alert(1)</script>"
+ * Decoding is the consumer's job (Express already decodes query/body); doing it
+ * here can only re-introduce syntax that the steps above just removed.
+ */
 function sanitizeInput(input) {
     if (typeof input !== 'string') return input;
 
@@ -90,14 +100,6 @@ function sanitizeInput(input) {
 
     sanitized = sanitized.replace(EVENT_HANDLER_REGEX, '')
         .replace(EXPRESSION_REGEX, '');
-
-    sanitized = sanitized.replace(URL_ENCODED_INJECTION_REGEX, (match) => {
-        try {
-            return decodeURIComponent(match);
-        } catch {
-            return '';
-        }
-    });
 
     return sanitized.trim();
 }
@@ -169,21 +171,37 @@ function validatePassword(password) {
     };
 }
 
+/**
+ * Coarse SQL-shaped-payload screen, kept purely as defence in depth.
+ *
+ * Every query in this codebase is parameterized (`dbPool.query(sql, [params])`);
+ * the only interpolated SQL fragments are literal column names built from
+ * hard-coded arrays. So this check is not what stops injection — it is a
+ * tripwire, and a tripwire that rejects real customer input is a net loss.
+ *
+ * Removed from the previous pattern set because they fire on ordinary prose and
+ * add nothing on top of parameterization:
+ *   - the SQL-comment marker pattern, which rejected "Honey & Ginger -- best
+ *     seller" and any text containing a C-style comment opener
+ *   - the bare `sleep(n)` pattern, which rejected a blog post about "sleep(8)
+ *     hours a night"
+ *
+ * What remains are multi-keyword sequences that effectively never occur in a
+ * product name, address, review, or support message.
+ */
 function isSafeSQLInput(input) {
     if (typeof input !== 'string') return true;
 
     const sqlInjectionPatterns = [
-        /(\b(?:DROP\s+(?:TABLE|DATABASE|INDEX|VIEW|PROCEDURE|FUNCTION)|TRUNCATE\s+TABLE|ALTER\s+(?:TABLE|DATABASE|COLUMN))\b)/gi,
-        /(?:;\s*(?:DROP|TRUNCATE|ALTER|DELETE|EXEC)\b)/gi,
-        /(\bEXEC(?:UTE)?\s*\()/gi,
-        /(?:\bUNION\b\s+\bSELECT\b)/gi,
-        /(?:\bSELECT\b.*\bINTO\s+(?:OUT|DUMP)FILE\b)/gi,
-        /(?:\bLOAD\s+(?:DATA|FILE)\b)/gi,
-        /(?:--\s|\/\*!|\/\*)/gi,
-        /(\bINSERT\s+INTO\b.*\bVALUES\b.*\bSELECT\b)/gi,
-        /(\bWAITFOR\s+DELAY\b)/gi,
-        /(\bBENCHMARK\b\s*\()/gi,
-        /(sleep\s*\(\s*\d+\s*\))/gi,
+        /(\b(?:DROP\s+(?:TABLE|DATABASE|INDEX|VIEW|PROCEDURE|FUNCTION)|TRUNCATE\s+TABLE|ALTER\s+(?:TABLE|DATABASE|COLUMN))\b)/i,
+        /(?:;\s*(?:DROP|TRUNCATE|ALTER|DELETE|EXEC)\b)/i,
+        /(\bEXEC(?:UTE)?\s*\()/i,
+        /(?:\bUNION\b\s+\bSELECT\b)/i,
+        /(?:\bSELECT\b.*\bINTO\s+(?:OUT|DUMP)FILE\b)/i,
+        /(?:\bLOAD\s+(?:DATA\s+INFILE|_FILE\s*\())/i,
+        /(\bINSERT\s+INTO\b.*\bVALUES\b.*\bSELECT\b)/i,
+        /(\bWAITFOR\s+DELAY\b)/i,
+        /(\bBENCHMARK\s*\(\s*\d)/i,
     ];
 
     return !sqlInjectionPatterns.some(pattern => pattern.test(input));

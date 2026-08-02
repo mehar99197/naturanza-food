@@ -168,8 +168,12 @@ export function AdminDashboard() {
       await Promise.all([
         adminAPI.getDashboardStats(),
         adminAPI.getRecentOrders(8),
-        adminAPI.getSalesReport(),
-        adminAPI.getProductSalesReport(),
+        // The dashboard is visible to every admin, but these feeds are gated
+        // server-side by the Reports / Payments grants. A staff admin without
+        // them gets a 403 per widget — degrade that widget instead of failing
+        // the whole page.
+        adminAPI.getSalesReport().catch(() => null),
+        adminAPI.getProductSalesReport().catch(() => null),
         adminAPI.getPaymentAnalytics().catch(() => null),
       ]);
     return {

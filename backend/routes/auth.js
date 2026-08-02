@@ -49,6 +49,7 @@ const {
 } = require("../utils/emailService");
 const { isDisposableEmail, hasDeliverableDomain } = require("../utils/emailValidation");
 const { getClientIp } = require("../utils/clientIp");
+const { createConnectionReleaser } = require("../utils/dbConnection");
 const {
   createVerificationCode,
   verifyCode,
@@ -622,6 +623,7 @@ router.post("/resend-verification", async (req, res) => {
 // Login user
 router.post("/login", async (req, res) => {
   const connection = await db.promise().getConnection();
+  const release = createConnectionReleaser(connection);
 
   try {
     const parsedBody = parsePayload(loginSchema, req.body || {});
@@ -636,7 +638,7 @@ router.post("/login", async (req, res) => {
         failureReason: "Invalid login payload",
       });
 
-      connection.release();
+      release();
       return res.status(400).json({ error: parsedBody.error });
     }
 
@@ -657,7 +659,7 @@ router.post("/login", async (req, res) => {
         failureReason: "Invalid credentials",
       });
 
-      connection.release();
+      release();
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
@@ -673,7 +675,7 @@ router.post("/login", async (req, res) => {
         failureReason: "Account disabled",
       });
 
-      connection.release();
+      release();
       return res
         .status(403)
         .json({ error: "Account is disabled. Please contact support." });
@@ -681,7 +683,7 @@ router.post("/login", async (req, res) => {
 
     const lockStatus = await checkAccountLockout(connection, user.id);
     if (lockStatus.locked) {
-      connection.release();
+      release();
       return res.status(423).json({
         error: "Account temporarily locked due to multiple failed attempts.",
       });
@@ -701,7 +703,7 @@ router.post("/login", async (req, res) => {
         failureReason: "Invalid credentials",
       });
 
-      connection.release();
+      release();
 
       if (newLockStatus.locked) {
         return res.status(423).json({
@@ -717,7 +719,7 @@ router.post("/login", async (req, res) => {
     }
 
     await resetLoginFailuresAtomic(connection, user.id);
-    connection.release();
+    release();
 
     if (String(user.role || "").trim().toLowerCase() === "admin") {
       void recordLoginHistorySafely({
@@ -775,6 +777,10 @@ router.post("/login", async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ error: "Server error" });
+  } finally {
+    // Guard against an unexpected throw stranding the connection in the pool's
+    // in-use set — 10 such leaks exhaust the pool and hang every later request.
+    release();
   }
 });
 
@@ -1063,85 +1069,68 @@ router.put("/change-password", authenticateToken, restrictBody('currentPassword'
     }
 
     const connection = await db.promise().getConnection();
+    const release = createConnectionReleaser(connection);
 
     try {
       await ensurePasswordHistoryTable(connection);
 
-      db.query(
+      const [results] = await connection.query(
         "SELECT password, password_set_by_user FROM users WHERE id = ?",
         [req.user.id],
-        async (err, results) => {
-          if (err) {
-            connection.release();
-            return res.status(500).json({ error: "Database error" });
-          }
-
-          if (!results.length) {
-            connection.release();
-            return res.status(404).json({ error: "User not found" });
-          }
-
-          const requiresCurrentPassword = toBooleanFlag(
-            results[0].password_set_by_user,
-            true,
-          );
-
-          if (requiresCurrentPassword && !currentPassword) {
-            connection.release();
-            return res
-              .status(400)
-              .json({ error: "Current password is required" });
-          }
-
-          if (requiresCurrentPassword) {
-            const isValidPassword = await bcrypt.compare(
-              currentPassword,
-              results[0].password,
-            );
-            if (!isValidPassword) {
-              connection.release();
-              return res
-                .status(401)
-                .json({ error: "Current password is incorrect" });
-            }
-          }
-
-          const reusedPassword = await hasReusedPassword(
-            connection,
-            req.user.id,
-            newPassword,
-            5
-          );
-
-          if (reusedPassword) {
-            connection.release();
-            return res.status(400).json({
-              error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
-            });
-          }
-
-          const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-          db.query(
-            "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
-            [hashedPassword, req.user.id],
-            async (err, result) => {
-              if (err) {
-                connection.release();
-                return res.status(500).json({ error: "Error updating password" });
-              }
-
-              await addPasswordToHistory(connection, req.user.id, newPassword);
-              connection.release();
-
-              res.json({ message: "Password changed successfully" });
-            },
-          );
-        },
       );
-    } catch (error) {
-      connection.release();
-      throw error;
+
+      if (!results.length) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const requiresCurrentPassword = toBooleanFlag(
+        results[0].password_set_by_user,
+        true,
+      );
+
+      if (requiresCurrentPassword && !currentPassword) {
+        return res
+          .status(400)
+          .json({ error: "Current password is required" });
+      }
+
+      if (requiresCurrentPassword) {
+        const isValidPassword = await bcrypt.compare(
+          currentPassword,
+          results[0].password,
+        );
+        if (!isValidPassword) {
+          return res
+            .status(401)
+            .json({ error: "Current password is incorrect" });
+        }
+      }
+
+      const reusedPassword = await hasReusedPassword(
+        connection,
+        req.user.id,
+        newPassword,
+        5,
+      );
+
+      if (reusedPassword) {
+        return res.status(400).json({
+          error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
+        });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+      await connection.query(
+        "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
+        [hashedPassword, req.user.id],
+      );
+
+      await addPasswordToHistory(connection, req.user.id, newPassword);
+
+      return res.json({ message: "Password changed successfully" });
+    } finally {
+      release();
     }
   } catch (error) {
     res.status(500).json({ error: "Server error" });
@@ -1765,6 +1754,10 @@ router.post("/forgot-password", async (req, res) => {
 
 // Reset Password - Verify token and update password
 router.post("/reset-password", async (req, res) => {
+  // Assigned once the pooled connection is acquired; the `finally` below always
+  // runs it so a throw mid-flow can never leak the connection.
+  let release = () => {};
+
   try {
     const parsedBody = parsePayload(resetPasswordSchema, req.body || {});
     if (!parsedBody.ok) {
@@ -1804,6 +1797,7 @@ router.post("/reset-password", async (req, res) => {
     }
 
     const connection = await db.promise().getConnection();
+    release = createConnectionReleaser(connection);
     await ensurePasswordHistoryTable(connection);
 
     const [userRows] = await connection.query(
@@ -1814,7 +1808,7 @@ router.post("/reset-password", async (req, res) => {
     if (userRows.length && userRows[0].password) {
       const isSamePassword = await bcrypt.compare(newPassword, userRows[0].password);
       if (isSamePassword) {
-        connection.release();
+        release();
         return res.status(400).json({
           error: "New password must be different from your current password.",
           success: false,
@@ -1824,7 +1818,7 @@ router.post("/reset-password", async (req, res) => {
 
     const reusedPassword = await hasReusedPassword(connection, tokenValidation.userId, newPassword, 5);
     if (reusedPassword) {
-      connection.release();
+      release();
       return res.status(400).json({
         error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
         success: false,
@@ -1840,7 +1834,7 @@ router.post("/reset-password", async (req, res) => {
 
     await addPasswordToHistory(connection, tokenValidation.userId, newPassword);
 
-    connection.release();
+    release();
 
     await markTokenAsUsed(db.promise(), tokenValidation.tokenId);
 
@@ -1860,6 +1854,8 @@ router.post("/reset-password", async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ error: "Server error. Please try again later." });
+  } finally {
+    release();
   }
 });
 

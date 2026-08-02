@@ -1131,31 +1131,6 @@ export const adminAPI = {
     return response.data;
   },
 
-  getTaxRates: async () => {
-    const response = await axiosInstance.get("/admin/tax-rates");
-    return response.data;
-  },
-
-  createTaxRate: async (taxRateData) => {
-    const response = await axiosInstance.post("/admin/tax-rates", taxRateData);
-    return response.data;
-  },
-
-  updateTaxRate: async (taxRateId, taxRateData) => {
-    const response = await axiosInstance.put(
-      `/admin/tax-rates/${taxRateId}`,
-      taxRateData,
-    );
-    return response.data;
-  },
-
-  deleteTaxRate: async (taxRateId) => {
-    const response = await axiosInstance.delete(
-      `/admin/tax-rates/${taxRateId}`,
-    );
-    return response.data;
-  },
-
   getPaymentMethods: async () => {
     const response = await axiosInstance.get("/admin/payment-methods");
     return response.data;
@@ -1210,6 +1185,18 @@ export const adminAPI = {
   getPaymentAnalytics: async () => {
     const response = await axiosInstance.get("/admin/payments/analytics");
     return response.data;
+  },
+
+  // Payment screenshots are no longer on the public /images mount (they carry
+  // customer bank details), so they cannot be loaded with a bare <img src>.
+  // Fetch the bytes with the admin token attached and hand back an object URL;
+  // callers must revokeObjectURL when done.
+  getPaymentVerificationScreenshot: async (verificationId) => {
+    const response = await axiosInstance.get(
+      `/admin/payments/verifications/${verificationId}/screenshot`,
+      { responseType: "blob" },
+    );
+    return URL.createObjectURL(response.data);
   },
 
   approvePaymentVerification: async (verificationId, adminNote = null) => {

@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const { requirePermission } = require("../middleware/requirePermission");
 const { restrictBody } = require("../middleware/security");
 const asyncHandler = require("../middleware/asyncHandler");
 const productController = require("../controllers/productController");
@@ -16,6 +17,7 @@ router.post(
   "/",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_products"),
   restrictBody('name', 'slug', 'barcode', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'is_organic', 'ingredients', 'benefits', 'usage'),
   asyncHandler(productController.createProduct),
 );
@@ -24,6 +26,7 @@ router.put(
   "/:id",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_products"),
   restrictBody('name', 'slug', 'barcode', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'is_organic', 'ingredients', 'benefits', 'usage'),
   asyncHandler(productController.updateProduct),
 );
@@ -32,6 +35,7 @@ router.delete(
   "/:id",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_products"),
   asyncHandler(productController.deleteProduct),
 );
 
@@ -39,6 +43,7 @@ router.patch(
   "/:id/stock",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_products"),
   restrictBody('stock_quantity'),
   asyncHandler(productController.updateStock),
 );
@@ -48,6 +53,7 @@ router.post(
   "/upload-image",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_products"),
   uploadProductImage,
   (req, res) => {
     try {

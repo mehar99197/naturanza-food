@@ -1,7 +1,11 @@
 const express = require("express");
+const path = require("path");
+const fs = require("fs");
 const router = express.Router();
 const { db } = require("../config/db");
+const { UPLOADS_IMAGES_DIR } = require("../middleware/upload");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const { requirePermission } = require("../middleware/requirePermission");
 const requireSuperAdmin = require("../middleware/requireSuperAdmin");
 const { restrictBody } = require("../middleware/security");
 const { toBoolean, toNullableString } = require("../utils/helpers");
@@ -50,7 +54,7 @@ const ALLOWED_VERIFICATION_STAGES = new Set([
 // Live revenue rollups for the dashboard cards.
 // Three conditional SUMs in a single round-trip — the planner scans the
 // (status, created_at) index once instead of three times.
-router.get("/analytics", authenticateToken, isAdmin, async (req, res) => {
+router.get("/analytics", authenticateToken, isAdmin, requirePermission("manage_payments"), async (req, res) => {
   const conn = await db.promise().getConnection();
   try {
     // Pin session TZ so CURDATE() / MONTH(NOW()) align with PKT regardless of server locale.
@@ -102,7 +106,7 @@ router.get("/analytics", authenticateToken, isAdmin, async (req, res) => {
 });
 
 // GET /api/admin/payments/accounts
-router.get("/accounts", authenticateToken, isAdmin, async (req, res) => {
+router.get("/accounts", authenticateToken, isAdmin, requirePermission("manage_payments"), async (req, res) => {
   try {
     const [rows] = await db
       .promise()
@@ -123,6 +127,7 @@ router.put(
   "/accounts/:id",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_payments"),
   requireSuperAdmin,
   restrictBody("account_number", "account_name", "is_active"),
   async (req, res) => {
@@ -171,11 +176,63 @@ router.put(
   },
 );
 
+// GET /api/admin/payments/verifications/:id/screenshot
+//
+// Payment screenshots contain bank account numbers, transaction IDs, phone
+// numbers and amounts. They used to sit under the public `/images` static mount
+// with no auth at all, so anyone holding (or guessing) a URL could read them.
+// They are now streamed only to an admin with the Payments grant, and the
+// on-disk folder is excluded from the public mount in index.js.
+router.get(
+  "/verifications/:id/screenshot",
+  authenticateToken,
+  isAdmin,
+  requirePermission("manage_payments"),
+  async (req, res) => {
+    try {
+      const verificationId = Number(req.params.id);
+      if (!Number.isInteger(verificationId) || verificationId <= 0) {
+        return res.status(400).json({ error: "Invalid verification id" });
+      }
+
+      const [[record]] = await db.promise().query(
+        "SELECT screenshot_url FROM advance_payment_verifications WHERE id = ? LIMIT 1",
+        [verificationId],
+      );
+
+      if (!record?.screenshot_url) {
+        return res.status(404).json({ error: "Screenshot not found" });
+      }
+
+      // Resolve strictly inside the verification folder — the stored value is
+      // never trusted as a path.
+      const storedName = path.basename(String(record.screenshot_url));
+      const baseDir = path.resolve(UPLOADS_IMAGES_DIR, "payment-verifications");
+      const absolutePath = path.resolve(baseDir, storedName);
+
+      if (!absolutePath.startsWith(`${baseDir}${path.sep}`)) {
+        return res.status(400).json({ error: "Invalid screenshot reference" });
+      }
+
+      if (!fs.existsSync(absolutePath)) {
+        return res.status(404).json({ error: "Screenshot file is no longer available" });
+      }
+
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("X-Robots-Tag", "noindex, nofollow");
+      return res.sendFile(absolutePath);
+    } catch (error) {
+      return res.status(500).json({ error: "Failed to load screenshot" });
+    }
+  },
+);
+
 // GET /api/admin/payments/verifications
 router.get(
   "/verifications",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_payments"),
   async (req, res) => {
     try {
       const statusParam = String(req.query.status || "pending")
@@ -240,6 +297,7 @@ router.put(
   "/verifications/:id/approve",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_payments"),
   restrictBody("admin_note"),
   async (req, res) => {
     const verificationId = Number.parseInt(req.params.id, 10);
@@ -492,6 +550,7 @@ router.put(
   "/verifications/:id/reject",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_payments"),
   restrictBody("reason"),
   async (req, res) => {
     const verificationId = Number.parseInt(req.params.id, 10);

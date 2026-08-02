@@ -11,15 +11,6 @@ const PAYMENT_METHOD_OPTIONS = [
   { code: "jazzcash", label: "JazzCash" },
 ];
 
-const initialTaxForm = {
-  name: "",
-  rate_percent: "",
-  country: "Pakistan",
-  state: "",
-  is_default: false,
-  is_active: true,
-};
-
 const initialPaymentMethodForm = {
   code: "cod",
   label: "Cash on Delivery",
@@ -34,30 +25,26 @@ export function AdminOperations() {
   const [error, setError] = useState("");
 
   const [paymentMethods, setPaymentMethods] = useState([]);
-  const [taxRates, setTaxRates] = useState([]);
   const [inventoryMovements, setInventoryMovements] = useState([]);
 
   const [paymentMethodForm, setPaymentMethodForm] = useState(
     initialPaymentMethodForm,
   );
-  const [taxForm, setTaxForm] = useState(initialTaxForm);
 
   const loadData = async () => {
     try {
       setLoading(true);
       setError("");
 
-      const [paymentMethodsResponse, taxRatesResponse, movementsResponse] =
+      const [paymentMethodsResponse, movementsResponse] =
         await Promise.all([
           adminAPI.getPaymentMethods(),
-          adminAPI.getTaxRates(),
           adminAPI.getInventoryMovements({ limit: 20 }),
         ]);
 
       setPaymentMethods(
         Array.isArray(paymentMethodsResponse) ? paymentMethodsResponse : [],
       );
-      setTaxRates(Array.isArray(taxRatesResponse) ? taxRatesResponse : []);
       setInventoryMovements(
         Array.isArray(movementsResponse) ? movementsResponse : [],
       );
@@ -137,65 +124,6 @@ export function AdminOperations() {
     }
   };
 
-  const createTaxRate = async () => {
-    try {
-      await adminAPI.createTaxRate({
-        ...taxForm,
-        rate_percent: Number(taxForm.rate_percent),
-      });
-      setTaxForm(initialTaxForm);
-      await loadData();
-    } catch (requestError) {
-      setError(
-        requestError?.response?.data?.error || "Failed to create tax rate",
-      );
-    }
-  };
-
-  const toggleTaxRate = async (taxRate) => {
-    try {
-      await adminAPI.updateTaxRate(taxRate.id, {
-        ...taxRate,
-        is_active: !(taxRate.is_active === true || taxRate.is_active === 1),
-      });
-      await loadData();
-    } catch (requestError) {
-      setError(
-        requestError?.response?.data?.error || "Failed to update tax rate",
-      );
-    }
-  };
-
-  const setDefaultTaxRate = async (taxRate) => {
-    try {
-      await adminAPI.updateTaxRate(taxRate.id, {
-        ...taxRate,
-        is_default: true,
-        is_active: true,
-      });
-      await loadData();
-    } catch (requestError) {
-      setError(
-        requestError?.response?.data?.error || "Failed to set default tax rate",
-      );
-    }
-  };
-
-  const deleteTaxRate = async (taxRate) => {
-    if (!confirm(`Delete tax rate ${taxRate.name}?`)) {
-      return;
-    }
-
-    try {
-      await adminAPI.deleteTaxRate(taxRate.id);
-      await loadData();
-    } catch (requestError) {
-      setError(
-        requestError?.response?.data?.error || "Failed to delete tax rate",
-      );
-    }
-  };
-
   const activePaymentMethodsCount = useMemo(
     () =>
       paymentMethods.filter(
@@ -213,7 +141,7 @@ export function AdminOperations() {
               Operations Control
             </h1>
             <p className="text-gray-600">
-              Manage payment methods, tax rates and inventory logs in real time.
+              Manage payment methods and inventory logs in real time.
             </p>
           </div>
           <button
@@ -232,7 +160,7 @@ export function AdminOperations() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <p className="text-sm text-gray-500">Payment Methods</p>
             <p className="text-2xl font-bold text-gray-900">
@@ -240,12 +168,6 @@ export function AdminOperations() {
             </p>
             <p className="text-xs text-gray-500">
               {activePaymentMethodsCount} active
-            </p>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <p className="text-sm text-gray-500">Tax Rates</p>
-            <p className="text-2xl font-bold text-gray-900">
-              {taxRates.length}
             </p>
           </div>
         </div>
@@ -340,128 +262,6 @@ export function AdminOperations() {
                         </button>
                         <button
                           onClick={() => deletePaymentMethod(method)}
-                          className="px-3 py-1 bg-red-600 text-white rounded"
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="bg-white rounded-2xl border border-gray-200 p-5 space-y-4">
-          <h2 className="text-xl font-bold text-gray-900">Tax Rates</h2>
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-            <input
-              value={taxForm.name}
-              onChange={(e) =>
-                setTaxForm((prev) => ({ ...prev, name: e.target.value }))
-              }
-              placeholder="Name"
-              className="border border-gray-300 rounded-lg px-3 py-2"
-            />
-            <input
-              type="number"
-              value={taxForm.rate_percent}
-              onChange={(e) =>
-                setTaxForm((prev) => ({
-                  ...prev,
-                  rate_percent: e.target.value,
-                }))
-              }
-              placeholder="Rate %"
-              className="border border-gray-300 rounded-lg px-3 py-2"
-            />
-            <input
-              value={taxForm.country}
-              onChange={(e) =>
-                setTaxForm((prev) => ({ ...prev, country: e.target.value }))
-              }
-              placeholder="Country"
-              className="border border-gray-300 rounded-lg px-3 py-2"
-            />
-            <input
-              value={taxForm.state}
-              onChange={(e) =>
-                setTaxForm((prev) => ({ ...prev, state: e.target.value }))
-              }
-              placeholder="State"
-              className="border border-gray-300 rounded-lg px-3 py-2"
-            />
-            <label className="inline-flex items-center gap-2 px-2">
-              <input
-                type="checkbox"
-                checked={taxForm.is_default}
-                onChange={(e) =>
-                  setTaxForm((prev) => ({
-                    ...prev,
-                    is_default: e.target.checked,
-                  }))
-                }
-              />
-              Default
-            </label>
-            <button
-              onClick={createTaxRate}
-              className="bg-green-600 hover:bg-green-700 text-white rounded-lg px-4 py-2 font-semibold"
-            >
-              Add Tax
-            </button>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-600 border-b">
-                  <th className="py-2">Name</th>
-                  <th className="py-2">Rate</th>
-                  <th className="py-2">Region</th>
-                  <th className="py-2">Default</th>
-                  <th className="py-2">Status</th>
-                  <th className="py-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {taxRates.map((taxRate) => {
-                  const isActive =
-                    taxRate.is_active === true || taxRate.is_active === 1;
-                  const isDefault =
-                    taxRate.is_default === true || taxRate.is_default === 1;
-                  return (
-                    <tr key={taxRate.id} className="border-b">
-                      <td className="py-2">{taxRate.name}</td>
-                      <td className="py-2">
-                        {Number(taxRate.rate_percent || 0).toFixed(2)}%
-                      </td>
-                      <td className="py-2">
-                        {taxRate.country}
-                        {taxRate.state ? `, ${taxRate.state}` : ""}
-                      </td>
-                      <td className="py-2">{isDefault ? "Yes" : "No"}</td>
-                      <td className="py-2">
-                        {isActive ? "Active" : "Inactive"}
-                      </td>
-                      <td className="py-2 text-right space-x-2">
-                        <button
-                          onClick={() => toggleTaxRate(taxRate)}
-                          className="px-3 py-1 border rounded"
-                        >
-                          {isActive ? "Disable" : "Enable"}
-                        </button>
-                        {!isDefault && (
-                          <button
-                            onClick={() => setDefaultTaxRate(taxRate)}
-                            className="px-3 py-1 border rounded"
-                          >
-                            Set Default
-                          </button>
-                        )}
-                        <button
-                          onClick={() => deleteTaxRate(taxRate)}
                           className="px-3 py-1 bg-red-600 text-white rounded"
                         >
                           Delete

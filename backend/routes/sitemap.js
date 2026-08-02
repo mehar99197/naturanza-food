@@ -13,6 +13,20 @@ const CATEGORY_MAP = {
   seeds: { name: 'Organic Seeds', changefreq: 'weekly', priority: 0.8 }
 };
 
+// Every interpolated value must be XML-escaped. A single product named
+// "Honey & Ginger" previously produced a raw `&` in <image:title>, which makes
+// the WHOLE document malformed — Google rejects the entire sitemap, not just
+// that entry.
+const escapeXml = (value) =>
+  String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+    // Strip control characters that are illegal in XML 1.0 regardless of escaping.
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+
 function buildXml(urls) {
   const today = new Date().toISOString().split('T')[0];
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -21,15 +35,15 @@ function buildXml(urls) {
 `;
   urls.forEach(url => {
     xml += `  <url>
-    <loc>${url.loc}</loc>
-    <lastmod>${url.lastmod || today}</lastmod>
-    <changefreq>${url.changefreq}</changefreq>
-    <priority>${url.priority}</priority>`;
+    <loc>${escapeXml(url.loc)}</loc>
+    <lastmod>${escapeXml(url.lastmod || today)}</lastmod>
+    <changefreq>${escapeXml(url.changefreq)}</changefreq>
+    <priority>${escapeXml(url.priority)}</priority>`;
     if (url.image) {
       xml += `
     <image:image>
-      <image:loc>${url.image}</image:loc>
-      <image:title>${url.imageTitle || 'Product Image'}</image:title>
+      <image:loc>${escapeXml(url.image)}</image:loc>
+      <image:title>${escapeXml(url.imageTitle || 'Product Image')}</image:title>
     </image:image>`;
     }
     xml += `

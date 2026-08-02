@@ -7,7 +7,67 @@ import { buildRejectionWhatsAppLink, buildApprovalWhatsAppLink } from "@/utils/w
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
-import { getAbsoluteImageUrl } from "@/lib/imageUtils";
+
+/**
+ * Payment screenshots are served from an authenticated admin endpoint (they
+ * contain customer bank details), so they cannot be linked with a bare
+ * <img src> — the browser would not attach the admin token. Fetch the bytes
+ * through the API client and render from an object URL, revoking it on unmount.
+ */
+function VerificationScreenshot({ verificationId, orderId, onOpen }) {
+  const [objectUrl, setObjectUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl = "";
+
+    adminAPI
+      .getPaymentVerificationScreenshot(verificationId)
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        createdUrl = url;
+        setObjectUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [verificationId]);
+
+  if (failed) {
+    return <span className="text-xs text-slate-400">Unavailable</span>;
+  }
+
+  if (!objectUrl) {
+    return <span className="text-xs text-slate-400">Loading…</span>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen({ url: objectUrl, label: orderId })}
+      className="flex items-center gap-2"
+    >
+      <img
+        src={objectUrl}
+        alt={`Screenshot ${orderId}`}
+        className="h-10 w-10 rounded-lg object-cover"
+      />
+      <span className="text-xs font-semibold text-emerald-700 whitespace-nowrap">
+        View
+      </span>
+      <Eye className="h-4 w-4 text-emerald-600" />
+    </button>
+  );
+}
 
 const accountMeta = [
   { type: "jazzcash", label: "JazzCash", icon: Wallet },
@@ -476,9 +536,7 @@ export function AdminPaymentsExtensions() {
                   const stageKey = String(verification.verification_stage || "full_payment").toLowerCase();
                   const stageMeta = stageBadgeStyles[stageKey] || stageBadgeStyles.full_payment;
                   const isFinalCollection = stageKey === "final_collection";
-                  const screenshotUrl = verification.screenshot_url
-                    ? getAbsoluteImageUrl(verification.screenshot_url)
-                    : "";
+                  const hasScreenshot = Boolean(verification.screenshot_url);
                   const isPending = status === "pending";
                   const isRejecting = rejectingId === verification.id;
 
@@ -550,27 +608,12 @@ export function AdminPaymentsExtensions() {
                         )}
                       </td>
                       <td className="py-3 pr-4">
-                        {screenshotUrl ? (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setActiveScreenshot({
-                                url: screenshotUrl,
-                                label: verification.order_id,
-                              })
-                            }
-                            className="flex items-center gap-2"
-                          >
-                            <img
-                              src={screenshotUrl}
-                              alt={`Screenshot ${verification.order_id}`}
-                              className="h-10 w-10 rounded-lg object-cover"
-                            />
-                            <span className="text-xs font-semibold text-emerald-700 whitespace-nowrap">
-                              View
-                            </span>
-                            <Eye className="h-4 w-4 text-emerald-600" />
-                          </button>
+                        {hasScreenshot ? (
+                          <VerificationScreenshot
+                            verificationId={verification.id}
+                            orderId={verification.order_id}
+                            onOpen={setActiveScreenshot}
+                          />
                         ) : isFinalCollection ? (
                           <span className="text-xs italic text-slate-400">Not required</span>
                         ) : (

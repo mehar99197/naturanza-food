@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
 
 const ALLOWED_RETURN_STATUSES = new Set([
@@ -145,7 +146,7 @@ router.get('/my', authenticateToken, async (req, res) => {
 });
 
 // Admin list (mirrors /admin/returns for direct route usage)
-router.get('/admin/all', authenticateToken, isAdmin, async (req, res) => {
+router.get('/admin/all', authenticateToken, isAdmin, requirePermission("manage_returns"), async (req, res) => {
   const status = req.query.status ? String(req.query.status).trim() : null;
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
 
