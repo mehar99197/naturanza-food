@@ -155,6 +155,22 @@ const authLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
+// Fetching a CSRF token is the prerequisite for every unsafe request, so
+// spending the general API budget on it turns a burst of reads into "no form on
+// the site can be submitted". It gets its own generous bucket instead: the
+// client caches the token for the whole session, so one fetch per page load.
+const csrfTokenLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number.parseInt(process.env.CSRF_RATE_LIMIT_MAX || "600", 10) || 600,
+  message: {
+    error: "Too many requests from this IP, please try again later.",
+    retryAfter: "15 minutes",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === "OPTIONS",
+});
+
 const refreshLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 25,
@@ -172,6 +188,22 @@ app.use(hpp());
 
 // Basic Middleware
 app.use(cookieParser());
+
+// The edge CDN in front of this app stores API responses that carry no
+// Set-Cookie header and replays them to unrelated visitors. A single 429 from
+// the rate limiter was cached that way, so every browser fetching
+// GET /api/csrf-token got the stored 429, never received a csrf_token cookie,
+// and every form failed with "CSRF token required". API responses are
+// per-request, per-session state and must never be stored by a shared cache —
+// the public sitemap XML is the one exception.
+const isCacheableApiPath = (reqPath) => reqPath.startsWith("/api/sitemap");
+
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/") && !isCacheableApiPath(req.path)) {
+    res.setHeader("Cache-Control", "no-store");
+  }
+  next();
+});
 
 // CORS Configuration - Restrict origins in production
 const DEV_CORS_ORIGINS = [
@@ -395,10 +427,15 @@ if (ENABLE_RATE_LIMITS) {
   app.use("/api/auth/refresh", refreshLimiter);
   app.use("/api/admin/login", authLimiter);
 
-  // Apply general rate limiting to all API routes (except auth which has its own limits)
+  app.use("/api/csrf-token", csrfTokenLimiter);
+
+  // Apply general rate limiting to all API routes (except auth and the CSRF
+  // token endpoint, which have their own limits, and the health check used by
+  // uptime monitors)
   app.use("/api/", (req, res, next) => {
     const authPath = req.path.match(/^\/auth\/(login|register|google|refresh)/);
-    if (!authPath) {
+    const hasOwnLimiter = req.path === "/csrf-token" || req.path === "/health";
+    if (!authPath && !hasOwnLimiter) {
       apiLimiter(req, res, next);
     } else {
       next();

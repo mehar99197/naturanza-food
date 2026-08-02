@@ -336,6 +336,17 @@ const isUserRoute = (url) =>
   /^\/reviews(\/|$)/.test(url) ||
   /^\/payments(\/|$)/.test(url);
 
+const CSRF_USER_MESSAGE =
+  "Your security session expired. Please refresh the page and try again.";
+
+const withCsrfUserMessage = (error) => {
+  if (error?.response?.data) {
+    error.response.data.error = CSRF_USER_MESSAGE;
+  }
+  error.customMessage = CSRF_USER_MESSAGE;
+  return error;
+};
+
 const shouldSkipAuthRefresh = (request) => {
   const headers = request?.headers || {};
   const skipHeader =
@@ -369,8 +380,15 @@ axiosInstance.interceptors.response.use(
         }
         return axiosInstance(originalRequest);
       } catch (retryError) {
-        return Promise.reject(error);
+        return Promise.reject(withCsrfUserMessage(error));
       }
+    }
+
+    if (isCsrfError) {
+      // The refetch already ran and the token was still rejected. Callers render
+      // the server wording verbatim, and "CSRF token required" tells a visitor
+      // nothing about what to do next.
+      return Promise.reject(withCsrfUserMessage(error));
     }
 
     // Don't retry auth endpoints (login, register, etc.)
