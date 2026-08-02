@@ -137,3 +137,10 @@ In **Google Cloud Console → Credentials → OAuth 2.0 Client**:
   persistent storage (e.g. an object store) as a follow-up.
 - **Updates:** push to `main` → redeploy from hPanel (or auto-deploy). Each deploy reinstalls deps
   and rebuilds the frontend.
+- **Frontend build tooling is pruned after build.** The root `postinstall` builds `frontend/dist`
+  and then removes `frontend/node_modules` (the server only serves `dist`). This keeps the deployed
+  server free of Vite/eslint build-tooling packages that the hPanel vulnerability scanner would
+  otherwise flag (postcss, esbuild, js-yaml, brace-expansion — all dev-only, not runtime code; see
+  `SECURITY-NOTES.md`). ⚠️ Because of this, the frontend must be built **only** by `postinstall`. Do
+  **not** also set a separate hPanel **Build Command** (`npm run build`) that runs after install — it
+  would execute after the prune and fail with `vite: command not found`.

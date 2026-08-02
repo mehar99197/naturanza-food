@@ -35,3 +35,29 @@ npm audit
 ## Backend
 
 `npm audit --omit=dev` in `backend/` reports **0 vulnerabilities**.
+
+## Hostinger vulnerability scanner — frontend build-tooling advisories
+
+The hPanel scanner (Security → Vulnerabilities) has flagged, on the **deployed** server:
+`postcss`, `esbuild`, `js-yaml`, and `brace-expansion` (e.g. CVE-2026-14257,
+GHSA-r28c-9q8g-f849, CVE-2026-59869, and the withdrawn esbuild GHSA-gv7w-rqvm-qjhr).
+
+**Status: not runtime-exploitable.** Every one of these is a **dev/build-only** dependency —
+`postcss`/`esbuild` via Vite, `js-yaml` via eslint, `brace-expansion` via
+`eslint-plugin-react → minimatch`. `npm ls --omit=dev` shows **none** of them in the production
+dependency tree. The live app runs `node backend/index.js` (backend `npm audit` = 0) and serves the
+pre-built static `frontend/dist`; it never loads any of these packages at runtime.
+
+Why the scanner still sees them: the deploy installs devDependencies to run `vite build`, and the
+tooling was previously left in `frontend/node_modules` on the server afterwards. The repo lockfile
+already pins patched `postcss` 8.5.25 / `esbuild` 0.28.1 / `js-yaml` 4.3.1; a stale scan predates
+that deploy. `brace-expansion`'s "fixed" line (5.x) would require a cross-major override of an
+eslint transitive — avoided, because it is not shipped at runtime.
+
+**Fix applied:** the root `postinstall` now deletes `frontend/node_modules` **after** the build
+(`… && npm --prefix frontend run build && rm -rf frontend/node_modules`), so the deployed server
+carries only `frontend/dist` + `backend/node_modules` — the build/lint tooling the scanner flags is
+gone. ⚠️ This assumes the frontend is built **only** by `postinstall` (the documented flow). If a
+**separate Build Command** is configured in the hPanel Node app (`npm run build`) to run *after*
+install, remove it — otherwise it would run after the prune and fail with `vite: not found`.
+Re-run the scan after the next deploy to confirm the advisories clear.
