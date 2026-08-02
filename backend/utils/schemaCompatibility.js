@@ -337,6 +337,19 @@ const ensureTableStatements = [
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`,
+  // Per-user coupon redemption ledger. The UNIQUE(coupon_id, user_id) constraint is
+  // the authoritative guard against one customer reusing a single-use/welcome coupon
+  // across many orders — the checkout pre-check is only the friendly path; the unique
+  // index rejects a concurrent double-redeem even under a race.
+  `CREATE TABLE IF NOT EXISTS coupon_redemptions (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    coupon_id INT NOT NULL,
+    user_id INT NOT NULL,
+    order_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_coupon_user (coupon_id, user_id),
+    KEY idx_coupon_redemptions_user (user_id)
+  )`,
 ];
 
 const defaultPaymentMethods = [

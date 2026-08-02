@@ -22,6 +22,7 @@ const {
   revokeSessionByToken,
   revokeSessionById,
   revokeSessionsByUserId,
+  hashToken,
 } = require("../utils/sessionManager");
 const {
   createRefreshTokenRecord,
@@ -137,6 +138,12 @@ const getAllowedGoogleClientIds = () => {
 // Behind Hostinger's proxy, Express's req.ip is an internal hop, so we resolve
 // the originating client from the forwarded headers — see utils/clientIp.js.
 const getRequestIp = (req) => getClientIp(req);
+
+// Fixed, valid cost-12 bcrypt hash used only to equalize login response time on the
+// unknown-email path. Without a comparison there, a registered email incurs the
+// ~200ms bcrypt.compare while an unregistered one returns immediately, turning login
+// into a user-enumeration timing oracle (CWE-208). Computed once at startup.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("naturanza-login-timing-equalizer", 12);
 
 const isPrivateOrLocalIp = (ipAddress) => {
   const ip = String(ipAddress || "").trim().toLowerCase();
@@ -498,11 +505,35 @@ router.post("/register", async (req, res) => {
         return res.status(403).json(ADMIN_EMAIL_SIGNUP_BLOCKED);
       }
 
-      // A prior signup that was never verified: steer them to verification
-      // instead of a dead-end "already registered" error.
+      // A prior signup that was never verified. SECURITY (CWE-708 account
+      // pre-hijacking): the row still holds the password of whoever registered
+      // first. If that was an attacker "pre-registering" the victim's address, the
+      // attacker's password would survive the victim later verifying and let the
+      // attacker log in. So re-registration OVERWRITES the pending credential with
+      // this attempt's password and re-issues a fresh code (older codes are
+      // invalidated), ensuring the password that becomes active belongs to the
+      // party controlling the inbox that receives the new code — not an earlier
+      // squatter. (Verified rows fall through to "already registered" below.)
       if (!existingUsers[0].email_verified) {
+        const rehashedPassword = await bcrypt.hash(password, 12);
+        await db.promise().query(
+          `UPDATE users
+              SET name = ?, password = ?, phone = ?, address = ?,
+                  signup_provider = 'password', password_set_by_user = TRUE
+            WHERE id = ? AND email_verified = FALSE`,
+          [name, rehashedPassword, phone || null, address || null, existingUsers[0].id],
+        );
+
+        const { code, expiresInMinutes } = await createVerificationCode(
+          db.promise(),
+          existingUsers[0].id,
+          normalizedEmail,
+        );
+        void sendVerificationCodeEmail(normalizedEmail, name, code, expiresInMinutes);
+
+        res.setHeader("Cache-Control", "no-store");
         return res.status(409).json({
-          error: "This email is already registered but not verified. Please verify it.",
+          error: "This email is already registered but not verified. We've re-sent a verification code.",
           code: "EMAIL_NOT_VERIFIED",
           email: normalizedEmail,
         });
@@ -689,6 +720,10 @@ router.post("/login", async (req, res) => {
     );
 
     if (!users.length) {
+      // Burn the same ~200ms a real bcrypt.compare (below) would, so the unknown-
+      // email path is time-indistinguishable from a wrong-password one (CWE-208).
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+
       void recordLoginHistorySafely({
         req,
         attemptedEmail: normalizedEmail,
@@ -914,10 +949,24 @@ router.post("/google", async (req, res) => {
 
       // Google has verified this email — clear any unverified flag so a user who
       // signed up with a password but never verified can still get in via Google.
+      // SECURITY (CWE-708 account pre-hijacking): a still-unverified row may hold a
+      // password an attacker set while "pre-registering" this address. The person
+      // authenticating here proved ownership via Google, so that stored password is
+      // untrusted — overwrite it with a fresh unusable random hash (mirroring how
+      // new Google accounts are created) and mark password_set_by_user=FALSE, so an
+      // attacker's chosen password can't survive on the now-active account. The
+      // real owner can set a password any time via the password-reset flow.
       if (!existingUser.email_verified) {
+        const scrubbedPassword = await bcrypt.hash(
+          `google_reclaim_${payload.sub}_${existingUser.id}`,
+          12,
+        );
         await db
           .promise()
-          .query("UPDATE users SET email_verified = TRUE WHERE id = ?", [existingUser.id]);
+          .query(
+            "UPDATE users SET email_verified = TRUE, password = ?, password_set_by_user = FALSE WHERE id = ?",
+            [scrubbedPassword, existingUser.id],
+          );
       }
 
       const authSession = await issueAuthSession(req, res, existingUser, "google");
@@ -1163,6 +1212,23 @@ router.put("/change-password", authenticateToken, restrictBody('currentPassword'
       );
 
       await addPasswordToHistory(connection, req.user.id, newPassword);
+
+      // SECURITY (CWE-613): a password change must evict every OTHER session and its
+      // refresh token, so a token stolen before the change can't outlive it. Keep
+      // only the device performing the change (matches the reset-password flow,
+      // which revokes everything).
+      const [sessionRows] = await connection.query(
+        "SELECT id FROM user_sessions WHERE user_id = ? AND token_hash = ? LIMIT 1",
+        [req.user.id, hashToken(req.token)],
+      );
+      const currentSessionId = sessionRows[0]?.id || null;
+      await revokeSessionsByUserId(connection, req.user.id, currentSessionId);
+      await connection.query(
+        `UPDATE refresh_tokens
+            SET revoked_at = NOW(), revoked_reason = 'password_change', last_used_at = NOW()
+          WHERE user_id = ? AND revoked_at IS NULL${currentSessionId ? " AND session_id <> ?" : ""}`,
+        currentSessionId ? [req.user.id, currentSessionId] : [req.user.id],
+      );
 
       return res.json({ message: "Password changed successfully" });
     } finally {

@@ -12,6 +12,24 @@
  * Security-sensitive rate limiting keeps using Express's trust-proxy `req.ip`.
  */
 
+// True only for a syntactically valid IPv4 or IPv6 literal. The forwarded headers
+// this module reads are client-controlled, and the result is written to
+// user_login_history and shown back to the user as a "recent login location"
+// security signal; without this check an attacker sending
+// `X-Forwarded-For: <arbitrary text>` could plant non-IP garbage into that field
+// (CWE-348 / CWE-20). A spoofed *valid* IP is still possible on this infrastructure
+// (see the module note) — that residual is accepted; this at least guarantees the
+// stored value is a real IP.
+const isValidIpFormat = (ip) => {
+  if (!ip) return false;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  if (v4) {
+    return v4.slice(1).every((octet) => Number(octet) <= 255);
+  }
+  // IPv6: hex groups and colons only, and it must actually contain a colon.
+  return ip.includes(":") && /^[0-9a-fA-F:]+$/.test(ip);
+};
+
 // Reduce a raw header value to a bare IP (strip brackets, IPv4-mapped IPv6, port).
 const stripToIp = (raw) => {
   let value = String(raw || "").trim();
@@ -31,7 +49,7 @@ const stripToIp = (raw) => {
   }
 
   if (!value || value.toLowerCase() === "unknown") return null;
-  return value;
+  return isValidIpFormat(value) ? value : null;
 };
 
 // True for loopback / private / link-local addresses (and missing values).

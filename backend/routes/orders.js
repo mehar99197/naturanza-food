@@ -707,10 +707,16 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       });
     }
 
-    // SECURITY: never trust the client-supplied payment status. Prepaid gateway
-    // methods are 'paid'; COD / wallet / bank transfer stay 'pending' until an
-    // admin verifies the payment. Financial totals are recomputed below.
-    const PREPAID_METHODS = new Set(['online', 'card']);
+    // SECURITY: never trust the client-supplied payment status, and never mark an
+    // order 'paid' at creation. No payment gateway is wired up, so nothing collects
+    // money in this handler — the previous set {'online','card'} auto-set 'paid',
+    // which handed out fully-paid, shippable orders for free to any logged-in user
+    // (they never paid anything). Every order now starts 'pending' and can only
+    // become 'paid' through an authenticated flow that actually confirms payment:
+    // the admin verification queue, or a future gateway callback that validates the
+    // collected amount server-side (add its method here only then). Financial
+    // totals are recomputed below.
+    const PREPAID_METHODS = new Set();
     const paymentStatus = PREPAID_METHODS.has(paymentMethod) ? 'paid' : 'pending';
 
     const customerName = req.body?.customer_name
@@ -783,6 +789,22 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
         !(coupon.usage_limit && coupon.used_count >= coupon.usage_limit) &&
         !(coupon.min_order_amount && subtotal < safeNumber(coupon.min_order_amount))
       ) {
+        // Per-user redemption cap: the global usage_limit/used_count gate does not
+        // stop the SAME customer reusing a one-time/welcome coupon on order after
+        // order. Reject if this user already redeemed it (the UNIQUE(coupon_id,
+        // user_id) index on coupon_redemptions is the authoritative race guard;
+        // this SELECT just returns a clean 409 instead of a constraint error).
+        const [[priorRedemption]] = await connection.query(
+          `SELECT 1 FROM coupon_redemptions WHERE coupon_id = ? AND user_id = ? LIMIT 1`,
+          [coupon.id, req.user.id],
+        );
+        if (priorRedemption) {
+          await connection.rollback();
+          return res.status(409).json({
+            error: 'You have already used this coupon.',
+            code: 'COUPON_ALREADY_USED',
+          });
+        }
         if (String(coupon.discount_type) === 'percentage') {
           discountAmount = (subtotal * safeNumber(coupon.discount_value)) / 100;
           if (coupon.max_discount && discountAmount > safeNumber(coupon.max_discount)) {
@@ -876,10 +898,20 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
           code: 'COUPON_EXHAUSTED',
         });
       }
+
+      // Record this user's redemption. UNIQUE(coupon_id, user_id) makes a concurrent
+      // second checkout by the same user fail here and roll the whole order back,
+      // closing the race the pre-check SELECT alone cannot.
+      await connection.query(
+        `INSERT INTO coupon_redemptions (coupon_id, user_id, order_id)
+         VALUES (?, ?, ?)`,
+        [redeemedCouponId, req.user.id, orderId],
+      );
     }
 
     // Stock policy:
-    //   - paymentStatus === 'paid'    : prepaid (card/online). Hard-deduct now, customer is committed.
+    //   - paymentStatus === 'paid'    : payment already confirmed server-side. Hard-deduct now.
+    //     (Not reachable at creation today — kept for a future validated-gateway callback.)
     //   - paymentStatus === 'pending' : awaiting manual verification (COD advance / wallet screenshot).
     //                                   Reserve only. Admin approval will deduct; reject/timeout releases.
     // This prevents overselling during the verification queue without locking stock forever

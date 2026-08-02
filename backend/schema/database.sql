@@ -194,6 +194,18 @@ CREATE TABLE IF NOT EXISTS coupons (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+-- Per-user coupon redemption ledger. UNIQUE(coupon_id, user_id) enforces a
+-- one-redemption-per-user cap (welcome/one-time codes) independent of the global
+-- usage_limit. See routes/orders.js checkout and migration 021.
+CREATE TABLE IF NOT EXISTS coupon_redemptions (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    coupon_id INT NOT NULL,
+    user_id INT NOT NULL,
+    order_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_coupon_user (coupon_id, user_id),
+    KEY idx_coupon_redemptions_user (user_id)
+);
 -- Note: Seed data (default admin, categories, products) is maintained in
 -- backend/seed-test-data.sql and loaded by setup-database.js.
 -- Product Variants Tables

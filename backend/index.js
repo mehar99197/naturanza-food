@@ -63,6 +63,28 @@ const ENFORCE_HTTPS =
     .trim()
     .toLowerCase() === "true";
 
+// Hosts we will ever redirect TO. Derived from the CORS allowlist (apex + www) or
+// an explicit CANONICAL_HOST. Used so the HTTPS/host redirects below never reflect
+// an attacker-supplied Host / X-Forwarded-Host into the Location header.
+const ALLOWED_REDIRECT_HOSTS = ALLOWED_CORS_ORIGINS.map((origin) =>
+  origin.replace(/^https?:\/\//, "").replace(/\/$/, "").toLowerCase(),
+).filter(Boolean);
+const CANONICAL_HOST =
+  String(process.env.CANONICAL_HOST || "").trim().toLowerCase() ||
+  ALLOWED_REDIRECT_HOSTS[0] ||
+  "";
+
+// Never trust X-Forwarded-Host (fully client-settable) when building a redirect
+// target. Prefer the configured canonical host; otherwise accept the request's own
+// Host header only when it is allow-listed; else fall back to the canonical host.
+const resolveSafeRedirectHost = (req) => {
+  const requestHost = String(req.headers.host || "").trim().toLowerCase();
+  if (requestHost && ALLOWED_REDIRECT_HOSTS.includes(requestHost)) {
+    return requestHost;
+  }
+  return CANONICAL_HOST || requestHost;
+};
+
 if (TRUST_PROXY_ENABLED) {
   app.set("trust proxy", 1);
 }
@@ -76,8 +98,12 @@ if (ENFORCE_HTTPS && process.env.NODE_ENV === "production") {
       return next();
     }
 
-    // Redirect HTTP → HTTPS with a permanent redirect
-    const host = req.headers["x-forwarded-host"] || req.headers.host || "";
+    // Redirect HTTP → HTTPS with a permanent redirect. Use a validated canonical
+    // host (never the attacker-settable X-Forwarded-Host) so this can't be turned
+    // into an open-redirect / cache-poisoning primitive, and mark it no-store so a
+    // shared cache can't replay a poisoned Location.
+    const host = resolveSafeRedirectHost(req);
+    res.setHeader("Cache-Control", "no-store");
     return res.redirect(301, `https://${host}${req.originalUrl}`);
   });
 }
@@ -93,9 +119,12 @@ if (ENFORCE_HTTPS && process.env.NODE_ENV === "production") {
 //
 // style-src keeps 'unsafe-inline' because Radix and framer-motion set inline
 // style attributes at runtime.
+// apis.google.com is deliberately excluded: it is not loaded by this app (Google
+// Identity Services uses accounts.google.com, analytics uses googletagmanager.com)
+// and it historically hosts JSONP/callback gadgets that can be abused to execute
+// script under a self-only policy — i.e. it weakens the CSP for no benefit here.
 const GOOGLE_SCRIPT_HOSTS = [
   "https://accounts.google.com",
-  "https://apis.google.com",
   "https://www.googletagmanager.com",
 ];
 
@@ -286,8 +315,32 @@ const { UPLOADS_IMAGES_DIR } = require("./middleware/upload");
 // reachable from the public image mount. They are served only through
 // GET /api/admin/payments/verifications/:id/screenshot, which enforces admin
 // auth + the manage_payments grant.
-app.use("/images/payment-verifications", (req, res) => {
-  res.status(404).type("txt").send("Not Found");
+//
+// A plain prefix mount ("/images/payment-verifications") is NOT enough: Express
+// routes on the raw, un-normalized path, but express.static/serve-static normalize
+// "../" and percent-encodings AFTER routing — so a request for
+// "/images/x/../payment-verifications/secret.webp" (or the %2f/%2e variants) skips
+// the prefix mount and is then resolved back into the folder and served. We instead
+// decode + normalize the path ourselves — the same single decodeURIComponent pass
+// serve-static uses — and 404 anything that resolves into the payment-verifications
+// folder, however it was spelled.
+const PAYMENT_VERIFICATIONS_SEGMENT = "payment-verifications";
+app.use("/images", (req, res, next) => {
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(req.path);
+  } catch (e) {
+    decodedPath = req.path;
+  }
+  const segments = path.posix
+    .normalize(decodedPath)
+    .toLowerCase()
+    .split("/")
+    .filter(Boolean);
+  if (segments.includes(PAYMENT_VERIFICATIONS_SEGMENT)) {
+    return res.status(404).type("txt").send("Not Found");
+  }
+  return next();
 });
 
 app.use("/images", express.static(UPLOADS_IMAGES_DIR));
@@ -547,10 +600,16 @@ app.get("/api/csrf-token", (req, res) => {
 const frontendDist = path.join(__dirname, "..", "frontend", "dist");
 if (process.env.NODE_ENV === "production") {
   // Canonical host: 301 www -> apex so the two don't compete as duplicate content.
+  // Only ever redirect to an allow-listed apex — otherwise `Host: www.evil.com`
+  // would be reflected into the Location as an open redirect.
   app.use((req, res, next) => {
-    const host = req.headers.host || "";
+    const host = String(req.headers.host || "").trim().toLowerCase();
     if (host.startsWith("www.")) {
-      return res.redirect(301, `https://${host.slice(4)}${req.originalUrl}`);
+      const apex = host.slice(4);
+      if (ALLOWED_REDIRECT_HOSTS.includes(apex) || apex === CANONICAL_HOST) {
+        res.setHeader("Cache-Control", "no-store");
+        return res.redirect(301, `https://${apex}${req.originalUrl}`);
+      }
     }
     next();
   });

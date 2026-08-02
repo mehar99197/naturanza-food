@@ -1734,14 +1734,31 @@ router.put("/returns/:id/status", requirePermission("manage_returns"), restrictB
     );
 
     if (status === "refunded") {
-      const refundAmount = Number(
-        refund_amount || request.requested_amount || 0,
+      // Cap the payout at the order total minus refunds already processed for this
+      // order. Both refund_amount (admin-supplied) and requested_amount
+      // (customer-supplied) are untrusted; without a ceiling an inflated value was
+      // paid out verbatim, enabling an over-refund.
+      const [[orderRow]] = await connection.query(
+        "SELECT total_amount FROM orders WHERE id = ? LIMIT 1",
+        [request.order_id],
       );
+      const orderTotal = Number(orderRow?.total_amount) || 0;
+      const [[priorRefunds]] = await connection.query(
+        "SELECT COALESCE(SUM(amount), 0) AS refunded FROM refund_transactions WHERE order_id = ? AND status = 'processed'",
+        [request.order_id],
+      );
+      const refundCeiling = Math.max(0, orderTotal - (Number(priorRefunds?.refunded) || 0));
+
+      const requestedRefund = Number(refund_amount || request.requested_amount || 0);
+      const refundAmount = Math.min(Math.max(0, requestedRefund), refundCeiling);
 
       if (!(refundAmount > 0)) {
         await connection.rollback();
         return res.status(400).json({
-          error: "Valid refund amount is required for refunded status",
+          error:
+            refundCeiling <= 0
+              ? "This order has already been fully refunded."
+              : "Valid refund amount is required for refunded status",
         });
       }
 

@@ -1,6 +1,6 @@
 const bcrypt = require("bcryptjs");
 const { db } = require("../config/db");
-const { hashToken } = require("../utils/sessionManager");
+const { hashToken, revokeSessionsByUserId } = require("../utils/sessionManager");
 const { revokeRefreshTokensBySessionId } = require("../utils/tokenStore");
 const { addPasswordToHistory, hasReusedPassword } = require("../utils/passwordHistory");
 
@@ -363,6 +363,24 @@ const changePassword = async (req, res) => {
     );
 
   await addPasswordToHistory(db.promise(), req.user.id, newPassword);
+
+  // SECURITY (CWE-613): evict every OTHER session and its refresh token so a token
+  // stolen before this change can't outlive it; keep only the current device.
+  let currentSessionId = null;
+  if (req.token) {
+    const [sessionRows] = await db.promise().query(
+      "SELECT id FROM user_sessions WHERE user_id = ? AND token_hash = ? LIMIT 1",
+      [req.user.id, hashToken(req.token)],
+    );
+    currentSessionId = sessionRows[0]?.id || null;
+  }
+  await revokeSessionsByUserId(db.promise(), req.user.id, currentSessionId);
+  await db.promise().query(
+    `UPDATE refresh_tokens
+        SET revoked_at = NOW(), revoked_reason = 'password_change', last_used_at = NOW()
+      WHERE user_id = ? AND revoked_at IS NULL${currentSessionId ? " AND session_id <> ?" : ""}`,
+    currentSessionId ? [req.user.id, currentSessionId] : [req.user.id],
+  );
 
   return res.json({
     message: isFirstTimePasswordSetup

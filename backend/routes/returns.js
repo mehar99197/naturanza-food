@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/requirePermission');
+const { requirePermission, hasPermission } = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
 
 const ALLOWED_RETURN_STATUSES = new Set([
@@ -70,11 +70,21 @@ router.post('/request', authenticateToken, restrictBody('order_id', 'reason', 'd
       return res.status(409).json({ error: 'A return request for this order is already in progress' });
     }
 
+    // Never let a customer-supplied requested_amount exceed the order total — an
+    // uncapped value here feeds straight into the admin refund path (which defaults
+    // the payout to requested_amount), enabling an over-refund. Clamp to
+    // [0, order.total_amount]; fall back to the full total when unspecified.
+    const orderTotal = safeNumber(order.total_amount, 0);
+    const cappedAmount = Math.min(
+      orderTotal,
+      requestedAmount > 0 ? requestedAmount : orderTotal,
+    );
+
     const [insertResult] = await connection.query(
       `INSERT INTO returns_requests
        (order_id, user_id, reason, details, requested_amount, status)
        VALUES (?, ?, ?, ?, ?, 'requested')`,
-      [orderId, req.user.id, reason, details, requestedAmount > 0 ? requestedAmount : order.total_amount],
+      [orderId, req.user.id, reason, details, cappedAmount],
     );
 
     const returnRequestId = insertResult.insertId;
@@ -201,7 +211,16 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
 
     const record = rows[0];
-    if (req.user.role !== 'admin' && record.user_id !== req.user.id) {
+    // Non-owner reads expose another customer's return reason, requested amount,
+    // and every refund transaction — financial PII. A bare role==='admin' check
+    // let ANY staff_admin (e.g. one holding only manage_blog) read every return by
+    // walking sequential ids. Mirror the orders.js hardening: the owner may read
+    // their own; any other reader must be an admin holding the manage_returns grant.
+    const isOwner = record.user_id === req.user.id;
+    const isAuthorizedAdmin =
+      String(req.user.role || '').trim().toLowerCase() === 'admin' &&
+      hasPermission(req.user, 'manage_returns');
+    if (!isOwner && !isAuthorizedAdmin) {
       return res.status(403).json({ error: 'Access denied' });
     }
 

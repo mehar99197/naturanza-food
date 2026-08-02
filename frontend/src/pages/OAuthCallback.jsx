@@ -62,7 +62,10 @@ const OAuthCallback = () => {
  // Parse user data
  const userData = JSON.parse(decodeURIComponent(userDataString));
 
- // Store access token in memory only.
+ // NOTE: setUserAccessToken persists the access token to localStorage (see
+ // services/api.js), it is NOT memory-only. Hardening follow-up: hold the access
+ // token in memory and rely on the httpOnly refresh cookie + /auth/refresh to
+ // restore it on reload, so an XSS foothold can't read a bearer token from storage.
  setUserAccessToken(token);
  localStorage.setItem('userData', JSON.stringify(userData));
 

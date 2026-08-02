@@ -56,7 +56,24 @@ const compressImage = async (buffer, options = {}) => {
     } = options;
 
     try {
-        let sharpInstance = sharp(buffer)
+        // fileFilter only checks the attacker-controlled extension + mimetype;
+        // sharp auto-detects the true format from the bytes. Cap the decode and
+        // reject non-raster/oversized inputs BEFORE resizing so a vector (SVG) or a
+        // tiny, highly-compressed pixel-flood PNG can't drive huge allocations
+        // (CWE-434 / decompression DoS). The allocation happens at decode, before
+        // the resize, so `withoutEnlargement` does not help on its own.
+        const MAX_INPUT_PIXELS = 24_000_000; // ~24 MP
+        const RASTER_FORMATS = new Set(['jpeg', 'png', 'webp', 'gif']);
+
+        const metadata = await sharp(buffer, { limitInputPixels: MAX_INPUT_PIXELS }).metadata();
+        if (!RASTER_FORMATS.has(metadata.format)) {
+            throw new Error('Unsupported image format');
+        }
+        if (metadata.width && metadata.height && metadata.width * metadata.height > MAX_INPUT_PIXELS) {
+            throw new Error('Image dimensions exceed the allowed limit');
+        }
+
+        let sharpInstance = sharp(buffer, { limitInputPixels: MAX_INPUT_PIXELS })
             .resize(width, height, {
                 fit: fit,
                 withoutEnlargement: true // Don't enlarge smaller images

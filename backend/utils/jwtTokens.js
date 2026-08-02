@@ -35,6 +35,18 @@ const RAW_JWT_SECRET = String(
 const NODE_ENV = String(process.env.NODE_ENV || "development").trim().toLowerCase();
 const IS_PRODUCTION = NODE_ENV === "production";
 
+// This exact secret was committed to backend/.env.example (and is recoverable from
+// git history). Anyone holding it can forge access tokens AND CSRF tokens. If a
+// deployment is still configured with it, fail closed in production rather than
+// serve forgeable tokens — rotate to a fresh 64-byte secret.
+const KNOWN_LEAKED_JWT_SECRET =
+  "38142dfbc2ae4e3c0de5c09159d66ebbf7e05dca780d2684247387a21cd4adcd50820168ed8ef80cc33b476c8d2dff7a21fcb4fe689571e4877ad429825ec222";
+if (IS_PRODUCTION && RAW_JWT_SECRET === KNOWN_LEAKED_JWT_SECRET) {
+  throw new Error(
+    "JWT_SECRET matches a value that was committed to source control and is compromised. Generate a new 64-byte secret (node -e \"console.log(require('crypto').randomBytes(64).toString('hex'))\") and set it in the environment.",
+  );
+}
+
 const resolveHsSecret = () => {
   const secretLengthBytes = Buffer.byteLength(RAW_JWT_SECRET, "utf8");
   if (secretLengthBytes >= 64) {

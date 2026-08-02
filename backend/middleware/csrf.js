@@ -172,11 +172,11 @@ const csrfMiddleware = (options = {}) => {
       });
     }
 
-    const clientToken =
-      req.body?._csrf ||
-      req.body?.csrfToken ||
-      req.headers[CSRF_HEADER_NAME] ||
-      req.query?._csrf;
+    // Accept the token ONLY from the custom request header. A cross-site HTML form
+    // can set body/query fields but cannot set a custom header, so header-only
+    // acceptance removes the form-submission CSRF vector that body/`_csrf` support
+    // reintroduced. The SPA already sends it as `x-csrf-token` (services/api.js).
+    const clientToken = req.headers[CSRF_HEADER_NAME];
 
     if (!clientToken) {
       return res.status(403).json({
