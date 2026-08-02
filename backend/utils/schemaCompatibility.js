@@ -1,4 +1,5 @@
 const { backfillKnownProductContent } = require("./productContentDefaults");
+const { buildInternalEan13 } = require("./barcode");
 
 const ensureTableStatements = [
   `CREATE TABLE IF NOT EXISTS user_addresses (
@@ -515,6 +516,26 @@ const ensurePaymentAccountsSeed = async (db) => {
   }
 };
 
+/**
+ * Give every product a scannable retail barcode. Runs after the barcode column
+ * and its unique index exist, so pre-existing catalogues get codes without a
+ * manual backfill step. Generation is deterministic per product id — reprinting
+ * a label always yields the same code — and the algorithm lives only in
+ * utils/barcode.js so it can never drift from validation.
+ */
+const backfillProductBarcodes = async (db) => {
+  const [rows] = await db.query(
+    "SELECT id FROM products WHERE barcode IS NULL OR barcode = ''",
+  );
+
+  for (const row of rows) {
+    await db.query("UPDATE products SET barcode = ? WHERE id = ?", [
+      buildInternalEan13(row.id),
+      row.id,
+    ]);
+  }
+};
+
 const ensureProductionSchema = async (db) => {
   for (const statement of ensureTableStatements) {
     await ensureTable(db, statement);
@@ -565,7 +586,7 @@ const ensureProductionSchema = async (db) => {
   await ensureColumns(db, "products", {
     slug: "VARCHAR(200) NULL",
     images: "JSON NULL",
-    qr_code_url: "VARCHAR(255) NULL",
+    barcode: "VARCHAR(20) NULL",
     ingredients: "TEXT NULL",
     benefits: "TEXT NULL",
     usage: "TEXT NULL",
@@ -652,6 +673,13 @@ const ensureProductionSchema = async (db) => {
     "idx_products_featured_active",
     ensureProductsFeaturedActiveIndexSql,
   );
+  await ensureIndex(
+    db,
+    "products",
+    "uq_products_barcode",
+    "CREATE UNIQUE INDEX uq_products_barcode ON products (barcode)",
+  );
+  await backfillProductBarcodes(db);
 };
 
 module.exports = {

@@ -3,13 +3,13 @@ import { createPortal } from "react-dom";
 import {
   AlertCircle,
   AlertTriangle,
+  Barcode,
   Box,
   CheckCircle2,
   Image,
   Package,
   Pencil,
   Plus,
-  QrCode,
   RefreshCw,
   Search,
   Trash2,
@@ -23,10 +23,12 @@ import { useAdminData } from "@/context/AdminDataContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
 import { getAbsoluteImageUrl } from "@/lib/imageUtils";
-import { ProductQRCode } from "@/components/ProductQRCode";
+import { ProductBarcode } from "@/components/ProductBarcode";
+import { adminAPI } from "@/services/api";
 
 const initialFormState = {
   name: "",
+  barcode: "",
   description: "",
   ingredients: "",
   benefits: "",
@@ -188,8 +190,9 @@ export function AdminProducts() {
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadingGallery, setUploadingGallery] = useState(false);
-  const [showQrModal, setShowQrModal] = useState(false);
-  const [qrProductData, setQrProductData] = useState(null);
+  const [showBarcodeModal, setShowBarcodeModal] = useState(false);
+  const [barcodeProductData, setBarcodeProductData] = useState(null);
+  const [barcodeError, setBarcodeError] = useState("");
 
   const productRows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -272,6 +275,7 @@ export function AdminProducts() {
     setEditingProduct(product);
     setFormData({
       name: String(product.name || ""),
+      barcode: String(product.barcode || ""),
       description: getDisplayDescription(product, ""),
       ingredients: String(product.ingredients || ""),
       benefits: String(product.benefits || ""),
@@ -331,6 +335,7 @@ export function AdminProducts() {
 
       const payload = {
         name,
+        barcode: String(formData.barcode || "").trim(),
         description: description || null,
         ingredients: ingredients || null,
         benefits: benefits || null,
@@ -372,18 +377,27 @@ export function AdminProducts() {
     }
   };
 
-  const openQrModal = (product) => {
-    setQrProductData({
-      productId: product.id,
-      productName: product.name,
-      productSlug: product.slug,
-    });
-    setShowQrModal(true);
+  // Fetched rather than read off the row: the endpoint assigns an internal
+  // EAN-13 on the fly for any product that predates the barcode column.
+  const openBarcodeModal = async (product) => {
+    setBarcodeProductData(null);
+    setBarcodeError("");
+    setShowBarcodeModal(true);
+
+    try {
+      const data = await adminAPI.getProductBarcodeData(product.id);
+      setBarcodeProductData(data);
+    } catch (requestError) {
+      setBarcodeError(
+        requestError?.response?.data?.error || "Failed to load the product barcode",
+      );
+    }
   };
 
-  const closeQrModal = () => {
-    setShowQrModal(false);
-    setQrProductData(null);
+  const closeBarcodeModal = () => {
+    setShowBarcodeModal(false);
+    setBarcodeProductData(null);
+    setBarcodeError("");
   };
 
   // Validates a single image file (type + size). Returns an error string, or "" if valid.
@@ -757,11 +771,11 @@ export function AdminProducts() {
                       <div className="inline-flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={() => openQrModal(product)}
-                          aria-label={`QR Code for ${product.name}`}
+                          onClick={() => openBarcodeModal(product)}
+                          aria-label={`Barcode for ${product.name}`}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-700"
                         >
-                          <QrCode className="h-4 w-4" />
+                          <Barcode className="h-4 w-4" />
                         </button>
                         <button
                           type="button"
@@ -894,12 +908,12 @@ export function AdminProducts() {
                           <div className="inline-flex items-center gap-2">
                             <button
                               type="button"
-                              onClick={() => openQrModal(product)}
-                              title="Generate QR Code"
+                              onClick={() => openBarcodeModal(product)}
+                              title="Generate barcode label"
                               className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition-colors duration-200 hover:bg-emerald-50"
                             >
-                              <QrCode className="h-4 w-4" />
-                              QR
+                              <Barcode className="h-4 w-4" />
+                              Barcode
                             </button>
                             <button
                               type="button"
@@ -987,6 +1001,27 @@ export function AdminProducts() {
                           className="h-11 w-full rounded-xl border border-emerald-100 bg-white px-4 text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:h-12 sm:rounded-2xl"
                           placeholder="Product name"
                         />
+                      </label>
+
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          Barcode
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={formData.barcode}
+                          onChange={(event) =>
+                            setFormData((prev) => ({ ...prev, barcode: event.target.value }))
+                          }
+                          className="h-11 w-full rounded-xl border border-emerald-100 bg-white px-4 font-mono text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:font-sans placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:h-12 sm:rounded-2xl"
+                          placeholder="Leave blank to generate automatically"
+                        />
+                        <span className="block text-[11px] leading-relaxed text-slate-400">
+                          Paste your registered GS1 code (EAN-13, UPC-A or EAN-8). Leave
+                          it empty and an internal EAN-13 is assigned — scannable on any
+                          POS, but the store must map it once in their system.
+                        </span>
                       </label>
 
                       <label className="space-y-1.5 sm:col-span-2">
@@ -1328,7 +1363,7 @@ export function AdminProducts() {
             )
               : null}
 
-        {showQrModal && qrProductData && typeof document !== "undefined"
+        {showBarcodeModal && typeof document !== "undefined"
           ? createPortal(
               <div className="fixed inset-0 z-[130] overflow-hidden">
                 <div className="absolute -inset-1 bg-slate-950/80 backdrop-blur-lg" />
@@ -1338,15 +1373,15 @@ export function AdminProducts() {
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <p className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-                            Product QR Code
+                            Product Barcode
                           </p>
                           <p className="mt-1 text-sm text-slate-500">
-                            Scan to view product details
+                            Print and stick on the pack — any POS scanner reads it
                           </p>
                         </div>
                         <button
                           type="button"
-                          onClick={closeQrModal}
+                          onClick={closeBarcodeModal}
                           className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
                         >
                           <X className="h-4 w-4" />
@@ -1354,11 +1389,20 @@ export function AdminProducts() {
                       </div>
                     </div>
                     <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-                      <ProductQRCode
-                        productId={qrProductData.productId}
-                        productName={qrProductData.productName}
-                        productSlug={qrProductData.productSlug}
-                      />
+                      {barcodeError ? (
+                        <p className="py-8 text-center text-sm font-medium text-rose-600">
+                          {barcodeError}
+                        </p>
+                      ) : barcodeProductData ? (
+                        <ProductBarcode
+                          productName={barcodeProductData.productName}
+                          barcode={barcodeProductData.barcode}
+                        />
+                      ) : (
+                        <p className="py-8 text-center text-sm text-slate-400">
+                          Loading barcode…
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>

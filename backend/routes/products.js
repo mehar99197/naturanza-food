@@ -7,6 +7,8 @@ const productController = require("../controllers/productController");
 const { uploadProductImage } = require("../middleware/upload");
 
 router.get("/featured/list", asyncHandler(productController.getFeaturedProducts));
+// Multi-segment routes stay above "/:id" so a scanned code is never read as an id.
+router.get("/barcode/:code", asyncHandler(productController.getProductByBarcode));
 router.get("/", asyncHandler(productController.getProducts));
 router.get("/:id", asyncHandler(productController.getProductById));
 
@@ -14,7 +16,7 @@ router.post(
   "/",
   authenticateToken,
   isAdmin,
-  restrictBody('name', 'slug', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'is_organic', 'ingredients', 'benefits', 'usage'),
+  restrictBody('name', 'slug', 'barcode', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'is_organic', 'ingredients', 'benefits', 'usage'),
   asyncHandler(productController.createProduct),
 );
 
@@ -22,7 +24,7 @@ router.put(
   "/:id",
   authenticateToken,
   isAdmin,
-  restrictBody('name', 'slug', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'is_organic', 'ingredients', 'benefits', 'usage'),
+  restrictBody('name', 'slug', 'barcode', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'is_organic', 'ingredients', 'benefits', 'usage'),
   asyncHandler(productController.updateProduct),
 );
 

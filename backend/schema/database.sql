@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS products (
     id INT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(200) NOT NULL,
     slug VARCHAR(200) NOT NULL UNIQUE,
+    -- Retail barcode (EAN-13 / UPC-A / EAN-8) so POS terminals can scan the
+    -- product in a physical store. NULL until assigned; UNIQUE ignores NULLs.
+    barcode VARCHAR(20) NULL UNIQUE,
     description TEXT,
     ingredients TEXT,
     benefits TEXT,
@@ -50,7 +53,6 @@ CREATE TABLE IF NOT EXISTS products (
     category_id INT,
     image_url VARCHAR(255),
     images JSON,
-    qr_code_url VARCHAR(255),
     stock_quantity INT DEFAULT 0,
     reserved_stock INT NOT NULL DEFAULT 0,
     is_organic BOOLEAN DEFAULT FALSE,

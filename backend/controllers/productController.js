@@ -68,6 +68,17 @@ const getProductById = async (req, res) => {
   return res.json(product);
 };
 
+// POS lookup: a store's scanner reads the label and resolves it to a product.
+const getProductByBarcode = async (req, res) => {
+  const product = await productModel.findByBarcode(req.params.code);
+
+  if (!product) {
+    return res.status(404).json({ error: "No product matches that barcode" });
+  }
+
+  return res.json(product);
+};
+
 const createProduct = async (req, res) => {
   const payload = req.body || {};
 
@@ -135,6 +146,7 @@ module.exports = {
   getFeaturedProducts,
   getProducts,
   getProductById,
+  getProductByBarcode,
   createProduct,
   updateProduct,
   deleteProduct,

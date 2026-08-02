@@ -10,6 +10,7 @@ const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/
 const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
 const { getAboutContent, updateAboutContent } = require("../utils/aboutContent");
 const { getClientIp } = require("../utils/clientIp");
+const { buildInternalEan13 } = require("../utils/barcode");
 const asyncHandler = require("../middleware/asyncHandler");
 const newsletterController = require("../controllers/newsletterController");
 const { syncDefaultAdminPassword } = require("../utils/envSync");
@@ -1867,8 +1868,8 @@ router.put("/returns/:id/status", restrictBody('status', 'note', 'refund_amount'
   }
 });
 
-// QR code data for a product
-router.get("/products/:id/qr-data", async (req, res) => {
+// Barcode data for a product — feeds the printable label in the admin panel.
+router.get("/products/:id/barcode-data", async (req, res) => {
   try {
     const productId = Number(req.params.id);
     if (!Number.isInteger(productId)) {
@@ -1876,7 +1877,7 @@ router.get("/products/:id/qr-data", async (req, res) => {
     }
 
     const [rows] = await db.promise().query(
-      "SELECT id, name, slug, qr_code_url FROM products WHERE id = ? LIMIT 1",
+      "SELECT id, name, barcode FROM products WHERE id = ? LIMIT 1",
       [productId],
     );
 
@@ -1885,14 +1886,21 @@ router.get("/products/:id/qr-data", async (req, res) => {
     }
 
     const product = rows[0];
-    const frontendUrl = String(process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
-    const productUrl = product.qr_code_url || `${frontendUrl}/product/${product.id}`;
+
+    // A product predating the barcode column (or created while the boot backfill
+    // was still running) gets its internal code assigned on first label print.
+    let barcode = product.barcode;
+    if (!barcode) {
+      barcode = buildInternalEan13(product.id);
+      await db
+        .promise()
+        .query("UPDATE products SET barcode = ? WHERE id = ?", [barcode, product.id]);
+    }
 
     res.json({
       productId: product.id,
       productName: product.name,
-      productSlug: product.slug,
-      productUrl,
+      barcode,
     });
   } catch (error) {
     res.status(500).json({ error: "Database error" });

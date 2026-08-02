@@ -5,10 +5,42 @@ const { createSlug } = require("../utils/slugify");
 const { getAdminSettings } = require("../utils/adminSettings");
 const { insertAdminNotifications } = require("../utils/adminNotifications");
 const { fillMissingProductContent } = require("../utils/productContentDefaults");
+const { buildInternalEan13, normalizeBarcode } = require("../utils/barcode");
 
-const buildProductUrl = (productId) => {
-  const frontendUrl = String(process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
-  return `${frontendUrl}/product/${productId}`;
+const createModelError = (message, statusCode, code) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+};
+
+/**
+ * Resolve the barcode to persist for a product.
+ * An admin-supplied value wins (a real GS1/manufacturer code); a blank value
+ * falls back to the deterministic internal EAN-13 so every product stays
+ * scannable at a POS terminal.
+ */
+const resolveBarcode = (value, productId) => {
+  try {
+    return normalizeBarcode(value) || buildInternalEan13(productId);
+  } catch (error) {
+    throw createModelError(error.message, 400, "PRODUCT_BARCODE_INVALID");
+  }
+};
+
+const assertBarcodeIsFree = async (connection, barcode, productId) => {
+  const [rows] = await connection.query(
+    "SELECT id FROM products WHERE barcode = ? AND id <> ? LIMIT 1",
+    [barcode, productId],
+  );
+
+  if (rows.length > 0) {
+    throw createModelError(
+      `Barcode ${barcode} is already assigned to another product`,
+      409,
+      "PRODUCT_BARCODE_TAKEN",
+    );
+  }
 };
 
 const safeNumber = (value, fallback = 0) => {
@@ -300,6 +332,34 @@ const findById = async (productId) => {
   return product;
 };
 
+/**
+ * Resolve a scanned barcode to a product. Backs the POS lookup endpoint, so it
+ * accepts the same formatting a handheld scanner may emit (spaces / dashes).
+ */
+const findByBarcode = async (code) => {
+  const barcode = String(code || "").replace(/[\s-]/g, "");
+
+  if (!/^\d{8,13}$/.test(barcode)) {
+    return null;
+  }
+
+  const [rows] = await dbPool.query(
+    `SELECT p.*, c.name AS category_name
+     FROM products p
+     LEFT JOIN categories c ON p.category_id = c.id
+     WHERE p.barcode = ?
+     LIMIT 1`,
+    [barcode],
+  );
+
+  if (!rows.length) {
+    return null;
+  }
+
+  const [product] = await hydrateProducts(rows);
+  return product;
+};
+
 const createProduct = async (payload = {}) => {
   return withTransaction(async (connection) => {
     const name = String(payload.name || "").trim();
@@ -340,8 +400,14 @@ const createProduct = async (payload = {}) => {
       ],
     );
 
-    const qrCodeUrl = buildProductUrl(result.insertId);
-    await connection.query("UPDATE products SET qr_code_url = ? WHERE id = ?", [qrCodeUrl, result.insertId]);
+    // The internal fallback needs the auto-increment id, so the barcode is
+    // assigned right after the insert rather than inside it.
+    const barcode = resolveBarcode(payload.barcode, result.insertId);
+    await assertBarcodeIsFree(connection, barcode, result.insertId);
+    await connection.query("UPDATE products SET barcode = ? WHERE id = ?", [
+      barcode,
+      result.insertId,
+    ]);
 
     if (galleryImages.length > 0) {
       await replaceProductGallery(connection, result.insertId, galleryImages);
@@ -437,6 +503,16 @@ const updateProduct = async (productId, payload = {}) => {
       params.push(formatter(payload[key]));
     }
 
+    // Barcode needs validation + a uniqueness check, so it sits outside the
+    // plain scalar list. Clearing the field re-issues the internal EAN-13
+    // rather than leaving the product unscannable.
+    if (hasOwn("barcode")) {
+      const barcode = resolveBarcode(payload.barcode, productId);
+      await assertBarcodeIsFree(connection, barcode, productId);
+      fields.push("barcode = ?");
+      params.push(barcode);
+    }
+
     const shouldUpdateGallery = Array.isArray(payload.gallery_images);
     if (shouldUpdateGallery || hasOwn("image_url")) {
       const imageUrl = hasOwn("image_url")
@@ -496,9 +572,6 @@ const updateProduct = async (productId, payload = {}) => {
       shouldSendLowStockEmail =
         Boolean(adminSettings.emailNotifications) && Boolean(lowStockEvent);
     }
-
-    const qrCodeUrl = buildProductUrl(productId);
-    await connection.query("UPDATE products SET qr_code_url = ? WHERE id = ?", [qrCodeUrl, productId]);
 
     return {
       updated: true,
@@ -587,6 +660,7 @@ module.exports = {
   listProducts,
   listFeaturedProducts,
   findById,
+  findByBarcode,
   createProduct,
   updateProduct,
   deleteById,

@@ -1319,9 +1319,9 @@ export const adminAPI = {
     return response.data;
   },
 
-  // Get QR code data for a product
-  getProductQrData: async (productId) => {
-    const response = await axiosInstance.get(`/admin/products/${productId}/qr-data`);
+  // Get barcode data for a product (drives the printable POS label)
+  getProductBarcodeData: async (productId) => {
+    const response = await axiosInstance.get(`/admin/products/${productId}/barcode-data`);
     return response.data;
   },
 
