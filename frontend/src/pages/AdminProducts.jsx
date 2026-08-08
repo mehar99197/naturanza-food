@@ -1364,7 +1364,7 @@ export function AdminProducts() {
                             Product Barcode
                           </p>
                           <p className="mt-1 text-sm text-slate-500">
-                            Print and stick on the pack — any POS scanner reads it
+                            POS barcode is for checkout; scan the QR code for product details
                           </p>
                         </div>
                         <button

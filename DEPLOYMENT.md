@@ -88,6 +88,7 @@ DB_PASSWORD=<your db password>
 DB_NAME=<your db name>
 JWT_SECRET=<from backend/.env.example or your own>
 CORS_ALLOWED_ORIGINS=https://naturanzafood.com,https://www.naturanzafood.com
+PUBLIC_SITE_URL=https://naturanzafood.com
 ENABLE_RATE_LIMITS=true
 ENABLE_CSRF_PROTECTION=true
 ENFORCE_HTTPS=true
