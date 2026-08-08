@@ -16,9 +16,14 @@ const ensureDir = (dir) => {
 // so customer uploads (payment screenshots, product/category/avatar images)
 // survive a redeploy (which clears the repo working tree). Defaults to a
 // sibling `persistent-uploads/images` of the app root; override via UPLOADS_DIR.
+const hostingerPersistentDir = process.env.HOME
+    ? path.join(process.env.HOME, 'domains', 'naturanzafood.com', 'persistent-uploads', 'images')
+    : null;
 const UPLOADS_IMAGES_DIR =
     process.env.UPLOADS_DIR ||
-    path.join(__dirname, '..', '..', '..', 'persistent-uploads', 'images');
+    (hostingerPersistentDir && fs.existsSync(hostingerPersistentDir)
+        ? hostingerPersistentDir
+        : path.join(__dirname, '..', '..', '..', 'persistent-uploads', 'images'));
 
 // Configure multer for memory storage (we'll process before saving)
 const storage = multer.memoryStorage();

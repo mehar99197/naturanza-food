@@ -4,9 +4,14 @@ const fs = require('fs');
 
 // Keep admin profile uploads beside the other persistent media, outside the
 // git-deployed application tree.
+const hostingerPersistentDir = process.env.HOME
+  ? path.join(process.env.HOME, 'domains', 'naturanzafood.com', 'persistent-uploads', 'images')
+  : null;
 const uploadsBaseDir =
   process.env.UPLOADS_DIR ||
-  path.join(__dirname, '..', '..', '..', 'persistent-uploads', 'images');
+  (hostingerPersistentDir && fs.existsSync(hostingerPersistentDir)
+    ? hostingerPersistentDir
+    : path.join(__dirname, '..', '..', '..', 'persistent-uploads', 'images'));
 const uploadsDir = path.join(uploadsBaseDir, 'admins');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
