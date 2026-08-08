@@ -8,10 +8,7 @@ const bcrypt = require('bcryptjs');
 
 async function generateHash(password, userType = 'user') {
     try {
-        // Determine salt rounds based on user type
-        // Admin: 10 rounds (higher security for privileged accounts)
-        // Normal users: 4 rounds (faster, sufficient for regular users)
-        const saltRounds = userType.toLowerCase() === 'admin' ? 10 : 4;
+        const saltRounds = 12;
         
         const hash = await bcrypt.hash(password, saltRounds);
         

@@ -50,14 +50,24 @@ In **hPanel → Websites → Add Website → Node.js App** (Business plan suppor
 2. **Node version:** 22 (18 or 20 also work).
 3. If Hostinger asks for these (framework type "Other"):
    - **Entry / startup file:** `backend/index.js`
-   - **Build command:** `npm run build`
+   - **Build command:** **leave empty** — see the warning below.
    - **Output / build directory:** `frontend/dist`
-4. Hostinger runs `npm install` automatically. The root `postinstall` then installs the backend and
-   frontend dependencies, and `npm run build` compiles the frontend into `frontend/dist`.
+4. Hostinger runs `npm install` automatically. The root `postinstall` does everything else: it
+   installs the backend and frontend dependencies, compiles the frontend into `frontend/dist`, and
+   then **deletes `frontend/node_modules`** so no Vite/eslint build tooling is left on the server.
 
-> **If the build fails with "vite: command not found"**, the platform pruned devDependencies before
-> building. In the app's build settings ensure dev dependencies are installed for the build step
-> (e.g. `npm install --include=dev` as the install command), since `vite` is a devDependency.
+> ⚠️ **Do not set a separate hPanel Build Command (`npm run build`).** It runs *after* `npm install`,
+> i.e. after `postinstall` has already built the frontend and removed `frontend/node_modules` — so it
+> would fail with **`vite: not found`**. The build already happens inside `postinstall`; a second
+> build step is both redundant and breaking. If a Build Command is already configured, clear it.
+
+> **If the build fails with "vite: command not found"**, check these two causes in order:
+> 1. A separate hPanel **Build Command** is set — clear it (see the warning above). This is the most
+>    likely cause, because the prune removes `frontend/node_modules` before that step would run.
+> 2. The platform pruned devDependencies before building. `postinstall` already passes
+>    `--include=dev` when installing the frontend; if the platform still strips them, set the install
+>    command to `npm install --include=dev`, since `vite` is a devDependency.
+
 
 ---
 
