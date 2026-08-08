@@ -25,7 +25,7 @@ import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/context/SettingsContext';
 import { useReviews } from '@/context/ReviewContext';
-import { reviewAPI } from '@/services/api';
+import { productAPI, reviewAPI } from '@/services/api';
 import { useWishlist } from '@/context/WishlistContext';
 import { formatPrice, getProductPricing } from '@/lib/utils';
 import { convertFromPkr, hasExchangeRate } from '@/lib/exchangeRates';
@@ -233,47 +233,73 @@ export function ProductDetail() {
       return;
     }
 
-    setIsLoading(true);
+    let cancelled = false;
+    let timeoutId;
 
-    const currentProduct = getProductById(id) || null;
-    setProduct(currentProduct);
+    const loadProduct = async () => {
+      setIsLoading(true);
 
-    if (currentProduct) {
-      const categoryLookup =
-        currentProduct.category_id ||
-        currentProduct.category ||
-        currentProduct.category_name ||
-        'all';
-
-      let pool = getProductsByCategory(categoryLookup);
-      if (!Array.isArray(pool) || pool.length === 0) {
-        pool = getProductsByCategory('all');
+      // QR links can target products outside the first public catalog page or
+      // products that are no longer active, so resolve those directly by ID.
+      let currentProduct = getProductById(id) || null;
+      if (!currentProduct && id) {
+        try {
+          currentProduct = await productAPI.getById(id);
+        } catch {
+          currentProduct = null;
+        }
       }
 
-      const nextRelated = (Array.isArray(pool) ? pool : [])
-        .filter((item) => String(item.id) !== String(id))
-        .slice(0, 8);
+      if (cancelled) {
+        return;
+      }
 
-      setRelatedProducts(nextRelated);
-    } else {
-      setRelatedProducts([]);
-    }
+      setProduct(currentProduct);
 
-    setQuantity(1);
-    setActiveImage(0);
-    setActiveDesktopTab('description');
-    setActiveMobileSection('description');
+      if (currentProduct) {
+        const categoryLookup =
+          currentProduct.category_id ||
+          currentProduct.category ||
+          currentProduct.category_name ||
+          'all';
 
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-    }
+        let pool = getProductsByCategory(categoryLookup);
+        if (!Array.isArray(pool) || pool.length === 0) {
+          pool = getProductsByCategory('all');
+        }
 
-    const timeoutId = window.setTimeout(() => {
-      setIsLoading(false);
-    }, 220);
+        const nextRelated = (Array.isArray(pool) ? pool : [])
+          .filter((item) => String(item.id) !== String(id))
+          .slice(0, 8);
+
+        setRelatedProducts(nextRelated);
+      } else {
+        setRelatedProducts([]);
+      }
+
+      setQuantity(1);
+      setActiveImage(0);
+      setActiveDesktopTab('description');
+      setActiveMobileSection('description');
+
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+      }
+
+      timeoutId = window.setTimeout(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }, 220);
+    };
+
+    loadProduct();
 
     return () => {
-      window.clearTimeout(timeoutId);
+      cancelled = true;
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
     };
   }, [id, productsLoading, getProductById, getProductsByCategory]);
 
