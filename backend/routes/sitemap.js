@@ -5,14 +5,13 @@ const pool = db.promise();
 
 // Public site URL used in <loc> tags. Override via PUBLIC_SITE_URL env.
 const BASE_URL = (process.env.PUBLIC_SITE_URL || 'https://naturanzafood.com').replace(/\/+$/, '');
-const CATEGORY_MAP = {
-  honey: { name: 'Organic Honey', changefreq: 'weekly', priority: 0.8 },
-  'herbal-teas': { name: 'Herbal Teas', changefreq: 'weekly', priority: 0.8 },
-  supplements: { name: 'Natural Supplements', changefreq: 'weekly', priority: 0.8 },
-  oils: { name: 'Natural Oils', changefreq: 'weekly', priority: 0.8 },
-  seeds: { name: 'Organic Seeds', changefreq: 'weekly', priority: 0.8 }
-};
 
+const toAbsoluteUrl = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `${BASE_URL}${raw.startsWith('/') ? '' : '/'}${raw}`;
+};
 function buildXml(urls) {
   const today = new Date().toISOString().split('T')[0];
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -53,7 +52,7 @@ router.get('/sitemap/products', async (req, res) => {
 
     const urls = products.map(product => {
       const productUrl = `${BASE_URL}/product/${product.id}`;
-      const imageUrl = product.image_url ? `${BASE_URL}${product.image_url}` : null;
+      const imageUrl = toAbsoluteUrl(product.image_url);
       return {
         loc: productUrl,
         lastmod: product.updated_at ? product.updated_at.toISOString().split('T')[0] : undefined,
@@ -73,10 +72,20 @@ router.get('/sitemap/products', async (req, res) => {
 
 router.get('/sitemap/categories', async (req, res) => {
   try {
-    const urls = Object.entries(CATEGORY_MAP).map(([slug, data]) => ({
-      loc: `${BASE_URL}/shop/${slug}`,
-      changefreq: data.changefreq,
-      priority: data.priority
+    const [categories] = await pool.query(
+      `SELECT slug, name, image_url
+         FROM categories
+        WHERE is_active = TRUE
+          AND category_type IN ('shop', 'both')
+        ORDER BY name ASC`,
+    );
+
+    const urls = categories.map((category) => ({
+      loc: `${BASE_URL}/shop/${encodeURIComponent(category.slug)}`,
+      changefreq: 'weekly',
+      priority: 0.8,
+      image: toAbsoluteUrl(category.image_url),
+      imageTitle: category.name,
     }));
 
     urls.push({

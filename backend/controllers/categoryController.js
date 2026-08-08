@@ -3,7 +3,9 @@ const categoryModel = require("../models/categoryModel");
 const ALLOWED_CATEGORY_TYPES = new Set(["shop", "shop_by_category", "both"]);
 
 const getCategories = async (req, res) => {
-  const includeInactive = String(req.query?.include_inactive || "false") === "true";
+  const includeInactive =
+    String(req.query?.include_inactive || "false") === "true" &&
+    String(req.user?.role || "").toLowerCase() === "admin";
   const requestedCategoryType = String(
     req.query?.category_type || req.query?.type || "",
   )

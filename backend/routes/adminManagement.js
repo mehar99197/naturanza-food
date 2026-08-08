@@ -64,7 +64,7 @@ const resolveAdminRole = async (connection, desiredRole) => {
 };
 
 // GET /api/admin-management/admins - Get all admins with filters
-router.get('/admins', authenticateToken, isAdmin, async (req, res) => {
+router.get('/admins', authenticateToken, isAdmin, requireSuperAdmin, async (req, res) => {
   try {
     const { status, role, search } = req.query;
     const isRequesterSuperAdmin = req.user.admin_role === 'super_admin';
@@ -151,7 +151,7 @@ router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, upload.sin
 
     let profilePicture = null;
     if (req.file) {
-      profilePicture = `/uploads/admins/${req.file.filename}`;
+       profilePicture = `/images/admins/${req.file.filename}`;
     }
 
     let adminPermissions = null;
@@ -398,10 +398,10 @@ router.delete('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin,
 });
 
 // GET /api/admin-management/admins/:id/logs - Get admin activity logs
-router.get('/admins/:id/logs', authenticateToken, isAdmin, async (req, res) => {
+router.get('/admins/:id/logs', authenticateToken, isAdmin, requireSuperAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
 
     const [logs] = await db.promise().query(
       'SELECT action, ip_address, created_at FROM admin_audit_logs WHERE admin_id = ? ORDER BY created_at DESC LIMIT ?',

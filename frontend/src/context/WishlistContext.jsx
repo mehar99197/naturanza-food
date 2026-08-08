@@ -27,9 +27,10 @@ export function WishlistProvider({ children }) {
 	const [showToast, setShowToast] = useState(false);
 	const [toastMessage, setToastMessage] = useState('');
 	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState(null);
-	const [updatingIds, setUpdatingIds] = useState(() => new Set());
-	const toastTimeoutRef = useRef(null);
+ const [error, setError] = useState(null);
+ const [updatingIds, setUpdatingIds] = useState(() => new Set());
+ const toastTimeoutRef = useRef(null);
+ const requestGenerationRef = useRef(0);
 
 	const showTransientToast = useCallback((message) => {
 		setToastMessage(message);
@@ -45,6 +46,7 @@ export function WishlistProvider({ children }) {
 	}, []);
 
 	const fetchWishlist = useCallback(async ({ silent = false } = {}) => {
+		const requestGeneration = ++requestGenerationRef.current;
 		if (!isAuthenticated) {
 			setItems([]);
 			return [];
@@ -56,16 +58,18 @@ export function WishlistProvider({ children }) {
 			}
 			setError(null);
 			const data = await wishlistAPI.get();
+			if (requestGeneration !== requestGenerationRef.current) return [];
 			const nextItems = Array.isArray(data?.items) ? data.items : [];
 			setItems(nextItems);
 			return nextItems;
 		} catch (err) {
+			if (requestGeneration !== requestGenerationRef.current) return [];
 			const message = err.response?.data?.error || err.message || 'Failed to load wishlist';
 			setError(message);
 			setItems([]);
 			return [];
 		} finally {
-			if (!silent) {
+			if (!silent && requestGeneration === requestGenerationRef.current) {
 				setLoading(false);
 			}
 		}
@@ -85,6 +89,7 @@ export function WishlistProvider({ children }) {
 		setItems([]);
 		setError(null);
 		setUpdatingIds(new Set());
+		requestGenerationRef.current += 1;
 	}, [isAuthenticated, authLoading, fetchWishlist]);
 
 	useEffect(() => {

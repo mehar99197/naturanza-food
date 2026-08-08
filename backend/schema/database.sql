@@ -175,7 +175,8 @@ CREATE TABLE IF NOT EXISTS reviews (
     is_approved BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_reviews_user_product (user_id, product_id)
 );
 -- Coupons table
 CREATE TABLE IF NOT EXISTS coupons (
@@ -647,14 +648,17 @@ CREATE TABLE IF NOT EXISTS payment_accounts (
     is_active BOOLEAN DEFAULT true,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
-INSERT INTO payment_accounts (type, account_number, account_name)
+INSERT INTO payment_accounts (type, account_number, account_name, is_active)
 SELECT 'jazzcash', '03XX-XXXXXXX', 'Naturanza Food'
+  , FALSE
 WHERE NOT EXISTS (SELECT 1 FROM payment_accounts WHERE type = 'jazzcash');
-INSERT INTO payment_accounts (type, account_number, account_name)
+INSERT INTO payment_accounts (type, account_number, account_name, is_active)
 SELECT 'easypaisa', '03XX-XXXXXXX', 'Naturanza Food'
+  , FALSE
 WHERE NOT EXISTS (SELECT 1 FROM payment_accounts WHERE type = 'easypaisa');
-INSERT INTO payment_accounts (type, account_number, account_name)
+INSERT INTO payment_accounts (type, account_number, account_name, is_active)
 SELECT 'bank', 'PK00XXXX0000000000000000', 'Naturanza Food'
+  , FALSE
 WHERE NOT EXISTS (SELECT 1 FROM payment_accounts WHERE type = 'bank');
 -- Advance payment verification submissions
 CREATE TABLE IF NOT EXISTS advance_payment_verifications (

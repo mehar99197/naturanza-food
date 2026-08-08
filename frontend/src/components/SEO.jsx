@@ -166,7 +166,7 @@ export function ReturnsSEO() {
   return (
     <SEO
       title="Returns and Refunds Policy"
-      description="Naturanza Food returns policy. Request return within 7 days. Refund processed within 5-10 business days after quality check. Quality guaranteed."
+       description="Naturanza Food returns policy. Request return within 3 days for eligible shipping issues. Refund processed within 5-10 business days after quality check."
       keywords="Naturanza returns, organic products refund Pakistan, natural food returns, satisfaction guarantee Pakistan"
       url={`${SITE_URL}/returns`}
     />

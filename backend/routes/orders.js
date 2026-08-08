@@ -1,13 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const requirePermission = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
 const { createInvoicePdfBuffer } = require('../utils/invoicePdf');
 const { getAdminSettings } = require('../utils/adminSettings');
 const { insertAdminNotifications, getAdminRecipients } = require('../utils/adminNotifications');
 const { sendEmail } = require('../utils/emailService');
-const { reserveStockOnConnection } = require('../utils/stockReservations');
+const {
+  reserveStockOnConnection,
+  releaseReservationsOnConnection,
+} = require('../utils/stockReservations');
 
 const ALLOWED_ORDER_STATUSES = new Set([
   'pending',
@@ -93,6 +97,76 @@ const parseNullableDate = (value) => {
 };
 
 const createTrackingNumber = (orderId) => `TRK-${String(orderId).padStart(10, '0')}`;
+
+const requireOrdersPermissionForAdmins = (req, res, next) => {
+  if (String(req.user?.role || '').toLowerCase() !== 'admin') {
+    return next();
+  }
+  return requirePermission('manage_orders')(req, res, next);
+};
+
+const restoreConsumedOrSoldInventoryOnConnection = async (
+  connection,
+  orderId,
+  userId,
+  note,
+) => {
+  const [consumedReservations] = await connection.query(
+    `SELECT product_id, SUM(quantity) AS quantity
+       FROM stock_reservations
+      WHERE order_id = ? AND state = 'consumed'
+      GROUP BY product_id
+      ORDER BY product_id
+      FOR UPDATE`,
+    [orderId],
+  );
+  const [saleMovements] = await connection.query(
+    `SELECT product_id, SUM(ABS(quantity_change)) AS quantity
+       FROM inventory_movements
+      WHERE order_id = ? AND movement_type = 'sale' AND quantity_change < 0
+      GROUP BY product_id
+      ORDER BY product_id`,
+    [orderId],
+  );
+
+  const restoreByProduct = new Map();
+  for (const row of consumedReservations) {
+    restoreByProduct.set(Number(row.product_id), Number(row.quantity) || 0);
+  }
+  for (const row of saleMovements) {
+    const productId = Number(row.product_id);
+    if (!restoreByProduct.has(productId)) {
+      restoreByProduct.set(productId, Number(row.quantity) || 0);
+    }
+  }
+
+  for (const [productId, quantity] of restoreByProduct) {
+    if (quantity <= 0) continue;
+
+    const [[product]] = await connection.query(
+      'SELECT stock_quantity FROM products WHERE id = ? FOR UPDATE',
+      [productId],
+    );
+    if (!product) continue;
+
+    const previousStock = safeNumber(product.stock_quantity, 0);
+    const restoredStock = previousStock + quantity;
+    await connection.query('UPDATE products SET stock_quantity = ? WHERE id = ?', [
+      restoredStock,
+      productId,
+    ]);
+    await insertInventoryMovement(connection, {
+      productId,
+      orderId,
+      movementType: 'cancel_restore',
+      quantityChange: quantity,
+      previousStock,
+      newStock: restoredStock,
+      note,
+      createdByUserId: userId,
+    });
+  }
+};
 
 const insertNotification = async (
   connection,
@@ -642,16 +716,17 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
   }
 
   const connection = await db.promise().getConnection();
+  let transactionCommitted = false;
 
   try {
     await connection.beginTransaction();
 
     const [cartItems] = await connection.query(
-      `SELECT c.product_id, c.quantity, p.name, p.image_url, p.price, p.stock_quantity, p.discount_percentage,
-              (p.price - (p.price * p.discount_percentage / 100)) AS final_price
+      `SELECT c.product_id, c.quantity, p.name, p.image_url, p.price, p.stock_quantity, p.reserved_stock, p.discount_percentage,
+               (p.price - (p.price * p.discount_percentage / 100)) AS final_price
        FROM cart c
        JOIN products p ON c.product_id = p.id
-       WHERE c.user_id = ?
+       WHERE c.user_id = ? AND p.is_active = TRUE
        FOR UPDATE`,
       [req.user.id],
     );
@@ -662,7 +737,9 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     }
 
     for (const item of cartItems) {
-      if (safeNumber(item.stock_quantity, 0) < safeNumber(item.quantity, 0)) {
+      const availableStock =
+        safeNumber(item.stock_quantity, 0) - safeNumber(item.reserved_stock, 0);
+      if (availableStock < safeNumber(item.quantity, 0)) {
         await connection.rollback();
         return res.status(400).json({
           error: `Insufficient stock for ${item.name}`,
@@ -691,7 +768,14 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     // methods are 'paid'; COD / wallet / bank transfer stay 'pending' until an
     // admin verifies the payment. Financial totals are recomputed below.
     const PREPAID_METHODS = new Set(['online', 'card']);
-    const paymentStatus = PREPAID_METHODS.has(paymentMethod) ? 'paid' : 'pending';
+    if (PREPAID_METHODS.has(paymentMethod)) {
+      await connection.rollback();
+      return res.status(400).json({
+        error: 'This payment method is not available yet. Please choose Cash on Delivery or a manual wallet payment.',
+      });
+    }
+
+    const paymentStatus = 'pending';
 
     const customerName = req.body?.customer_name
       ? String(req.body.customer_name).trim()
@@ -707,6 +791,16 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     const addressId = Number.isInteger(Number(req.body?.address_id))
       ? Number(req.body.address_id)
       : null;
+    if (addressId) {
+      const [[address]] = await connection.query(
+        "SELECT id FROM user_addresses WHERE id = ? AND user_id = ? AND is_active = TRUE LIMIT 1",
+        [addressId, req.user.id],
+      );
+      if (!address) {
+        await connection.rollback();
+        return res.status(400).json({ error: 'Selected address is not available' });
+      }
+    }
     const estimatedDelivery =
       parseNullableDate(req.body?.estimated_delivery) ||
       new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
@@ -748,7 +842,8 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
         `SELECT discount_type, discount_value, min_order_amount, max_discount, usage_limit, used_count
            FROM coupons
           WHERE code = ? AND is_active = TRUE
-            AND (expiry_date IS NULL OR expiry_date > NOW())`,
+            AND (expiry_date IS NULL OR expiry_date > NOW())
+          FOR UPDATE`,
         [couponCode],
       );
       if (
@@ -770,16 +865,35 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     }
     discountAmount = Math.min(Math.max(0, discountAmount), subtotal);
 
+    if (effectiveCouponCode) {
+      const [couponUpdate] = await connection.query(
+        `UPDATE coupons
+            SET used_count = used_count + 1
+          WHERE code = ? AND is_active = TRUE
+            AND (expiry_date IS NULL OR expiry_date > NOW())
+            AND (usage_limit IS NULL OR used_count < usage_limit)`,
+        [effectiveCouponCode],
+      );
+      if (couponUpdate.affectedRows === 0) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'Coupon is no longer available' });
+      }
+    }
+
     let shippingCost = 0;
     const freeShippingThreshold = safeNumber(adminSettings.shippingFree, 5000);
     const isCod = paymentMethod === 'cod';
     const qualifiesForFreeShipping = !isCod && (subtotal - discountAmount) >= freeShippingThreshold;
-    if (city && !qualifiesForFreeShipping) {
-      const [[cityFee]] = await connection.query(
-        `SELECT fee FROM city_delivery_fees WHERE city_name = ? AND is_active = TRUE LIMIT 1`,
-        [city],
-      );
-      shippingCost = cityFee ? safeNumber(cityFee.fee) : 0;
+    const [[cityFee]] = await connection.query(
+      `SELECT fee FROM city_delivery_fees WHERE city_name = ? AND is_active = TRUE LIMIT 1`,
+      [city],
+    );
+    if (!cityFee) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Please select a valid delivery city' });
+    }
+    if (!qualifiesForFreeShipping) {
+      shippingCost = safeNumber(cityFee.fee);
     }
 
     const totalAmount = Math.max(0, subtotal - discountAmount + tax + shippingCost);
@@ -958,6 +1072,7 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     }
 
     await connection.commit();
+    transactionCommitted = true;
 
     const [orderRows] = await connection.query(
       `SELECT o.*, (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) AS item_count
@@ -1008,7 +1123,20 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       order,
     });
   } catch (error) {
-    await connection.rollback();
+    if (!transactionCommitted) {
+      await connection.rollback();
+    } else {
+      console.error('[orders] post-commit response hydration failed:', {
+        orderId: error?.orderId,
+        code: error?.code,
+        message: error?.message,
+      });
+      return res.status(201).json({
+        message: 'Order created successfully',
+        orderId,
+        total: totalAmount.toFixed(2),
+      });
+    }
     console.error('[orders] create order failed:', {
       userId: req.user?.id,
       code: error?.code,
@@ -1041,7 +1169,7 @@ router.get('/my-orders', authenticateToken, async (req, res) => {
 });
 
 // Get all orders (Admin only)
-router.get('/admin/all', authenticateToken, isAdmin, async (req, res) => {
+router.get('/admin/all', authenticateToken, isAdmin, requirePermission('manage_orders'), async (req, res) => {
   const status = req.query.status ? String(req.query.status).trim() : null;
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
@@ -1072,7 +1200,7 @@ router.get('/admin/all', authenticateToken, isAdmin, async (req, res) => {
 });
 
 // Download invoice PDF (generated on backend from DB order data)
-router.get('/:id/invoice', authenticateToken, async (req, res) => {
+router.get('/:id/invoice', authenticateToken, requireOrdersPermissionForAdmins, async (req, res) => {
   try {
     const orderId = Number(req.params.id);
     if (!Number.isInteger(orderId)) {
@@ -1167,7 +1295,7 @@ router.get('/:id/invoice', authenticateToken, async (req, res) => {
 });
 
 // Get order details
-router.get('/:id', authenticateToken, async (req, res) => {
+router.get('/:id', authenticateToken, requireOrdersPermissionForAdmins, async (req, res) => {
   try {
     const orderId = Number(req.params.id);
     if (!Number.isInteger(orderId)) {
@@ -1196,7 +1324,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Get status timeline for an order
-router.get('/:id/history', authenticateToken, async (req, res) => {
+router.get('/:id/history', authenticateToken, requireOrdersPermissionForAdmins, async (req, res) => {
   try {
     const orderId = Number(req.params.id);
     if (!Number.isInteger(orderId)) {
@@ -1224,7 +1352,7 @@ router.get('/:id/history', authenticateToken, async (req, res) => {
 });
 
 // Get shipment details for an order
-router.get('/:id/shipment', authenticateToken, async (req, res) => {
+router.get('/:id/shipment', authenticateToken, requireOrdersPermissionForAdmins, async (req, res) => {
   try {
     const orderId = Number(req.params.id);
     if (!Number.isInteger(orderId)) {
@@ -1283,40 +1411,13 @@ router.put('/:id/cancel', authenticateToken, restrictBody(), async (req, res) =>
         .json({ error: 'Only pending/confirmed/processing orders can be cancelled' });
     }
 
-    const [items] = await connection.query(
-      'SELECT product_id, quantity FROM order_items WHERE order_id = ?',
-      [orderId],
+    await releaseReservationsOnConnection(connection, orderId);
+    await restoreConsumedOrSoldInventoryOnConnection(
+      connection,
+      orderId,
+      req.user.id,
+      `Stock restored after cancellation of order #${orderId}`,
     );
-
-    for (const item of items) {
-      const [productRows] = await connection.query(
-        'SELECT stock_quantity FROM products WHERE id = ? FOR UPDATE',
-        [item.product_id],
-      );
-
-      if (productRows.length === 0) {
-        continue;
-      }
-
-      const previousStock = safeNumber(productRows[0].stock_quantity, 0);
-      const restoredStock = previousStock + safeNumber(item.quantity, 0);
-
-      await connection.query('UPDATE products SET stock_quantity = ? WHERE id = ?', [
-        restoredStock,
-        item.product_id,
-      ]);
-
-      await insertInventoryMovement(connection, {
-        productId: item.product_id,
-        orderId,
-        movementType: 'cancel_restore',
-        quantityChange: Math.abs(safeNumber(item.quantity, 0)),
-        previousStock,
-        newStock: restoredStock,
-        note: `Stock restored after cancellation of order #${orderId}`,
-        createdByUserId: req.user.id,
-      });
-    }
 
     await connection.query('UPDATE orders SET status = ? WHERE id = ?', [
       'cancelled',
@@ -1351,7 +1452,7 @@ router.put('/:id/cancel', authenticateToken, restrictBody(), async (req, res) =>
 });
 
 // Update shipment details (Admin only)
-router.put('/:id/shipment', authenticateToken, isAdmin, restrictBody('courier_name', 'tracking_number', 'shipment_status', 'estimated_delivery', 'metadata'), async (req, res) => {
+router.put('/:id/shipment', authenticateToken, isAdmin, requirePermission('manage_orders'), restrictBody('courier_name', 'tracking_number', 'shipment_status', 'estimated_delivery', 'metadata'), async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId)) {
     return res.status(400).json({ error: 'Invalid order id' });
@@ -1424,7 +1525,7 @@ router.put('/:id/shipment', authenticateToken, isAdmin, restrictBody('courier_na
 });
 
 // Update order status (Admin only)
-router.put('/:id/status', authenticateToken, isAdmin, restrictBody('status', 'payment_status', 'note', 'courier_name', 'tracking_number', 'estimated_delivery'), async (req, res) => {
+router.put('/:id/status', authenticateToken, isAdmin, requirePermission('manage_orders'), restrictBody('status', 'payment_status', 'note', 'courier_name', 'tracking_number', 'estimated_delivery'), async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId)) {
     return res.status(400).json({ error: 'Invalid order id' });
@@ -1444,6 +1545,14 @@ router.put('/:id/status', authenticateToken, isAdmin, restrictBody('status', 'pa
     !ALLOWED_PAYMENT_STATUSES.has(requestedPaymentStatus)
   ) {
     return res.status(400).json({ error: 'Invalid payment status' });
+  }
+
+  if (
+    requestedPaymentStatus &&
+    String(req.user?.admin_role || '').toLowerCase() !== 'super_admin' &&
+    !(Array.isArray(req.user?.admin_permissions) && req.user.admin_permissions.includes('manage_payments'))
+  ) {
+    return res.status(403).json({ error: 'Payment status changes require payment permission' });
   }
 
   const note = req.body?.note ? String(req.body.note).trim() : null;
@@ -1492,40 +1601,13 @@ router.put('/:id/status', authenticateToken, isAdmin, restrictBody('status', 'pa
     }
 
     if (nextStatusRaw === 'cancelled' && order.status !== 'cancelled') {
-      const [items] = await connection.query(
-        'SELECT product_id, quantity FROM order_items WHERE order_id = ?',
-        [orderId],
+      await releaseReservationsOnConnection(connection, orderId);
+      await restoreConsumedOrSoldInventoryOnConnection(
+        connection,
+        orderId,
+        req.user.id,
+        `Stock restored after admin cancelled order #${orderId}`,
       );
-
-      for (const item of items) {
-        const [productRows] = await connection.query(
-          'SELECT stock_quantity FROM products WHERE id = ? FOR UPDATE',
-          [item.product_id],
-        );
-
-        if (!productRows.length) {
-          continue;
-        }
-
-        const previousStock = safeNumber(productRows[0].stock_quantity, 0);
-        const restoredStock = previousStock + safeNumber(item.quantity, 0);
-
-        await connection.query('UPDATE products SET stock_quantity = ? WHERE id = ?', [
-          restoredStock,
-          item.product_id,
-        ]);
-
-        await insertInventoryMovement(connection, {
-          productId: item.product_id,
-          orderId,
-          movementType: 'cancel_restore',
-          quantityChange: Math.abs(safeNumber(item.quantity, 0)),
-          previousStock,
-          newStock: restoredStock,
-          note: `Stock restored after admin cancelled order #${orderId}`,
-          createdByUserId: req.user.id,
-        });
-      }
     }
 
     if (nextStatusRaw === 'shipped' || nextStatusRaw === 'delivered') {
@@ -1619,7 +1701,7 @@ router.put('/:id/status', authenticateToken, isAdmin, restrictBody('status', 'pa
 });
 
 // Delete order (Admin only)
-router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
+router.delete('/:id', authenticateToken, isAdmin, requirePermission('manage_orders'), async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId)) {
     return res.status(400).json({ error: 'Invalid order id' });
@@ -1644,40 +1726,13 @@ router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
     const shouldRestoreStock = order.status !== 'cancelled';
 
     if (shouldRestoreStock) {
-      const [items] = await connection.query(
-        'SELECT product_id, quantity FROM order_items WHERE order_id = ?',
-        [orderId],
+      await releaseReservationsOnConnection(connection, orderId);
+      await restoreConsumedOrSoldInventoryOnConnection(
+        connection,
+        orderId,
+        req.user.id,
+        `Stock restored after admin deleted order #${orderId}`,
       );
-
-      for (const item of items) {
-        const [productRows] = await connection.query(
-          'SELECT stock_quantity FROM products WHERE id = ? FOR UPDATE',
-          [item.product_id],
-        );
-
-        if (!productRows.length) {
-          continue;
-        }
-
-        const previousStock = safeNumber(productRows[0].stock_quantity, 0);
-        const restoredStock = previousStock + safeNumber(item.quantity, 0);
-
-        await connection.query('UPDATE products SET stock_quantity = ? WHERE id = ?', [
-          restoredStock,
-          item.product_id,
-        ]);
-
-        await insertInventoryMovement(connection, {
-          productId: item.product_id,
-          orderId,
-          movementType: 'cancel_restore',
-          quantityChange: Math.abs(safeNumber(item.quantity, 0)),
-          previousStock,
-          newStock: restoredStock,
-          note: `Stock restored after admin deleted order #${orderId}`,
-          createdByUserId: req.user.id,
-        });
-      }
     }
 
     await insertNotification(

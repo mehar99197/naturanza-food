@@ -90,7 +90,7 @@ const csrfMiddleware = (options = {}) => {
       return next();
     }
 
-    const existingToken = req.cookies?.[CSRF_COOKIE_NAME];
+    let existingToken = req.cookies?.[CSRF_COOKIE_NAME];
 
     if (!existingToken) {
       const newToken = generateToken();
@@ -104,8 +104,7 @@ const csrfMiddleware = (options = {}) => {
         path: "/",
       });
 
-      req.csrfToken = newToken;
-      return next();
+      existingToken = signedToken;
     }
 
     const tokenFromBody = req.body?._csrf || req.body?.csrfToken;
@@ -131,21 +130,14 @@ const csrfMiddleware = (options = {}) => {
     }
 
     const existingVerification = verifySignedToken(existingToken);
-    if (existingVerification.valid) {
-      const newToken = generateToken();
-      const signedToken = createSignedToken(newToken);
-
-      res.cookie(CSRF_COOKIE_NAME, signedToken, {
-        httpOnly: true,
-        secure: cookieSecure,
-        sameSite: cookieSameSite,
-        maxAge: CSRF_COOKIE_MAX_AGE,
-        path: "/",
+    if (!existingVerification.valid || existingVerification.token !== verification.token) {
+      return res.status(403).json({
+        error: "Invalid or expired CSRF token",
+        code: "CSRF_TOKEN_INVALID",
       });
-
-      req.csrfToken = newToken;
     }
 
+    req.csrfToken = verification.token;
     next();
   };
 };

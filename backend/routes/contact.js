@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const requirePermission = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
 
@@ -61,7 +62,7 @@ router.post('/', restrictBody('name', 'email', 'phone', 'subject', 'message'), (
 });
 
 // Get all contacts (Admin only)
-router.get('/', authenticateToken, isAdmin, (req, res) => {
+router.get('/', authenticateToken, isAdmin, requirePermission('manage_messages'), (req, res) => {
     const { status } = req.query;
     
     let query = 'SELECT * FROM contacts';
@@ -84,7 +85,7 @@ router.get('/', authenticateToken, isAdmin, (req, res) => {
 });
 
 // Get contact by ID (Admin only)
-router.get('/:id', authenticateToken, isAdmin, (req, res) => {
+router.get('/:id', authenticateToken, isAdmin, requirePermission('manage_messages'), (req, res) => {
     db.query('SELECT * FROM contacts WHERE id = ?', [req.params.id], (err, results) => {
         if (err) {
             return res.status(500).json({ error: 'Database error' });
@@ -105,7 +106,7 @@ router.get('/:id', authenticateToken, isAdmin, (req, res) => {
 });
 
 // Update contact status (Admin only)
-router.put('/:id/status', authenticateToken, isAdmin, restrictBody('status'), (req, res) => {
+router.put('/:id/status', authenticateToken, isAdmin, requirePermission('manage_messages'), restrictBody('status'), (req, res) => {
     const { status } = req.body;
     
     if (!['new', 'read', 'responded'].includes(status)) {
@@ -126,7 +127,7 @@ router.put('/:id/status', authenticateToken, isAdmin, restrictBody('status'), (r
 });
 
 // Delete contact (Admin only)
-router.delete('/:id', authenticateToken, isAdmin, (req, res) => {
+router.delete('/:id', authenticateToken, isAdmin, requirePermission('manage_messages'), (req, res) => {
     db.query('DELETE FROM contacts WHERE id = ?', [req.params.id], (err, result) => {
         if (err) {
             return res.status(500).json({ error: 'Error deleting contact' });

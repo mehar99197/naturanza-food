@@ -2,8 +2,12 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Create uploads directory if it doesn't exist
-const uploadsDir = path.join(__dirname, '../uploads/admins');
+// Keep admin profile uploads beside the other persistent media, outside the
+// git-deployed application tree.
+const uploadsBaseDir =
+  process.env.UPLOADS_DIR ||
+  path.join(__dirname, '..', '..', '..', 'persistent-uploads', 'images');
+const uploadsDir = path.join(uploadsBaseDir, 'admins');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }

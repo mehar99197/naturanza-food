@@ -316,35 +316,6 @@ export const AuthProvider = ({ children }) => {
     };
   }, []);
 
-  // Handle session sync events from other tabs/components
-  const handleSessionSyncEvent = (event) => {
-    const source = String(event?.detail?.source || "").toLowerCase();
-
-    if (source.startsWith("admin-")) {
-      return;
-    }
-
-    if (source === "user-logout" || source === "user-token-refresh-failed") {
-      clearUserAccessToken();
-      applyUserState(null);
-      setLoading(false);
-      return;
-    }
-
-    if (source === "user-token-refresh" || source === "user-refresh") {
-      return;
-    }
-
-    void refreshProfile();
-  };
-
-  useEffect(() => {
-    window.addEventListener(AUTH_SESSION_SYNC_EVENT, handleSessionSyncEvent);
-    return () => {
-      window.removeEventListener(AUTH_SESSION_SYNC_EVENT, handleSessionSyncEvent);
-    };
-  }, []);
-
   // Periodic token refresh - runs every 12 minutes to keep session alive
   useEffect(() => {
     if (typeof window === "undefined" || !user) {

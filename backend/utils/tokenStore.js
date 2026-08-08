@@ -64,7 +64,7 @@ const rotateRefreshTokenRecord = async (
     userAgent = null,
   },
 ) => {
-  await db.query(
+  const [result] = await db.query(
     `UPDATE refresh_tokens
      SET revoked_at = NOW(),
          revoked_reason = 'rotated',
@@ -72,6 +72,12 @@ const rotateRefreshTokenRecord = async (
      WHERE jti = ? AND revoked_at IS NULL`,
     [newRefreshTokenJti, oldRefreshTokenJti],
   );
+
+  if (result.affectedRows !== 1) {
+    const error = new Error("Refresh token was already rotated");
+    error.code = "REFRESH_TOKEN_ALREADY_ROTATED";
+    throw error;
+  }
 
   await createRefreshTokenRecord(db, {
     userId,

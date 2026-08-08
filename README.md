@@ -29,7 +29,7 @@ on one domain.
 
 ## Local development
 
-Requires Node.js 18+ and a local MySQL/MariaDB.
+Requires Node.js 20.19+ and a local MySQL/MariaDB.
 
 ```bash
 # 1. Install all dependencies (root, backend, and frontend)

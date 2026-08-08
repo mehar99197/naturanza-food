@@ -52,7 +52,9 @@ const getProducts = async (req, res) => {
     featuredAlias: req.query.featured,
     limit: req.query.limit || 50,
     offset: req.query.offset || 0,
-    includeInactive: req.query.includeInactive === 'true',
+    includeInactive:
+      req.query.includeInactive === 'true' &&
+      String(req.user?.role || '').toLowerCase() === 'admin',
   });
 
   res.json({ data: products });

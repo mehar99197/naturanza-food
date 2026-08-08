@@ -526,7 +526,9 @@ const hasDownloadablePayload = (payload) => {
 export const productAPI = {
   getAll: async (includeInactive = false) => {
     const response = await axiosInstance.get("/products", {
-      params: includeInactive ? { includeInactive: 'true' } : {}
+      params: includeInactive
+        ? { includeInactive: 'true', limit: 500 }
+        : { limit: 500 },
     });
     return response.data;
   },
@@ -1225,6 +1227,14 @@ export const adminAPI = {
     return response.data;
   },
 
+  getPaymentVerificationScreenshot: async (verificationId) => {
+    const response = await axiosInstance.get(
+      `/admin/payments/verifications/${verificationId}/screenshot`,
+      { responseType: "blob" },
+    );
+    return response.data;
+  },
+
   getPaymentAnalytics: async () => {
     const response = await axiosInstance.get("/admin/payments/analytics");
     return response.data;
@@ -1433,7 +1443,9 @@ export const orderAPI = {
       return [];
     }
     const endpoint = hasAdminToken ? "/orders/admin/all" : "/orders/my-orders";
-    const response = await axiosInstance.get(endpoint);
+    const response = await axiosInstance.get(endpoint, {
+      params: hasAdminToken ? { limit: 500 } : {},
+    });
     return response.data;
   },
 

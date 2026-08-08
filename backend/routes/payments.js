@@ -58,11 +58,12 @@ router.post(
       const paymentMethod = String(req.body.payment_method || "")
         .trim()
         .toLowerCase();
-      const screenshotUrl =
-        toNullableString(req.body.screenshot_url) || req.file?.url || null;
+      // Never trust a client-supplied URL for a payment document. Only the
+      // file processed by this request may become the stored screenshot path.
+      const screenshotUrl = req.file?.url || null;
 
       const rawTid = toNullableString(req.body.transaction_id);
-      const transactionId = rawTid ? rawTid.replace(/\D/g, "").slice(0, 11) : null;
+      const transactionId = rawTid ? rawTid.replace(/[\s-]/g, "") : null;
 
       if (!orderId || !customerName) {
         return res

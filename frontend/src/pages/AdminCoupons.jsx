@@ -28,6 +28,7 @@ export default function AdminCoupons() {
  const [showSuccessToast, setShowSuccessToast] = useState(false);
  const [toastMessage, setToastMessage] = useState('');
  const [error, setError] = useState('');
+ const [searchQuery, setSearchQuery] = useState('');
  const [formData, setFormData] = useState({
  code: '',
  description: '',
@@ -151,6 +152,15 @@ export default function AdminCoupons() {
  };
  }, [coupons]);
 
+ const filteredCoupons = useMemo(() => {
+  const query = searchQuery.trim().toLowerCase();
+  if (!query) return coupons;
+  return coupons.filter((coupon) =>
+  String(coupon.code || '').toLowerCase().includes(query) ||
+  String(coupon.description || '').toLowerCase().includes(query),
+  );
+ }, [coupons, searchQuery]);
+
  return (
  <AdminLayout>
  <div className="mx-auto w-full max-w-[1240px] space-y-4 sm:space-y-6">
@@ -251,10 +261,12 @@ export default function AdminCoupons() {
  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
  <div className="relative w-full lg:max-w-xl">
  <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-emerald-500" />
- <input
- type="text"
- placeholder="Search coupons by code or description"
- className="h-12 w-full rounded-2xl border border-emerald-100 bg-white pl-11 pr-4 text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+  <input
+  type="text"
+  placeholder="Search coupons by code or description"
+  value={searchQuery}
+  onChange={(event) => setSearchQuery(event.target.value)}
+  className="h-12 w-full rounded-2xl border border-emerald-100 bg-white pl-11 pr-4 text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
  />
  </div>
  </div>
@@ -262,7 +274,7 @@ export default function AdminCoupons() {
 
  {/* Mobile Coupons List */}
  <div className="space-y-2 p-3 md:hidden">
- {coupons.length === 0 ? (
+  {filteredCoupons.length === 0 ? (
  <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-8 text-center">
  <p className="text-sm font-semibold text-slate-700">No coupons found</p>
  <p className="mt-1 text-xs text-slate-500">
@@ -270,7 +282,7 @@ export default function AdminCoupons() {
  </p>
  </div>
  ) : (
- coupons.map(coupon => (
+  filteredCoupons.map(coupon => (
  <article key={coupon.id} className="rounded-2xl border border-emerald-100 bg-white p-3 shadow-sm">
  <div className="flex items-start justify-between gap-3">
  <div className="min-w-0">
@@ -364,7 +376,7 @@ export default function AdminCoupons() {
  </tr>
  </thead>
  <tbody>
- {coupons.length === 0 ? (
+  {filteredCoupons.length === 0 ? (
  <tr>
  <td colSpan="7" className="px-6 py-14 text-center">
  <p className="text-base font-semibold text-slate-700">No coupons found</p>
@@ -374,7 +386,7 @@ export default function AdminCoupons() {
  </td>
  </tr>
  ) : (
- coupons.map(coupon => (
+  filteredCoupons.map(coupon => (
  <tr key={coupon.id} className="group border-b border-emerald-50 transition-colors duration-200 hover:bg-emerald-50/45">
  <td className="px-6 py-4">
  <div className="flex flex-col">

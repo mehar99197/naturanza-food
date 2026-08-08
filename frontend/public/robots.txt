@@ -17,6 +17,7 @@ Disallow: /reset-password
 Disallow: /auth/
 Disallow: /api/
 Disallow: /images/uploads/
+Disallow: /images/payment-verifications/
 Disallow: /uploads/
 
 # Block search and filter parameters (allow crawling, don't waste crawl budget)

@@ -1,7 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const requirePermission = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
+const { db } = require('../config/db');
+
+const requireReturnsPermissionForAdmins = (req, res, next) => {
+  if (String(req.user?.role || '').toLowerCase() !== 'admin') {
+    return next();
+  }
+  return requirePermission('manage_returns')(req, res, next);
+};
 
 const ALLOWED_RETURN_STATUSES = new Set([
   'requested',
@@ -55,6 +64,11 @@ router.post('/request', authenticateToken, restrictBody('order_id', 'reason', 'd
     if (!['delivered', 'shipped'].includes(order.status)) {
       await connection.rollback();
       return res.status(400).json({ error: 'Returns are only allowed for shipped/delivered orders' });
+    }
+
+    if (requestedAmount > Number(order.total_amount || 0)) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Requested refund cannot exceed the order total' });
     }
 
     const [existingRows] = await connection.query(
@@ -145,7 +159,7 @@ router.get('/my', authenticateToken, async (req, res) => {
 });
 
 // Admin list (mirrors /admin/returns for direct route usage)
-router.get('/admin/all', authenticateToken, isAdmin, async (req, res) => {
+router.get('/admin/all', authenticateToken, isAdmin, requirePermission('manage_returns'), async (req, res) => {
   const status = req.query.status ? String(req.query.status).trim() : null;
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
 
@@ -179,7 +193,7 @@ router.get('/admin/all', authenticateToken, isAdmin, async (req, res) => {
 });
 
 // Get return request detail by id
-router.get('/:id', authenticateToken, async (req, res) => {
+router.get('/:id', authenticateToken, requireReturnsPermissionForAdmins, async (req, res) => {
   const returnId = Number(req.params.id);
   if (!Number.isInteger(returnId)) {
     return res.status(400).json({ error: 'Invalid return request id' });

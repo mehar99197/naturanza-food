@@ -7,7 +7,6 @@ import { buildRejectionWhatsAppLink, buildApprovalWhatsAppLink } from "@/utils/w
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
-import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 
 const accountMeta = [
   { type: "jazzcash", label: "JazzCash", icon: Wallet },
@@ -64,6 +63,7 @@ export function AdminPaymentsExtensions() {
   const [rejectReason, setRejectReason] = useState("");
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [activeScreenshot, setActiveScreenshot] = useState(null);
+  const [screenshotUrls, setScreenshotUrls] = useState({});
   const [stage2NoteById, setStage2NoteById] = useState({});
 
   const initialAccountMap = useMemo(
@@ -120,6 +120,41 @@ export function AdminPaymentsExtensions() {
         verificationFilter,
     );
   }, [verificationFilter, verifications]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const objectUrls = [];
+
+    const loadScreenshots = async () => {
+      const rowsWithScreenshots = verifications.filter((verification) =>
+        verification.screenshot_url,
+      );
+
+      const entries = await Promise.all(
+        rowsWithScreenshots.map(async (verification) => {
+          try {
+            const blob = await adminAPI.getPaymentVerificationScreenshot(verification.id);
+            const url = URL.createObjectURL(blob);
+            objectUrls.push(url);
+            return [String(verification.id), url];
+          } catch {
+            return [String(verification.id), ""];
+          }
+        }),
+      );
+
+      if (!cancelled) {
+        setScreenshotUrls(Object.fromEntries(entries));
+      }
+    };
+
+    void loadScreenshots();
+
+    return () => {
+      cancelled = true;
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [verifications]);
 
   const pendingCount = useMemo(
     () =>
@@ -476,9 +511,7 @@ export function AdminPaymentsExtensions() {
                   const stageKey = String(verification.verification_stage || "full_payment").toLowerCase();
                   const stageMeta = stageBadgeStyles[stageKey] || stageBadgeStyles.full_payment;
                   const isFinalCollection = stageKey === "final_collection";
-                  const screenshotUrl = verification.screenshot_url
-                    ? getAbsoluteImageUrl(verification.screenshot_url)
-                    : "";
+                  const screenshotUrl = screenshotUrls[String(verification.id)] || "";
                   const isPending = status === "pending";
                   const isRejecting = rejectingId === verification.id;
 
@@ -571,6 +604,8 @@ export function AdminPaymentsExtensions() {
                             </span>
                             <Eye className="h-4 w-4 text-emerald-600" />
                           </button>
+                        ) : verification.screenshot_url ? (
+                          <span className="text-xs text-slate-400">Loading...</span>
                         ) : isFinalCollection ? (
                           <span className="text-xs italic text-slate-400">Not required</span>
                         ) : (

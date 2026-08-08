@@ -1,9 +1,12 @@
 const express = require("express");
 const router = express.Router();
+const path = require("path");
 const { db } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const requirePermission = require("../middleware/requirePermission");
 const requireSuperAdmin = require("../middleware/requireSuperAdmin");
 const { restrictBody } = require("../middleware/security");
+const { UPLOADS_IMAGES_DIR } = require("../middleware/upload");
 const { toBoolean, toNullableString } = require("../utils/helpers");
 const {
   consumeReservationsOnConnection,
@@ -50,7 +53,7 @@ const ALLOWED_VERIFICATION_STAGES = new Set([
 // Live revenue rollups for the dashboard cards.
 // Three conditional SUMs in a single round-trip — the planner scans the
 // (status, created_at) index once instead of three times.
-router.get("/analytics", authenticateToken, isAdmin, async (req, res) => {
+router.get("/analytics", authenticateToken, isAdmin, requirePermission("manage_payments"), async (req, res) => {
   const conn = await db.promise().getConnection();
   try {
     // Pin session TZ so CURDATE() / MONTH(NOW()) align with PKT regardless of server locale.
@@ -102,7 +105,7 @@ router.get("/analytics", authenticateToken, isAdmin, async (req, res) => {
 });
 
 // GET /api/admin/payments/accounts
-router.get("/accounts", authenticateToken, isAdmin, async (req, res) => {
+router.get("/accounts", authenticateToken, isAdmin, requirePermission("manage_payments"), async (req, res) => {
   try {
     const [rows] = await db
       .promise()
@@ -123,6 +126,7 @@ router.put(
   "/accounts/:id",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_payments"),
   requireSuperAdmin,
   restrictBody("account_number", "account_name", "is_active"),
   async (req, res) => {
@@ -176,6 +180,7 @@ router.get(
   "/verifications",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_payments"),
   async (req, res) => {
     try {
       const statusParam = String(req.query.status || "pending")
@@ -235,11 +240,60 @@ router.get(
   },
 );
 
+// Payment screenshots are private customer documents. The list endpoint only
+// returns metadata; the image itself requires an authenticated admin session.
+router.get(
+  "/verifications/:id/screenshot",
+  authenticateToken,
+  isAdmin,
+  requirePermission("manage_payments"),
+  async (req, res) => {
+    const verificationId = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(verificationId) || verificationId <= 0) {
+      return res.status(400).json({ error: "Invalid verification id" });
+    }
+
+    try {
+      const [[verification]] = await db.promise().query(
+        "SELECT screenshot_url FROM advance_payment_verifications WHERE id = ? LIMIT 1",
+        [verificationId],
+      );
+
+      const screenshotUrl = String(verification?.screenshot_url || "");
+      const prefix = "/images/payment-verifications/";
+      const filename = screenshotUrl.startsWith(prefix)
+        ? screenshotUrl.slice(prefix.length)
+        : "";
+
+      if (!filename || filename !== path.basename(filename)) {
+        return res.status(404).json({ error: "Payment screenshot not found" });
+      }
+
+      res.setHeader("Cache-Control", "private, no-store");
+      return res.sendFile(
+        path.join(UPLOADS_IMAGES_DIR, "payment-verifications", filename),
+        (error) => {
+          if (error && !res.headersSent) {
+            res.status(error.statusCode === 404 ? 404 : 500).json({
+              error: error.statusCode === 404
+                ? "Payment screenshot not found"
+                : "Failed to load payment screenshot",
+            });
+          }
+        },
+      );
+    } catch (error) {
+      return res.status(500).json({ error: "Failed to load payment screenshot" });
+    }
+  },
+);
+
 // PUT /api/admin/payments/verifications/:id/approve
 router.put(
   "/verifications/:id/approve",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_payments"),
   restrictBody("admin_note"),
   async (req, res) => {
     const verificationId = Number.parseInt(req.params.id, 10);
@@ -256,9 +310,11 @@ router.put(
       // Lock + load the verification row first so the rest of the txn can
       // branch on verification_stage.
       const [[existing]] = await conn.query(
-        `SELECT id, CAST(order_id AS UNSIGNED) AS order_id, verification_stage, status
-           FROM advance_payment_verifications
-          WHERE id = ?
+        `SELECT v.id, CAST(v.order_id AS UNSIGNED) AS order_id,
+                v.verification_stage, v.status, o.status AS order_status
+           FROM advance_payment_verifications v
+           LEFT JOIN orders o ON o.id = CAST(v.order_id AS UNSIGNED)
+          WHERE v.id = ?
           FOR UPDATE`,
         [verificationId],
       );
@@ -266,6 +322,18 @@ router.put(
       if (!existing) {
         await conn.rollback();
         return res.status(404).json({ error: "Verification not found" });
+      }
+
+      if (String(existing.status || "").toLowerCase() !== "pending") {
+        await conn.rollback();
+        return res.status(409).json({
+          error: `This verification is already ${existing.status}. Only pending verifications can be approved.`,
+        });
+      }
+
+      if (String(existing.order_status || '').toLowerCase() === 'cancelled') {
+        await conn.rollback();
+        return res.status(409).json({ error: 'Cancelled orders cannot receive payment approval' });
       }
 
       const stage = String(existing.verification_stage || "full_payment");
@@ -327,7 +395,7 @@ router.put(
       //   advance_shipping  → consume on approve so warehouse can ship
       //   final_collection  → NO-OP (stock was already consumed at stage 1)
       if (stage !== "final_collection" && orderId) {
-        await consumeReservationsOnConnection(conn, orderId);
+        await consumeReservationsOnConnection(conn, orderId, req.user.id);
       }
 
       // When stage-1 (advance_shipping) is approved, create the matching
@@ -478,8 +546,6 @@ router.put(
       });
       return res.status(500).json({
         error: "Failed to approve payment verification",
-        code: error?.code,
-        details: error?.sqlMessage || error?.message,
       });
     } finally {
       conn.release();
@@ -492,6 +558,7 @@ router.put(
   "/verifications/:id/reject",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_payments"),
   restrictBody("reason"),
   async (req, res) => {
     const verificationId = Number.parseInt(req.params.id, 10);
@@ -509,7 +576,7 @@ router.put(
       await conn.beginTransaction();
 
       const [[existing]] = await conn.query(
-        `SELECT id, CAST(order_id AS UNSIGNED) AS order_id, verification_stage
+        `SELECT id, CAST(order_id AS UNSIGNED) AS order_id, verification_stage, status
            FROM advance_payment_verifications
           WHERE id = ?
           FOR UPDATE`,
@@ -519,6 +586,13 @@ router.put(
       if (!existing) {
         await conn.rollback();
         return res.status(404).json({ error: "Verification not found" });
+      }
+
+      if (String(existing.status || "").toLowerCase() !== "pending") {
+        await conn.rollback();
+        return res.status(409).json({
+          error: `This verification is already ${existing.status}. Only pending verifications can be rejected.`,
+        });
       }
 
       const stage = String(existing.verification_stage || "full_payment");

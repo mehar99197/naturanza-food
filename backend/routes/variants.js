@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const requirePermission = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
 
 // Get database connection from global
@@ -63,7 +64,7 @@ router.get('/attributes/:productId', (req, res) => {
 });
 
 // Create a new variant (Admin only)
-router.post('/product/:productId', authenticateToken, isAdmin, restrictBody('variant_name', 'sku', 'price', 'stock_quantity', 'attributes', 'image_url'), (req, res) => {
+router.post('/product/:productId', authenticateToken, isAdmin, requirePermission('manage_products'), restrictBody('variant_name', 'sku', 'price', 'stock_quantity', 'attributes', 'image_url'), (req, res) => {
     const { productId } = req.params;
     const { variant_name, sku, price, stock_quantity, attributes, image_url } = req.body;
 
@@ -100,7 +101,7 @@ router.post('/product/:productId', authenticateToken, isAdmin, restrictBody('var
 });
 
 // Update a variant (Admin only)
-router.put('/:variantId', authenticateToken, isAdmin, restrictBody('variant_name', 'sku', 'price', 'stock_quantity', 'attributes', 'image_url', 'is_active'), (req, res) => {
+router.put('/:variantId', authenticateToken, isAdmin, requirePermission('manage_products'), restrictBody('variant_name', 'sku', 'price', 'stock_quantity', 'attributes', 'image_url', 'is_active'), (req, res) => {
     const { variantId } = req.params;
     const { variant_name, sku, price, stock_quantity, attributes, image_url, is_active } = req.body;
 
@@ -162,7 +163,7 @@ router.put('/:variantId', authenticateToken, isAdmin, restrictBody('variant_name
 });
 
 // Delete a variant (Admin only)
-router.delete('/:variantId', authenticateToken, isAdmin, (req, res) => {
+router.delete('/:variantId', authenticateToken, isAdmin, requirePermission('manage_products'), (req, res) => {
     const { variantId } = req.params;
     const db = getDb();
 
@@ -182,7 +183,7 @@ router.delete('/:variantId', authenticateToken, isAdmin, (req, res) => {
 });
 
 // Set variant attributes for a product (Admin only)
-router.post('/attributes/:productId', authenticateToken, isAdmin, restrictBody('attribute_name', 'attribute_values', 'display_order'), (req, res) => {
+router.post('/attributes/:productId', authenticateToken, isAdmin, requirePermission('manage_products'), restrictBody('attribute_name', 'attribute_values', 'display_order'), (req, res) => {
     const { productId } = req.params;
     const { attribute_name, attribute_values, display_order } = req.body;
 

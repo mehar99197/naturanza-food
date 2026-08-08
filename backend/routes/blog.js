@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const requirePermission = require("../middleware/requirePermission");
 const { restrictBody } = require("../middleware/security");
 const asyncHandler = require("../middleware/asyncHandler");
 const blogController = require("../controllers/blogController");
@@ -24,10 +25,10 @@ const BLOG_FIELDS = [
 router.get("/", asyncHandler(blogController.getPosts));
 
 // Admin list (defined before /:slug so it isn't captured as a slug)
-router.get("/admin", authenticateToken, isAdmin, asyncHandler(blogController.getAllPosts));
+router.get("/admin", authenticateToken, isAdmin, requirePermission("manage_blog"), asyncHandler(blogController.getAllPosts));
 
 // Blog cover image upload
-router.post("/upload-image", authenticateToken, isAdmin, uploadBlogImage, (req, res) => {
+router.post("/upload-image", authenticateToken, isAdmin, requirePermission("manage_blog"), uploadBlogImage, (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No image uploaded" });
   }
@@ -39,6 +40,7 @@ router.post(
   "/",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_blog"),
   restrictBody(...BLOG_FIELDS),
   asyncHandler(blogController.createPost),
 );
@@ -47,11 +49,12 @@ router.put(
   "/:id",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_blog"),
   restrictBody(...BLOG_FIELDS),
   asyncHandler(blogController.updatePost),
 );
 
-router.delete("/:id", authenticateToken, isAdmin, asyncHandler(blogController.deletePost));
+router.delete("/:id", authenticateToken, isAdmin, requirePermission("manage_blog"), asyncHandler(blogController.deletePost));
 
 // Public single post by slug (kept last so the specific routes above win)
 router.get("/:slug", asyncHandler(blogController.getPostBySlug));

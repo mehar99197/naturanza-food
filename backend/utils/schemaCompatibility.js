@@ -2,6 +2,76 @@ const { backfillKnownProductContent } = require("./productContentDefaults");
 const { buildInternalEan13 } = require("./barcode");
 
 const ensureTableStatements = [
+  `CREATE TABLE IF NOT EXISTS reviews (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    product_id INT NOT NULL,
+    user_id INT NOT NULL,
+    rating INT NOT NULL,
+    comment TEXT,
+    is_approved BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS email_verification_codes (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    email VARCHAR(120) NOT NULL,
+    code_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    is_used BOOLEAN NOT NULL DEFAULT FALSE,
+    used_at DATETIME NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_evc_user (user_id, is_used, expires_at),
+    INDEX idx_evc_email (email, is_used),
+    INDEX idx_evc_expires (expires_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    is_used BOOLEAN DEFAULT FALSE,
+    used_at DATETIME,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_password_reset_token_hash (token_hash),
+    INDEX idx_password_reset_user (user_id, is_used, expires_at),
+    INDEX idx_password_reset_email (email, is_used),
+    INDEX idx_password_reset_expires (expires_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS blog_posts (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    slug VARCHAR(200) NOT NULL UNIQUE,
+    title VARCHAR(200) NOT NULL,
+    excerpt VARCHAR(500),
+    content LONGTEXT NOT NULL,
+    author VARCHAR(120) DEFAULT 'Naturanza Food Team',
+    category VARCHAR(80),
+    image_url VARCHAR(255),
+    read_time VARCHAR(40),
+    keywords VARCHAR(500),
+    featured BOOLEAN NOT NULL DEFAULT FALSE,
+    is_published BOOLEAN NOT NULL DEFAULT TRUE,
+    published_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_blog_published (is_published, published_at),
+    INDEX idx_blog_category (category)
+  )`,
+  `CREATE TABLE IF NOT EXISTS admin_audit_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    admin_id INT NOT NULL,
+    action VARCHAR(500) NOT NULL,
+    ip_address VARCHAR(50),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_admin_audit_logs_admin (admin_id, created_at),
+    INDEX idx_admin_audit_logs_created (created_at)
+  )`,
   `CREATE TABLE IF NOT EXISTS user_addresses (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
@@ -366,6 +436,7 @@ const defaultPaymentMethods = [
     description: "Credit and debit cards",
     sort_order: 2,
     supports_online: true,
+    is_active: false,
   },
   {
     code: "online",
@@ -373,6 +444,7 @@ const defaultPaymentMethods = [
     description: "Bank transfer and online gateways",
     sort_order: 3,
     supports_online: true,
+    is_active: false,
   },
   {
     code: "easypaisa",
@@ -467,6 +539,35 @@ const ensureIndex = async (db, tableName, indexName, createSql) => {
   await db.query(createSql);
 };
 
+const removeDuplicateReviews = async (db) => {
+  const [duplicates] = await db.query(
+    `SELECT user_id, product_id, MAX(id) AS keep_id
+       FROM reviews
+      GROUP BY user_id, product_id
+     HAVING COUNT(*) > 1`,
+  );
+
+  for (const duplicate of duplicates) {
+    await db.query(
+      "DELETE FROM reviews WHERE user_id = ? AND product_id = ? AND id <> ?",
+      [duplicate.user_id, duplicate.product_id, duplicate.keep_id],
+    );
+  }
+};
+
+const migrateLegacyWishlist = async (db) => {
+  try {
+    await db.query(
+      `INSERT IGNORE INTO user_wishlist (user_id, product_id, added_at)
+       SELECT user_id, product_id, created_at FROM wishlist`,
+    );
+  } catch (error) {
+    if (error?.errno !== 1146) {
+      throw error;
+    }
+  }
+};
+
 const ensurePaymentMethodsSeed = async (db) => {
   const [rows] = await db.query("SELECT code FROM payment_methods");
   const existingCodes = new Set(
@@ -483,22 +584,30 @@ const ensurePaymentMethodsSeed = async (db) => {
     }
 
     await db.query(
-      `INSERT INTO payment_methods
-       (code, label, description, sort_order, supports_online, is_active)
-       VALUES (?, ?, ?, ?, ?, TRUE)`,
+       `INSERT INTO payment_methods
+        (code, label, description, sort_order, supports_online, is_active)
+        VALUES (?, ?, ?, ?, ?, ?)`,
       [
         method.code,
         method.label,
         method.description,
         method.sort_order,
         Boolean(method.supports_online),
+        method.is_active !== false,
       ],
     );
   }
+
+  // No card/online gateway is integrated in this application. Keep those
+  // methods unavailable instead of presenting a payment option that can never
+  // be verified.
+  await db.query(
+    "UPDATE payment_methods SET is_active = FALSE WHERE code IN ('card', 'online')",
+  );
 };
 
 const ensurePaymentAccountsSeed = async (db) => {
-  const [rows] = await db.query("SELECT type FROM payment_accounts");
+  const [rows] = await db.query("SELECT type, account_number FROM payment_accounts");
   const existingTypes = new Set(
     rows.map((row) => String(row.type || "").trim().toLowerCase()),
   );
@@ -510,9 +619,19 @@ const ensurePaymentAccountsSeed = async (db) => {
 
     await db.query(
       `INSERT INTO payment_accounts (type, account_number, account_name, is_active)
-       VALUES (?, ?, ?, TRUE)`,
+        VALUES (?, ?, ?, FALSE)`,
       [account.type, account.account_number, account.account_name],
     );
+  }
+
+  for (const row of rows) {
+    const accountNumber = String(row.account_number || "").trim().toUpperCase();
+    if (accountNumber.includes("XX") || accountNumber.startsWith("PK00XXXX")) {
+      await db.query(
+        "UPDATE payment_accounts SET is_active = FALSE WHERE type = ?",
+        [row.type],
+      );
+    }
   }
 };
 
@@ -546,6 +665,14 @@ const ensureProductionSchema = async (db) => {
 
   await ensurePaymentMethodsSeed(db);
   await ensurePaymentAccountsSeed(db);
+  await migrateLegacyWishlist(db);
+  await removeDuplicateReviews(db);
+  await ensureIndex(
+    db,
+    "reviews",
+    "uq_reviews_user_product",
+    "CREATE UNIQUE INDEX uq_reviews_user_product ON reviews (user_id, product_id)",
+  );
 
   await ensureColumns(db, "users", {
     admin_role: "ENUM('super_admin', 'staff_admin', 'admin', 'moderator') DEFAULT NULL",
@@ -555,6 +682,9 @@ const ensureProductionSchema = async (db) => {
     is_active: "BOOLEAN DEFAULT TRUE",
     signup_provider: "ENUM('password', 'google') DEFAULT 'password'",
     password_set_by_user: "BOOLEAN DEFAULT TRUE",
+    // Existing accounts are grandfathered in; password registration explicitly
+    // writes FALSE and sends the verification email.
+    email_verified: "BOOLEAN NOT NULL DEFAULT TRUE",
     failed_login_attempts: "INT DEFAULT 0",
     locked_until: "DATETIME NULL",
   });
@@ -620,6 +750,10 @@ const ensureProductionSchema = async (db) => {
   );
 
   await db.query(
+    "UPDATE products SET discount_percentage = LEAST(GREATEST(discount_percentage, 0), 90)",
+  );
+
+  await db.query(
     `UPDATE products
      SET images = JSON_ARRAY()
      WHERE images IS NULL`,
@@ -631,12 +765,30 @@ const ensureProductionSchema = async (db) => {
 
   await ensureColumns(db, "advance_payment_verifications", {
     transaction_id: "VARCHAR(50) NULL",
+    verification_stage:
+      "ENUM('full_payment', 'advance_shipping', 'final_collection') NOT NULL DEFAULT 'full_payment'",
+    admin_note: "TEXT NULL",
   });
+  await db.query(
+    "ALTER TABLE advance_payment_verifications MODIFY COLUMN payment_method ENUM('jazzcash','easypaisa','bank','cod') NOT NULL",
+  );
   await ensureIndex(
     db,
     "advance_payment_verifications",
     "uq_apv_transaction_id",
     "CREATE UNIQUE INDEX uq_apv_transaction_id ON advance_payment_verifications (transaction_id)",
+  );
+  await ensureIndex(
+    db,
+    "advance_payment_verifications",
+    "idx_apv_stage_status",
+    "CREATE INDEX idx_apv_stage_status ON advance_payment_verifications (verification_stage, status)",
+  );
+  await ensureIndex(
+    db,
+    "advance_payment_verifications",
+    "uq_apv_order_stage",
+    "CREATE UNIQUE INDEX uq_apv_order_stage ON advance_payment_verifications (order_id, verification_stage)",
   );
 
   await ensureColumns(db, "orders", ordersColumnDefinitions);

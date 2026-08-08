@@ -48,6 +48,20 @@ const safeNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const normalizeNonNegativeNumber = (value, fieldName) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw createModelError(`${fieldName} must be a non-negative number`, 400, "PRODUCT_VALUE_INVALID");
+  }
+  return parsed;
+};
+
+const normalizeDiscountPercentage = (value) =>
+  Math.min(normalizeNonNegativeNumber(value, "discount_percentage"), 90);
+
+const clampStoredDiscountPercentage = (value) =>
+  Math.min(Math.max(safeNumber(value, 0), 0), 90);
+
 const buildLowStockEvent = ({
   previousStock,
   newStock,
@@ -233,7 +247,7 @@ const hydrateProducts = async (products) => {
             : [],
       final_price:
         safeNumber(product.price, 0) -
-        (safeNumber(product.price, 0) * safeNumber(product.discount_percentage, 0)) / 100,
+        (safeNumber(product.price, 0) * clampStoredDiscountPercentage(product.discount_percentage)) / 100,
     };
   });
 };
@@ -251,7 +265,7 @@ const listProducts = async (filters = {}) => {
   } = filters;
 
   let query = `
-    SELECT p.*, c.name AS category_name
+    SELECT p.*, c.name AS category_name, c.slug AS category_slug
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
   `;
@@ -294,7 +308,10 @@ const listProducts = async (filters = {}) => {
   }
 
   query += " ORDER BY p.created_at DESC LIMIT ? OFFSET ?";
-  params.push(safeNumber(limit, 50), safeNumber(offset, 0));
+  params.push(
+    Math.min(Math.max(Math.trunc(safeNumber(limit, 50)), 1), 500),
+    Math.max(Math.trunc(safeNumber(offset, 0)), 0),
+  );
 
   const [rows] = await dbPool.query(query, params);
   return hydrateProducts(rows);
@@ -319,7 +336,7 @@ const findById = async (productId) => {
     `SELECT p.*, c.name AS category_name
      FROM products p
      LEFT JOIN categories c ON p.category_id = c.id
-     WHERE p.id = ?
+      WHERE p.id = ? AND p.is_active = TRUE
      LIMIT 1`,
     [productId],
   );
@@ -388,15 +405,15 @@ const createProduct = async (payload = {}) => {
         toNullableText(payload.ingredients) || defaultContent.ingredients,
         toNullableText(payload.benefits) || defaultContent.benefits,
         toNullableText(payload.usage) || defaultContent.usage,
-        safeNumber(payload.price, 0),
+         normalizeNonNegativeNumber(payload.price, "price"),
         toNullableInt(payload.category_id),
         imageUrl,
         imagesJson,
-        safeNumber(payload.stock_quantity, 0),
+         normalizeNonNegativeNumber(payload.stock_quantity || 0, "stock_quantity"),
         Boolean(payload.is_organic),
         Boolean(payload.is_featured),
         payload.is_active === undefined ? true : Boolean(payload.is_active),
-        safeNumber(payload.discount_percentage, 0),
+         normalizeDiscountPercentage(payload.discount_percentage || 0),
       ],
     );
 
@@ -429,7 +446,7 @@ const createProduct = async (payload = {}) => {
 const updateProduct = async (productId, payload = {}) => {
   return withTransaction(async (connection) => {
     const [existingRows] = await connection.query(
-      "SELECT id, name, slug, stock_quantity FROM products WHERE id = ? LIMIT 1 FOR UPDATE",
+      "SELECT id, name, slug, stock_quantity, reserved_stock FROM products WHERE id = ? LIMIT 1 FOR UPDATE",
       [productId],
     );
 
@@ -479,19 +496,30 @@ const updateProduct = async (productId, payload = {}) => {
       params.push(nextSlug);
     }
 
+    if (hasOwn("stock_quantity")) {
+      const nextStock = normalizeNonNegativeNumber(payload.stock_quantity, "stock_quantity");
+      if (nextStock < safeNumber(existingProduct.reserved_stock, 0)) {
+        throw createModelError(
+          "stock_quantity cannot be lower than reserved_stock",
+          409,
+          "PRODUCT_STOCK_BELOW_RESERVED",
+        );
+      }
+    }
+
     const scalarFields = [
       ["description", "description = ?", (value) => toNullableText(value) || defaultContent.description],
       ["ingredients", "ingredients = ?", (value) => toNullableText(value) || defaultContent.ingredients],
       ["benefits", "benefits = ?", (value) => toNullableText(value) || defaultContent.benefits],
       ["usage", "`usage` = ?", (value) => toNullableText(value) || defaultContent.usage],
-      ["price", "price = ?", (value) => safeNumber(value, 0)],
+      ["price", "price = ?", (value) => normalizeNonNegativeNumber(value, "price")],
       ["category_id", "category_id = ?", toNullableInt],
       ["image_url", "image_url = ?", (value) => (value ? String(value).trim() : null)],
-      ["stock_quantity", "stock_quantity = ?", (value) => safeNumber(value, 0)],
+      ["stock_quantity", "stock_quantity = ?", (value) => normalizeNonNegativeNumber(value, "stock_quantity")],
       ["is_organic", "is_organic = ?", (value) => Boolean(value)],
       ["is_featured", "is_featured = ?", (value) => Boolean(value)],
       ["is_active", "is_active = ?", (value) => Boolean(value)],
-      ["discount_percentage", "discount_percentage = ?", (value) => safeNumber(value, 0)],
+      ["discount_percentage", "discount_percentage = ?", normalizeDiscountPercentage],
     ];
 
     for (const [key, clause, formatter] of scalarFields) {
@@ -582,14 +610,19 @@ const updateProduct = async (productId, payload = {}) => {
 };
 
 const deleteById = async (productId) => {
-  const [result] = await dbPool.query("DELETE FROM products WHERE id = ?", [productId]);
+  // Products are referenced by historical order and inventory rows. Deactivate
+  // instead of hard-deleting so reporting and audit history remain intact.
+  const [result] = await dbPool.query(
+    "UPDATE products SET is_active = FALSE WHERE id = ? AND is_active = TRUE",
+    [productId],
+  );
   return result.affectedRows > 0;
 };
 
 const updateStock = async (productId, stockQuantity, userId) => {
   return withTransaction(async (connection) => {
     const [rows] = await connection.query(
-      "SELECT name, stock_quantity FROM products WHERE id = ? FOR UPDATE",
+      "SELECT name, stock_quantity, reserved_stock FROM products WHERE id = ? FOR UPDATE",
       [productId],
     );
 
@@ -598,6 +631,14 @@ const updateStock = async (productId, stockQuantity, userId) => {
     }
 
     const previousStock = safeNumber(rows[0].stock_quantity, 0);
+
+    if (stockQuantity < safeNumber(rows[0].reserved_stock, 0)) {
+      throw createModelError(
+        "stock_quantity cannot be lower than reserved_stock",
+        409,
+        "PRODUCT_STOCK_BELOW_RESERVED",
+      );
+    }
 
     await connection.query("UPDATE products SET stock_quantity = ? WHERE id = ?", [
       stockQuantity,

@@ -33,7 +33,7 @@ export function Footer({ variant = 'full' }) {
      .filter(cat => cat.is_active === 1 || cat.is_active === true)
      .map(cat => ({
       label: cat.name,
-      path: `/shop?category=${cat.slug || cat.name.toLowerCase().replace(/\s+/g, '-')}`
+       path: `/shop/${cat.slug || cat.name.toLowerCase().replace(/\s+/g, '-')}`
      }));
     setCategories(activeCategories);
    } catch (error) {

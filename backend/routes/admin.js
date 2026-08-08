@@ -3,6 +3,7 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 const { db } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const requirePermission = require("../middleware/requirePermission");
 const requireSuperAdmin = require("../middleware/requireSuperAdmin");
 const { restrictBody } = require("../middleware/security");
 const { issueAccessToken, verifyAccessToken, toExpiryDate } = require("../utils/jwtTokens");
@@ -532,7 +533,7 @@ router.get("/verify", authenticateToken, isAdmin, (req, res) => {
       name: req.user.name,
       email: req.user.email,
       role: req.user.role,
-      admin_role: req.user.admin_role || 'super_admin',
+       admin_role: req.user.admin_role,
       admin_permissions: req.user.admin_permissions,
       profile_image: req.user.profile_image || null,
     },
@@ -585,7 +586,7 @@ const { sendEmail, sendPasswordResetEmail } = require("../utils/emailService");
 const {
   createPasswordResetToken,
   validatePasswordResetToken,
-  markTokenAsUsed,
+  claimPasswordResetToken,
   invalidateAllUserTokens,
 } = require("../utils/passwordResetTokens");
 
@@ -754,6 +755,13 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
       });
     }
 
+    if (!(await claimPasswordResetToken(connection, tokenValidation.tokenId))) {
+      connection.release();
+      return res.status(400).json({
+        error: "This reset link has already been used or expired.",
+      });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 12);
 
     await connection.query(
@@ -774,7 +782,6 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
       }
     }
 
-    await markTokenAsUsed(db.promise(), tokenValidation.tokenId);
     await invalidateAllUserTokens(db.promise(), tokenValidation.userId);
     await revokeSessionsByUserId(db.promise(), tokenValidation.userId);
     await revokeRefreshTokensByUserId(
@@ -806,6 +813,52 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
 // All other admin routes require authentication and admin role
 router.use(authenticateToken);
 router.use(isAdmin);
+
+// The frontend hides sections by permission, but the API must enforce the same
+// boundary because staff can call these endpoints directly.
+const ADMIN_PERMISSION_RULES = [
+  { prefix: "/products", permission: "manage_products" },
+  { prefix: "/categories", permission: "manage_categories" },
+  { prefix: "/coupons", permission: "manage_coupons" },
+  { prefix: "/reviews", permission: "manage_reviews" },
+  { prefix: "/users", permission: "manage_customers" },
+  { prefix: "/reports", permission: "view_reports" },
+  { prefix: "/inventory", permission: "manage_products" },
+  { prefix: "/payment-methods", permission: "manage_payments" },
+  { prefix: "/returns", permission: "manage_returns" },
+  { prefix: "/newsletter", permission: "manage_subscribers" },
+];
+
+const requireAdminRoutePermission = (req, res, next) => {
+  const path = String(req.path || "");
+
+  if (String(req.user?.admin_role || "").toLowerCase() === "super_admin") {
+    return next();
+  }
+
+  if (
+    path === "/settings" ||
+    path.startsWith("/settings/") ||
+    path === "/about" ||
+    path.startsWith("/about/") ||
+    path === "/tax-rates" ||
+    path.startsWith("/tax-rates/")
+  ) {
+    return res.status(403).json({ error: "Super admin access required" });
+  }
+
+  const rule = ADMIN_PERMISSION_RULES.find(({ prefix }) =>
+    path === prefix || path.startsWith(`${prefix}/`),
+  );
+
+  if (!rule) {
+    return next();
+  }
+
+  return requirePermission(rule.permission)(req, res, next);
+};
+
+router.use(requireAdminRoutePermission);
 
 // Dashboard statistics
 router.get("/dashboard/stats", async (req, res) => {
@@ -1853,6 +1906,11 @@ router.put("/returns/:id/status", restrictBody('status', 'note', 'refund_amount'
 
     const request = rows[0];
 
+    if (request.status === "refunded" && status === "refunded") {
+      await connection.rollback();
+      return res.status(409).json({ error: "This return has already been refunded" });
+    }
+
     await connection.query(
       `UPDATE returns_requests
              SET status = ?, reviewed_by_user_id = ?, reviewed_at = NOW(), details = CONCAT(IFNULL(details, ''), ?)
@@ -1874,6 +1932,25 @@ router.put("/returns/:id/status", restrictBody('status', 'note', 'refund_amount'
         await connection.rollback();
         return res.status(400).json({
           error: "Valid refund amount is required for refunded status",
+        });
+      }
+
+      const [[orderTotals]] = await connection.query(
+        `SELECT total_amount,
+                COALESCE((SELECT SUM(amount)
+                            FROM refund_transactions
+                           WHERE return_request_id = ? AND status = 'processed'), 0) AS refunded_amount
+           FROM orders
+          WHERE id = ?
+          LIMIT 1`,
+        [request.id, request.order_id],
+      );
+      const orderTotal = Number(orderTotals?.total_amount) || 0;
+      const alreadyRefunded = Number(orderTotals?.refunded_amount) || 0;
+      if (refundAmount > Math.max(0, orderTotal - alreadyRefunded)) {
+        await connection.rollback();
+        return res.status(400).json({
+          error: "Refund amount exceeds the remaining refundable order balance",
         });
       }
 

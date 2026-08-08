@@ -26,14 +26,41 @@ import { useSettings } from "@/context/SettingsContext";
 import { formatPrice, computeStoreSaleDiscount } from "@/lib/utils";
 import api, { paymentAPI, settingsAPI, cartAPI } from "@/services/api";
 import { NoIndexSEO } from "@/components/SEO";
+import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 
 const http = api.axiosInstance;
 
 const STORAGE_KEY = "naturanza_checkout_shipping";
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMPTY_SHIPPING_DATA = {
+  firstName: "",
+  lastName: "",
+  email: "",
+  phone: "",
+  address: "",
+  city: "",
+  postalCode: "",
+};
+
+const getShippingStorageKey = (userId) =>
+  userId ? `${STORAGE_KEY}:${userId}` : null;
+
+const readStoredShippingData = (userId) => {
+  const storageKey = getShippingStorageKey(userId);
+  if (typeof window === "undefined" || !storageKey) {
+    return null;
+  }
+
+  try {
+    const saved = localStorage.getItem(storageKey);
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+};
 
 export function Checkout() {
-  const { items, totalPrice, clearCart, updateQuantity, removeItem, loading: cartLoading, error: cartError, fetchCart } = useCart();
+  const { items, totalPrice, clearCart, updateQuantity, removeFromCart, loading: cartLoading, error: cartError, fetchCart } = useCart();
   const { addOrder } = useOrders();
   const { user, loading: authLoading, isAuthenticated } = useAuth();
   const { settings } = useSettings();
@@ -152,21 +179,7 @@ export function Checkout() {
 
   // Shipping form state
   const [shippingData, setShippingData] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) return JSON.parse(saved);
-      } catch {}
-    }
-    return {
-      firstName: "",
-      lastName: "",
-      email: "",
-      phone: "",
-      address: "",
-      city: "",
-      postalCode: "",
-    };
+    return readStoredShippingData(user?.id) || EMPTY_SHIPPING_DATA;
   });
 
   // Field validation state (touched = user left field)
@@ -175,12 +188,14 @@ export function Checkout() {
 
   // Save shipping data to localStorage
   useEffect(() => {
-    if (typeof window !== "undefined" && step === "shipping") {
+    const storageKey = getShippingStorageKey(user?.id);
+    if (typeof window !== "undefined" && storageKey && step === "shipping") {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(shippingData));
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.setItem(storageKey, JSON.stringify(shippingData));
       } catch {}
     }
-  }, [shippingData, step]);
+  }, [shippingData, step, user?.id]);
 
   // Validation helpers
   const validatePhone = (val) => {
@@ -256,6 +271,10 @@ export function Checkout() {
 
   const [savedAddresses, setSavedAddresses] = useState([]);
   const [selectedAddressId, setSelectedAddressId] = useState(null);
+
+  useEffect(() => {
+    setShippingData(readStoredShippingData(user?.id) || EMPTY_SHIPPING_DATA);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user) return;
@@ -752,7 +771,10 @@ export function Checkout() {
   const canPlaceOrder = isCartReady && items.length > 0 && !isProcessing;
   const getCheckoutItemKey = (item) => item.product_id ?? item.id ?? item.name;
   const getCheckoutItemImage = (item) =>
-    item.image_url || item.image || "/images/products/honey.webp";
+    getAbsoluteImageUrl(
+      item.image_url || item.image || "/images/products/honey.webp",
+      { defaultFolder: "products" },
+    );
   const getCheckoutUnitPrice = (item) => item.final_price ?? item.price;
   const customerFullName =
     `${shippingData.firstName} ${shippingData.lastName}`.trim() ||
@@ -849,6 +871,7 @@ export function Checkout() {
         shipping_address: `${shippingData.address}, ${shippingData.city}`,
         phone: shippingData.phone,
         city: shippingData.city,
+        address_id: resolvedAddressId || null,
         payment_method: paymentMethod,
         // No payment_status / shipping_cost / discount_amount here on purpose:
         // the server derives the payment status from the method and recomputes
@@ -866,16 +889,24 @@ export function Checkout() {
       }
 
       const orderNum = `ORD-${newOrder.id.toString().padStart(6, "0")}`;
+      const authoritativeTotal = Number(newOrder.total_amount ?? finalTotal) || 0;
+      const authoritativeShipping = Number(newOrder.shipping_cost ?? deliveryFee) || 0;
       setOrderId(newOrder.id);
       setOrderNumber(orderNum);
-      setConfirmedTotal(finalTotal);
-      setConfirmedAdvanceFee(deliveryFee);
-      setConfirmedPayOnDeliveryAmount(payOnDeliveryAmount);
+      setConfirmedTotal(authoritativeTotal);
+      setConfirmedAdvanceFee(authoritativeShipping);
+      setConfirmedPayOnDeliveryAmount(
+        Math.max(0, authoritativeTotal - authoritativeShipping),
+      );
 
       // Clear cart after order is confirmed
       setStep("confirmation");
       clearCart();
-      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      try {
+        const storageKey = getShippingStorageKey(user?.id);
+        if (storageKey) localStorage.removeItem(storageKey);
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {}
     } catch (error) {
       // DO NOT re-fetch cart on order failure - this would clear the local cart if backend cart was already empty
       // The backend returns "Cart is empty" if items were removed between page load and order attempt
@@ -1034,7 +1065,8 @@ export function Checkout() {
         // Create the order if we haven't yet. On retry after a failed
         // verification upload we re-use the same orderId so we don't create
         // duplicate orders.
-        let activeOrderId = orderId;
+         let activeOrderId = orderId;
+         let resolvedAddressId = selectedAddressId;
 
         if (!activeOrderId) {
           if (user?.id) {
@@ -1048,7 +1080,8 @@ export function Checkout() {
                 postal_code: shippingData.postalCode,
               };
               const addressResponse = await api.userAPI.upsertDefaultAddress(defaultAddressPayload);
-              if (addressResponse?.address?.id) {
+               if (addressResponse?.address?.id) {
+                 resolvedAddressId = addressResponse.address.id;
                 setSelectedAddressId(addressResponse.address.id);
               }
             } catch (addressSaveErr) {
@@ -1062,8 +1095,9 @@ export function Checkout() {
             customer_email: shippingData.email,
             shipping_address: `${shippingData.address}, ${shippingData.city}`,
             phone: shippingData.phone,
-            city: shippingData.city,
-            payment_method: paymentMethod,
+             city: shippingData.city,
+             address_id: resolvedAddressId || null,
+             payment_method: paymentMethod,
             // Money fields are the server's to decide — see the note on the
             // other create call above. The COD advance step reads shipping_cost
             // back off the stored order, which the server sets from the city
@@ -1077,13 +1111,17 @@ export function Checkout() {
             throw new Error("Order creation failed - no order ID returned");
           }
 
-          activeOrderId = newOrder.id;
-          const orderNum = `ORD-${newOrder.id.toString().padStart(6, "0")}`;
-          setOrderId(newOrder.id);
-          setOrderNumber(orderNum);
-          setConfirmedTotal(isCod ? finalTotal : verificationTotal);
-          setConfirmedAdvanceFee(isCod ? verificationTotal : 0);
-          setConfirmedPayOnDeliveryAmount(isCod ? Math.max(0, subtotal - discount) : 0);
+           activeOrderId = newOrder.id;
+           const orderNum = `ORD-${newOrder.id.toString().padStart(6, "0")}`;
+           const authoritativeTotal = Number(newOrder.total_amount ?? finalTotal) || 0;
+           const authoritativeShipping = Number(newOrder.shipping_cost ?? deliveryFee) || 0;
+           setOrderId(newOrder.id);
+           setOrderNumber(orderNum);
+           setConfirmedTotal(authoritativeTotal);
+           setConfirmedAdvanceFee(isCod ? authoritativeShipping : 0);
+           setConfirmedPayOnDeliveryAmount(
+             isCod ? Math.max(0, authoritativeTotal - authoritativeShipping) : 0,
+           );
         }
 
         // Now submit the payment verification
@@ -1103,7 +1141,11 @@ export function Checkout() {
         // Clear cart and go to confirmation
         setStep("confirmation");
         clearCart();
-        try { localStorage.removeItem(STORAGE_KEY); } catch {}
+        try {
+          const storageKey = getShippingStorageKey(user?.id);
+          if (storageKey) localStorage.removeItem(storageKey);
+          localStorage.removeItem(STORAGE_KEY);
+        } catch {}
       } catch (submitError) {
         const statusCode = Number(submitError?.response?.status || 0);
         // Backend payload shape varies: order routes return { error }, payment
@@ -2342,7 +2384,7 @@ export function Checkout() {
                       </div>
                     </div>
                     <button
-                      onClick={() => removeItem(item.product_id ?? item.id)}
+                      onClick={() => removeFromCart(item.product_id ?? item.id)}
                       className="flex-shrink-0 p-1.5 text-slate-400 hover:text-red-500 transition-colors self-center"
                       aria-label="Remove item"
                     >

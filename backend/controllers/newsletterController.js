@@ -11,10 +11,12 @@ const {
 const BACKEND_URL =
   process.env.BACKEND_URL ||
   process.env.API_URL ||
+  process.env.PUBLIC_SITE_URL ||
   `http://localhost:${process.env.PORT || 5000}`;
+const NORMALIZED_BACKEND_URL = String(BACKEND_URL).replace(/\/+$/, "");
 
 const buildUnsubscribeUrl = (token) =>
-  `${BACKEND_URL}/api/newsletter/unsubscribe/${encodeURIComponent(token)}`;
+  `${NORMALIZED_BACKEND_URL}/api/newsletter/unsubscribe/${encodeURIComponent(token)}`;
 
 const notifyAdminsOfSubscriber = async (subscriber) => {
   try {

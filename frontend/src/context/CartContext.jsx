@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { cartAPI } from '@/services/api';
 import { useAuth } from './AuthContext';
 
@@ -15,20 +15,29 @@ export function CartProvider({ children }) {
  const [isCartOpen, setIsCartOpen] = useState(false);
  const [loading, setLoading] = useState(false);
  const [error, setError] = useState(null);
+ const requestGenerationRef = useRef(0);
 
  const fetchCart = useCallback(async () => {
- if (!isAuthenticated) return;
- try {
- setLoading(true);
- setError(null);
- const data = await cartAPI.get();
- setItems(Array.isArray(data.items) ? data.items : []);
- } catch (err) {
- setError(err.message);
- setItems([]);
- } finally {
- setLoading(false);
- }
+  const requestGeneration = ++requestGenerationRef.current;
+  if (!isAuthenticated) {
+  setItems([]);
+  return;
+  }
+  try {
+  setLoading(true);
+  setError(null);
+  const data = await cartAPI.get();
+  if (requestGeneration !== requestGenerationRef.current) return;
+  setItems(Array.isArray(data.items) ? data.items : []);
+  } catch (err) {
+  if (requestGeneration !== requestGenerationRef.current) return;
+  setError(err.message);
+  setItems([]);
+  } finally {
+  if (requestGeneration === requestGenerationRef.current) {
+  setLoading(false);
+  }
+  }
  }, [isAuthenticated]);
 
  // Fetch cart from API when authenticated
@@ -38,11 +47,13 @@ export function CartProvider({ children }) {
  return;
  }
  
- if (isAuthenticated) {
- fetchCart();
- } else {
- setItems([]);
- }
+  if (isAuthenticated) {
+  fetchCart();
+  } else {
+  requestGenerationRef.current += 1;
+  setItems([]);
+  setLoading(false);
+  }
  }, [isAuthenticated, authLoading, fetchCart]);
 
  const addToCart = useCallback(async (product, quantity = 1) => {
@@ -59,7 +70,8 @@ export function CartProvider({ children }) {
  return { success: false, error: message };
  }
 
- const safeQuantity = Math.max(1, Number(quantity) || 1);
+  const safeQuantity = Math.max(1, Number(quantity) || 1);
+  const requestGeneration = requestGenerationRef.current;
 
  const price = Number(product?.price ?? 0);
  const discount = Number(product?.discount_percentage ?? 0);
@@ -106,8 +118,11 @@ export function CartProvider({ children }) {
  await cartAPI.add(productId, safeQuantity);
  fetchCart();
  return { success: true };
- } catch (err) {
- setItems(previousItems);
+  } catch (err) {
+  if (requestGeneration !== requestGenerationRef.current) {
+  return { success: false, error: 'Session changed while updating the cart' };
+  }
+  setItems(previousItems);
  const message = err.response?.data?.error || 'Failed to add to cart';
  setError(message);
  return { success: false, error: message };

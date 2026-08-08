@@ -7,12 +7,12 @@ const { db } = require('../config/db');
 // Get user's cart
 router.get('/', authenticateToken, (req, res) => {
     const query = `
-        SELECT c.*, p.name, p.price, p.image_url, p.stock_quantity, p.discount_percentage,
+        SELECT c.*, p.name, p.price, p.image_url, p.stock_quantity, p.reserved_stock, p.discount_percentage,
         (p.price - (p.price * p.discount_percentage / 100)) as final_price,
         (c.quantity * (p.price - (p.price * p.discount_percentage / 100))) as subtotal
         FROM cart c
         JOIN products p ON c.product_id = p.id
-        WHERE c.user_id = ?
+        WHERE c.user_id = ? AND p.is_active = TRUE
     `;
     
     db.query(query, [req.user.id], (err, results) => {
@@ -39,7 +39,7 @@ router.post('/add', authenticateToken, restrictBody('product_id', 'quantity'), (
     }
 
     // Check if product exists and has enough stock
-    db.query('SELECT stock_quantity FROM products WHERE id = ?', [product_id], (err, results) => {
+    db.query('SELECT is_active, stock_quantity, reserved_stock FROM products WHERE id = ?', [product_id], (err, results) => {
         if (err) {
             return res.status(500).json({ error: 'Database error' });
         }
@@ -48,7 +48,12 @@ router.post('/add', authenticateToken, restrictBody('product_id', 'quantity'), (
             return res.status(404).json({ error: 'Product not found' });
         }
         
-        if (results[0].stock_quantity < parsedQuantity) {
+        if (!results[0].is_active) {
+            return res.status(404).json({ error: 'Product is no longer available' });
+        }
+
+        const availableStock = Number(results[0].stock_quantity || 0) - Number(results[0].reserved_stock || 0);
+        if (availableStock < parsedQuantity) {
             return res.status(400).json({ error: 'Insufficient stock' });
         }
 
@@ -60,9 +65,12 @@ router.post('/add', authenticateToken, restrictBody('product_id', 'quantity'), (
                     return res.status(500).json({ error: 'Database error' });
                 }
 
-                if (cartResults.length > 0) {
+                    if (cartResults.length > 0) {
+                    const newQuantity = Number(cartResults[0].quantity || 0) + parsedQuantity;
+                    if (newQuantity > availableStock) {
+                        return res.status(400).json({ error: 'Insufficient stock' });
+                    }
                     // Update quantity
-                    const newQuantity = cartResults[0].quantity + parsedQuantity;
                     db.query('UPDATE cart SET quantity = ? WHERE user_id = ? AND product_id = ?',
                         [newQuantity, req.user.id, product_id],
                         (err, result) => {
@@ -99,7 +107,7 @@ router.put('/update/:product_id', authenticateToken, restrictBody('quantity'), (
     }
     
     // Check stock availability
-    db.query('SELECT stock_quantity FROM products WHERE id = ?', [req.params.product_id], (err, results) => {
+    db.query('SELECT is_active, stock_quantity, reserved_stock FROM products WHERE id = ?', [req.params.product_id], (err, results) => {
         if (err) {
             return res.status(500).json({ error: 'Database error' });
         }
@@ -108,7 +116,12 @@ router.put('/update/:product_id', authenticateToken, restrictBody('quantity'), (
             return res.status(404).json({ error: 'Product not found' });
         }
         
-        if (results[0].stock_quantity < parsedQuantity) {
+        if (!results[0].is_active) {
+            return res.status(404).json({ error: 'Product is no longer available' });
+        }
+
+        const availableStock = Number(results[0].stock_quantity || 0) - Number(results[0].reserved_stock || 0);
+        if (availableStock < parsedQuantity) {
             return res.status(400).json({ error: 'Insufficient stock' });
         }
 

@@ -7,17 +7,22 @@ import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/context/SettingsContext';
 import { orderAPI } from '@/services/api';
 import { formatPrice } from '@/lib/utils';
+import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 import { NoIndexSEO } from '@/components/SEO';
 
 export function Orders() {
  const { settings } = useSettings();
- const { orders: allOrders } = useOrders();
+ const {
+  orders: allOrders,
+  loading: ordersLoading,
+  error: ordersError,
+  fetchOrders,
+ } = useOrders();
  const { user } = useAuth();
  const [orders, setOrders] = useState([]);
  const [selectedOrder, setSelectedOrder] = useState(null);
  const [filterStatus, setFilterStatus] = useState('all');
  const [searchQuery, setSearchQuery] = useState('');
- const [loading, setLoading] = useState(false);
  const [downloadingInvoice, setDownloadingInvoice] = useState(false);
  const [invoiceError, setInvoiceError] = useState('');
  const [invoiceSuccess, setInvoiceSuccess] = useState('');
@@ -260,7 +265,7 @@ if (selectedOrder) {
  {/* Order Tracker */}
  <OrderTracker 
  currentStatus={selectedOrder.status}
- trackingNumber={`TRK-${selectedOrder.id.toString().padStart(8, '0')}`}
+  trackingNumber={selectedOrder.tracking_number || `TRK-${selectedOrder.id.toString().padStart(10, '0')}`}
  estimatedDelivery={selectedOrder.estimated_delivery || 'Calculating...'}
  />
 
@@ -268,10 +273,10 @@ if (selectedOrder) {
  <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-6 md:p-8 mt-4 sm:mt-6">
  <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-3 sm:mb-4">Order Items</h3>
  <div className="space-y-3 sm:space-y-4">
- {selectedOrder.items.map((item, index) => (
+  {(selectedOrder.items || []).map((item, index) => (
  <div key={index} className="flex gap-3 sm:gap-4 p-3 sm:p-4 bg-gray-50 rounded-lg sm:rounded-xl">
  <img
- src={item.image_url || item.image}
+  src={getAbsoluteImageUrl(item.image_url || item.image || '/images/products/honey.webp', { defaultFolder: 'products' })}
  alt={item.product_name || item.name}
  className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-lg flex-shrink-0"
  onError={(e) => {
@@ -378,7 +383,7 @@ if (selectedOrder) {
 
  {/* Refresh Button */}
  <button
- onClick={() => {/* Orders auto-update via context */}}
+  onClick={() => void fetchOrders()}
  className="flex items-center justify-center gap-2 px-4 py-2.5 sm:py-3 text-sm sm:text-base bg-green-600 text-white rounded-lg hover:bg-green-700 active:scale-95"
  title="Orders update automatically"
  >
@@ -389,14 +394,21 @@ if (selectedOrder) {
  </div>
 
  {/* Orders List */}
- {loading ? (
+  {ordersLoading ? (
  <div className="flex items-center justify-center py-16 sm:py-20">
  <div className="text-center">
  <div className="w-12 h-12 sm:w-16 sm:h-16 border-4 border-green-600 border-t-transparent rounded-full mx-auto mb-3 sm:mb-4" />
  <p className="text-sm sm:text-base text-gray-600">Loading orders...</p>
  </div>
  </div>
- ) : filteredOrders.length === 0 ? (
+  ) : ordersError ? (
+  <div className="rounded-xl bg-red-50 p-8 text-center text-red-700">
+  <p>{ordersError}</p>
+  <button type="button" onClick={() => void fetchOrders()} className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-white">
+  Try again
+  </button>
+  </div>
+  ) : filteredOrders.length === 0 ? (
  <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg p-8 sm:p-12 text-center">
  <Package className="w-12 h-12 sm:w-16 sm:h-16 text-gray-400 mx-auto mb-3 sm:mb-4" />
  <h3 className="text-lg sm:text-xl font-semibold text-gray-900 mb-2">No orders found</h3>

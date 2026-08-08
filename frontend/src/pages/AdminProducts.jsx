@@ -345,7 +345,7 @@ export function AdminProducts() {
         image_url: primaryImage || null,
         gallery_images: galleryImages,
         stock_quantity: Math.max(0, Number(formData.stock_quantity) || 0),
-        discount_percentage: Math.max(0, Number(formData.discount_percentage) || 0),
+        discount_percentage: Math.min(90, Math.max(0, Number(formData.discount_percentage) || 0)),
         is_featured: Boolean(formData.is_featured),
         is_active: Boolean(formData.is_active),
       };
@@ -1111,6 +1111,8 @@ export function AdminProducts() {
                         </span>
                         <input
                           type="number"
+                          min="0"
+                          max="90"
                           value={formData.price}
                           onChange={(event) =>
                             setFormData((prev) => ({ ...prev, price: event.target.value }))

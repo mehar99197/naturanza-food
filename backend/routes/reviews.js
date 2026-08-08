@@ -23,11 +23,11 @@ router.post('/', authenticateToken, restrictBody('product_id', 'rating', 'commen
 
     // Check if product exists
     const [product] = await db.promise().query(
-      'SELECT id FROM products WHERE id = ?',
+      'SELECT id, is_active FROM products WHERE id = ?',
       [parsedProductId]
     );
 
-    if (product.length === 0) {
+    if (product.length === 0 || !product[0].is_active) {
       return res.status(404).json({ error: 'Product not found' });
     }
 
@@ -122,7 +122,7 @@ router.get('/my-reviews', authenticateToken, async (req, res) => {
         r.is_approved,
         r.created_at,
         p.name AS product_name,
-        p.image AS product_image
+         p.image_url AS product_image
        FROM reviews r
        JOIN products p ON p.id = r.product_id
        WHERE r.user_id = ?

@@ -38,16 +38,20 @@ const addPasswordToHistory = async (dbConnection, userId, newPassword) => {
       [userId, expiryDate]
     );
 
-    await dbConnection.query(`
-      DELETE ph FROM password_history ph
-      INNER JOIN (
-        SELECT id FROM password_history
+    const [latestRows] = await dbConnection.query(
+      `SELECT id FROM password_history
         WHERE user_id = ?
         ORDER BY created_at DESC
-        LIMIT ${PASSWORD_HISTORY_LIMIT}
-      ) latest ON ph.id <= latest.id
-      WHERE ph.user_id = ?
-    `, [userId, userId]);
+        LIMIT ?`,
+      [userId, PASSWORD_HISTORY_LIMIT],
+    );
+    const keepIds = latestRows.map((row) => row.id);
+    if (keepIds.length > 0) {
+      await dbConnection.query(
+        "DELETE FROM password_history WHERE user_id = ? AND id NOT IN (?)",
+        [userId, keepIds],
+      );
+    }
 
     return true;
   } catch (error) {

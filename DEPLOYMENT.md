@@ -47,7 +47,7 @@ Open **phpMyAdmin** for the new database and import `backend/schema/database.sql
 In **hPanel → Websites → Add Website → Node.js App** (Business plan supports this):
 
 1. **Connect GitHub** and select your repository, branch `main`.
-2. **Node version:** 22 (18 or 20 also work).
+2. **Node version:** 22 (or Node 20.19.0+).
 3. If Hostinger asks for these (framework type "Other"):
    - **Entry / startup file:** `backend/index.js`
    - **Build command:** `npm run build`
@@ -76,9 +76,11 @@ DB_PORT=3306
 DB_USER=<your db user>
 DB_PASSWORD=<your db password>
 DB_NAME=<your db name>
-JWT_SECRET=<from backend/.env.example or your own>
+JWT_SECRET=<unique 64-byte secret generated for this deployment>
 CORS_ALLOWED_ORIGINS=https://naturanzafood.com,https://www.naturanzafood.com
 PUBLIC_SITE_URL=https://naturanzafood.com
+BACKEND_URL=https://naturanzafood.com
+UPLOADS_DIR=<absolute persistent path outside the deployed application>
 ENABLE_RATE_LIMITS=true
 ENABLE_CSRF_PROTECTION=true
 ENFORCE_HTTPS=true
@@ -124,7 +126,7 @@ In **Google Cloud Console → Credentials → OAuth 2.0 Client**:
 1. Trigger the deployment in hPanel (or push to `main` if auto-deploy is on).
 2. After it goes live, verify:
    - `https://naturanzafood.com/api/health` → `{"status":"ok", ...}`
-   - The storefront loads; a deep link like `https://naturanzafood.com/products` works (SPA fallback).
+   - The storefront loads; a deep link like `https://naturanzafood.com/shop` works (SPA fallback).
    - Log in to the admin panel at `https://naturanzafood.com/admin/login` with the seeded admin.
 3. **Lock down the seed:** once admin login works, set `SEED_DEFAULT_ADMIN=false` in Environment
    Variables and redeploy, so the default admin isn't re-seeded on every boot.
@@ -137,4 +139,7 @@ In **Google Cloud Console → Credentials → OAuth 2.0 Client**:
   directory may not survive redeploys. If you rely on admin-uploaded images long-term, move them to
   persistent storage (e.g. an object store) as a follow-up.
 - **Updates:** push to `main` → redeploy from hPanel (or auto-deploy). Each deploy reinstalls deps
-  and rebuilds the frontend.
+   and rebuilds the frontend.
+- **Security before production:** rotate the production `JWT_SECRET` if an old example value was
+  ever used, revoke any cloud credentials visible in uploaded screenshots, and keep `UPLOADS_DIR`
+  outside the Git checkout. Payment verification files must never be committed.

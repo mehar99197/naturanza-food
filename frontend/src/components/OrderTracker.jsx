@@ -45,7 +45,12 @@ const orderStatuses = [
 ];
 
 export const OrderTracker = ({ currentStatus, trackingNumber, estimatedDelivery }) => {
- const currentIndex = orderStatuses.findIndex(status => status.key === currentStatus);
+ const normalizedStatus = {
+  confirmed: 'processing',
+  in_transit: 'shipped',
+  out_for_delivery: 'outForDelivery',
+ }[String(currentStatus || '').toLowerCase()] || currentStatus;
+ const currentIndex = orderStatuses.findIndex(status => status.key === normalizedStatus);
  const safeIndex = currentIndex < 0 ? 0 : currentIndex;
  const progressWidth = (safeIndex / (orderStatuses.length - 1)) * 100;
 
@@ -174,11 +179,11 @@ export const OrderTracker = ({ currentStatus, trackingNumber, estimatedDelivery 
  {/* Status Description */}
  <div className="mt-3.5 sm:mt-8 p-3 sm:p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-200">
  <p className="text-sm text-gray-700">
- {currentStatus === 'pending' && '🕐 Your order has been received and is awaiting processing.'}
- {currentStatus === 'processing' && '📦 Your order is being prepared for shipment.'}
- {currentStatus === 'shipped' && '🚚 Your order has been shipped and is on its way.'}
- {currentStatus === 'outForDelivery' && '🚛 Your order is out for delivery and will arrive soon!'}
- {currentStatus === 'delivered' && '✅ Your order has been successfully delivered. Enjoy!'}
+  {normalizedStatus === 'pending' && '🕐 Your order has been received and is awaiting processing.'}
+  {normalizedStatus === 'processing' && '📦 Your order is being prepared for shipment.'}
+  {normalizedStatus === 'shipped' && '🚚 Your order has been shipped and is on its way.'}
+  {normalizedStatus === 'outForDelivery' && '🚛 Your order is out for delivery and will arrive soon!'}
+  {normalizedStatus === 'delivered' && '✅ Your order has been successfully delivered. Enjoy!'}
  </p>
  </div>
  </div>

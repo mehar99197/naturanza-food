@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from"react";
-import { useSearchParams } from"react-router-dom";
+import { useParams, useSearchParams } from"react-router-dom";
 import { 
  Grid3X3, 
  LayoutList, 
@@ -29,7 +29,13 @@ import { useScrollReveal } from "@/hooks/useScrollReveal";
 
 export function Shop() {
  const { settings, exchangeRates } = useSettings();
- const { getActiveProducts } = useProducts();
+ const {
+  getActiveProducts,
+  loading: productsLoading,
+  error: productsError,
+  fetchProducts,
+ } = useProducts();
+ const { category: pathCategory } = useParams();
  const [searchParams, setSearchParams] = useSearchParams();
  const [viewMode, setViewMode] = useState("grid");
  const [sortBy, setSortBy] = useState("featured");
@@ -54,14 +60,23 @@ export function Shop() {
  const currencyRef = useRef(currencyCode);
  const [searchQuery, setSearchQuery] = useState("");
 
- const selectedCategory = searchParams.get("category") ||"all";
+ const selectedCategory = pathCategory || searchParams.get("category") ||"all";
 
  const [categories, setCategories] = useState([
  { id:"all", name:"All Products", icon: ShoppingBag },
  ]);
 
- useEffect(() => {
- let isMounted = true;
+  useEffect(() => {
+  if (!mobileDrawerOpen) return undefined;
+  const previousOverflow = document.body.style.overflow;
+  document.body.style.overflow = "hidden";
+  return () => {
+  document.body.style.overflow = previousOverflow;
+  };
+  }, [mobileDrawerOpen]);
+
+  useEffect(() => {
+  let isMounted = true;
  let loadingTimerId;
 
  const fetchCategories = async ({ showLoader = false } = {}) => {
@@ -73,9 +88,10 @@ export function Shop() {
  const data = await categoryAPI.getAll({ category_type: "shop" });
  const list = Array.isArray(data) ? data : data.data || [];
  const icons = [Droplet, Flower2, Coffee, Pill, ShoppingBag];
- const dynamic = list.map((cat, idx) => ({
- id: cat.id,
- name: cat.name,
+  const dynamic = list.map((cat, idx) => ({
+  id: cat.id,
+  slug: cat.slug,
+  name: cat.name,
  icon: icons[idx % icons.length],
  }));
 
@@ -128,7 +144,11 @@ export function Shop() {
  }, [currencyCode, maxPrice, priceRange]);
  const selectedCategoryName = useMemo(() => {
  return (
- categories.find((cat) => String(cat.id) === String(selectedCategory))?.name ||
+  categories.find(
+    (cat) =>
+      String(cat.id) === String(selectedCategory) ||
+      String(cat.slug || '').toLowerCase() === String(selectedCategory).toLowerCase(),
+  )?.name ||
 "All Products"
  );
  }, [selectedCategory, categories]);
@@ -190,7 +210,9 @@ export function Shop() {
  // Filter by category
  if (selectedCategory !=="all") {
  const selectedCategoryEntry = categories.find(
- (c) => String(c.id) === String(selectedCategory),
+  (c) =>
+    String(c.id) === String(selectedCategory) ||
+    String(c.slug || '').toLowerCase() === String(selectedCategory).toLowerCase(),
  );
  const selectedCategoryDisplayName = String(selectedCategoryEntry?.name || "");
  const normalizedSelectedCategory = String(selectedCategory).toLowerCase();
@@ -204,11 +226,14 @@ export function Shop() {
  const startupCategoryKeywords = startupCategoryKeywordMap[normalizedSelectedCategory] || [];
 
  result = result.filter((p) => {
- const directCategoryMatch =
- String(p.category_id) === String(selectedCategory) ||
- String(p.category) === String(selectedCategory) ||
- String(p.category_name) === String(selectedCategory) ||
- String(p.category_name) === selectedCategoryDisplayName;
+  const directCategoryMatch =
+  String(p.category_id) === String(selectedCategory) ||
+  String(p.category) === String(selectedCategory) ||
+  String(p.category_name) === String(selectedCategory) ||
+  String(p.category_slug || '').toLowerCase() === normalizedSelectedCategory ||
+  String(selectedCategoryEntry?.slug || '').toLowerCase() === normalizedSelectedCategory &&
+  String(p.category_id) === String(selectedCategoryEntry?.id) ||
+  String(p.category_name) === selectedCategoryDisplayName;
 
  if (directCategoryMatch) {
  return true;
@@ -577,7 +602,7 @@ export function Shop() {
  className={`reveal reveal-right ${gridVisible ? 'active' : ''}`}
  ref={gridRef}
  >
- {isLoading ? (
+  {isLoading || productsLoading ? (
  <div
  className={`shop-grid-compact grid gap-3 sm:gap-5 md:gap-5 lg:gap-6 ${
  viewMode ==="grid"
@@ -587,7 +612,14 @@ export function Shop() {
  >
  <ProductCardSkeleton count={8} viewMode={viewMode} />
  </div>
- ) : filteredProducts.length > 0 ? (
+  ) : productsError ? (
+  <div className="rounded-xl bg-red-50 p-8 text-center text-red-700">
+  <p>{productsError}</p>
+  <button type="button" onClick={() => void fetchProducts()} className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-white">
+  Try again
+  </button>
+  </div>
+  ) : filteredProducts.length > 0 ? (
  <div
  className={`shop-grid-compact grid gap-3 sm:gap-5 md:gap-5 lg:gap-6 ${
  viewMode ==="grid"

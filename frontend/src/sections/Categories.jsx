@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Tag } from 'lucide-react';
 import { categoryAPI } from '@/services/api';
+import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
 
 const normalizeImageUrl = (value) => {
@@ -11,21 +12,7 @@ const normalizeImageUrl = (value) => {
     return null;
   }
 
-  if (
-    trimmed.startsWith('/') ||
-    trimmed.startsWith('http://') ||
-    trimmed.startsWith('https://') ||
-    trimmed.startsWith('data:') ||
-    trimmed.startsWith('blob:')
-  ) {
-    return trimmed;
-  }
-
-  if (trimmed.startsWith('images/')) {
-    return `/${trimmed}`;
-  }
-
-  return `/${trimmed}`;
+  return getAbsoluteImageUrl(trimmed, { defaultFolder: 'categories' });
 };
 
 const mapCategoryCard = (category) => {

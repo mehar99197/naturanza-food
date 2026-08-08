@@ -17,9 +17,16 @@ const OAuthCallback = () => {
  const navigate = useNavigate();
  const [searchParams] = useSearchParams();
 
- useEffect(() => {
- const handleCallback = () => {
- // Extract token and user data from URL params
+  useEffect(() => {
+  const handleCallback = () => {
+  // Remove token/user query parameters from the address bar and history before
+  // any async work begins. The current Google flow uses an ID-token POST, but
+  // this legacy callback remains reachable for older links.
+  if (typeof window !== 'undefined') {
+  window.history.replaceState({}, document.title, window.location.pathname);
+  }
+
+  // Extract token and user data from URL params
  const token = searchParams.get('token');
  const userDataString = searchParams.get('user');
  const error = searchParams.get('error');

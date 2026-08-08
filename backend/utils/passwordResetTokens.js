@@ -119,6 +119,16 @@ const markTokenAsUsed = async (dbPool, tokenId) => {
   );
 };
 
+const claimPasswordResetToken = async (dbPool, tokenId) => {
+  const [result] = await dbPool.query(
+    `UPDATE password_reset_tokens
+        SET is_used = TRUE, used_at = NOW()
+      WHERE id = ? AND is_used = FALSE AND expires_at > NOW()`,
+    [tokenId],
+  );
+  return result.affectedRows === 1;
+};
+
 /**
  * Invalidate all tokens for a user (e.g., after password change)
  */
@@ -145,6 +155,7 @@ module.exports = {
   createPasswordResetToken,
   validatePasswordResetToken,
   markTokenAsUsed,
+  claimPasswordResetToken,
   invalidateAllUserTokens,
   cleanupExpiredTokens,
   TOKEN_EXPIRY_MINUTES,

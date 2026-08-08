@@ -2,10 +2,17 @@ const express = require("express");
 const router = express.Router();
 const { dbPool } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const requirePermission = require("../middleware/requirePermission");
 
 // All routes require authentication and admin role
 router.use(authenticateToken);
 router.use(isAdmin);
+router.use(requirePermission("manage_shipping_cities"));
+
+const parseFee = (value) => {
+  const fee = Number(value);
+  return Number.isFinite(fee) && fee >= 0 ? Math.round(fee) : null;
+};
 
 // GET /api/admin/shipping/city-fees - fetch all cities
 router.get("/city-fees", async (req, res) => {
@@ -25,21 +32,25 @@ router.get("/city-fees", async (req, res) => {
 router.post("/city-fees", async (req, res) => {
   try {
     const { city_name, fee = 0, is_active = true } = req.body;
+    const parsedFee = parseFee(fee);
 
     if (!city_name || typeof city_name !== "string" || !city_name.trim()) {
       return res.status(400).json({ error: "City name is required" });
+    }
+    if (parsedFee === null) {
+      return res.status(400).json({ error: "Fee must be a non-negative number" });
     }
 
     const [result] = await dbPool.query(
       `INSERT INTO city_delivery_fees (city_name, fee, is_active)
        VALUES (?, ?, ?)`,
-      [city_name.trim(), parseInt(fee, 10) || 0, Boolean(is_active)],
+       [city_name.trim(), parsedFee, Boolean(is_active)],
     );
 
     res.status(201).json({
       id: result.insertId,
       city_name: city_name.trim(),
-      fee: parseInt(fee, 10) || 0,
+       fee: parsedFee,
       is_active: Boolean(is_active),
     });
   } catch (error) {
@@ -65,8 +76,12 @@ router.put("/city-fees/:id", async (req, res) => {
     }
 
     if (fee !== undefined) {
+      const parsedFee = parseFee(fee);
+      if (parsedFee === null) {
+        return res.status(400).json({ error: "Fee must be a non-negative number" });
+      }
       updates.push("fee = ?");
-      values.push(parseInt(fee, 10) || 0);
+      values.push(parsedFee);
     }
 
     if (is_active !== undefined) {

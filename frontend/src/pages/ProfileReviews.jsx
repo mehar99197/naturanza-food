@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { MessageSquare, Star } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { reviewAPI } from "@/services/api";
+import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 import { reviewEvents, REVIEW_EVENTS } from "@/utils/reviewEvents";
 
 const renderStars = (rating) => {
@@ -130,7 +131,7 @@ export function ProfileReviews() {
                 {/* Product Image */}
                 {review.product_image && (
                   <img
-                    src={review.product_image}
+                    src={getAbsoluteImageUrl(review.product_image, { defaultFolder: "products" })}
                     alt={review.product_name || 'Product'}
                     className="h-16 w-16 sm:h-20 sm:w-20 rounded-lg object-cover border border-gray-200"
                     onError={(e) => {

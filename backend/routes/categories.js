@@ -1,18 +1,20 @@
 const express = require("express");
 const router = express.Router();
-const { authenticateToken, isAdmin } = require("../middleware/auth");
+const { authenticateToken, isAdmin, optionalAuthenticateToken } = require("../middleware/auth");
+const requirePermission = require("../middleware/requirePermission");
 const { restrictBody } = require("../middleware/security");
 const asyncHandler = require("../middleware/asyncHandler");
 const categoryController = require("../controllers/categoryController");
 const { uploadCategoryImage } = require("../middleware/upload");
 
-router.get("/", asyncHandler(categoryController.getCategories));
+router.get("/", optionalAuthenticateToken, asyncHandler(categoryController.getCategories));
 router.get("/:id", asyncHandler(categoryController.getCategoryById));
 
 router.post(
   "/",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_categories"),
   restrictBody('name', 'slug', 'description', 'image_url', 'is_active', 'category_type'),
   asyncHandler(categoryController.createCategory),
 );
@@ -21,6 +23,7 @@ router.put(
   "/:id",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_categories"),
   restrictBody('name', 'slug', 'description', 'image_url', 'is_active', 'category_type'),
   asyncHandler(categoryController.updateCategory),
 );
@@ -29,6 +32,7 @@ router.delete(
   "/:id",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_categories"),
   asyncHandler(categoryController.deleteCategory),
 );
 
@@ -37,6 +41,7 @@ router.post(
   "/upload-image",
   authenticateToken,
   isAdmin,
+  requirePermission("manage_categories"),
   uploadCategoryImage,
   (req, res) => {
     try {

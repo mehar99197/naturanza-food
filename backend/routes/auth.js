@@ -57,7 +57,7 @@ const {
 const {
   createPasswordResetToken,
   validatePasswordResetToken,
-  markTokenAsUsed,
+  claimPasswordResetToken,
   invalidateAllUserTokens,
 } = require("../utils/passwordResetTokens");
 const {
@@ -1861,7 +1861,7 @@ router.post("/reset-password", async (req, res) => {
     // admin link opened on the customer page by mistake — stop here. Admin
     // passwords change only through POST /api/admin/reset-password.
     if (userRows.length && isAdminAccount(userRows[0])) {
-      release();
+      connection.release();
       return res.status(403).json({ ...ADMIN_EMAIL_RECOVERY_BLOCKED, success: false });
     }
 
@@ -1885,6 +1885,14 @@ router.post("/reset-password", async (req, res) => {
       });
     }
 
+    if (!(await claimPasswordResetToken(connection, tokenValidation.tokenId))) {
+      connection.release();
+      return res.status(400).json({
+        error: "This reset link has already been used or expired.",
+        success: false,
+      });
+    }
+
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
     await connection.query(
@@ -1896,7 +1904,6 @@ router.post("/reset-password", async (req, res) => {
 
     connection.release();
 
-    await markTokenAsUsed(db.promise(), tokenValidation.tokenId);
 
     await invalidateAllUserTokens(db.promise(), tokenValidation.userId);
 

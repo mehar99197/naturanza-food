@@ -40,6 +40,14 @@ const toKebabCase = (str) =>
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "") || "product";
 
+const escapeHtml = (value) =>
+  String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 /**
  * JsBarcode writes straight into an SVG element. It sets width/height but not
  * always a viewBox, and without one the symbol cannot be rescaled by CSS — which
@@ -145,11 +153,12 @@ const printProductLabel = (productName, barcode, format, qrSvgOuterHTML) => {
       </div>`
     : "";
 
+  const safeProductName = escapeHtml(productName);
   const label = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Print Label - ${productName}</title>
+<title>Print Label - ${safeProductName}</title>
 <style>
   @page { margin: 0; size: auto; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -225,7 +234,7 @@ const printProductLabel = (productName, barcode, format, qrSvgOuterHTML) => {
 <body>
   <div class="label">
     <div class="brand">NATURANZA FOOD</div>
-    <div class="product-name">${productName}</div>
+    <div class="product-name">${safeProductName}</div>
     <div class="codes">${barcodeBlock}${qrBlock}</div>
   </div>
   <script>window.print();window.close();</script>

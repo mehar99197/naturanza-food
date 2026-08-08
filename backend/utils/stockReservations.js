@@ -70,7 +70,7 @@ async function reserveStockOnConnection(conn, orderId, items, ttlMinutes = RESER
   }
 }
 
-async function consumeReservationsOnConnection(conn, orderId) {
+async function consumeReservationsOnConnection(conn, orderId, createdByUserId = null) {
   const [resvs] = await conn.query(
     `SELECT product_id, quantity FROM stock_reservations
       WHERE order_id = ? AND state = 'held'
@@ -80,12 +80,33 @@ async function consumeReservationsOnConnection(conn, orderId) {
   if (resvs.length === 0) return 0;
 
   for (const r of resvs) {
+    const [[product]] = await conn.query(
+      'SELECT stock_quantity FROM products WHERE id = ? FOR UPDATE',
+      [r.product_id],
+    );
+    if (!product) continue;
+    const previousStock = Number(product.stock_quantity) || 0;
+    const newStock = previousStock - Number(r.quantity);
     await conn.query(
       `UPDATE products
           SET stock_quantity = stock_quantity - ?,
               reserved_stock = reserved_stock - ?
         WHERE id = ?`,
       [r.quantity, r.quantity, r.product_id],
+    );
+    await conn.query(
+      `INSERT INTO inventory_movements
+         (product_id, order_id, movement_type, quantity_change, previous_stock, new_stock, note, created_by_user_id)
+       VALUES (?, ?, 'sale', ?, ?, ?, ?, ?)`,
+      [
+        r.product_id,
+        orderId,
+        -Math.abs(Number(r.quantity)),
+        previousStock,
+        newStock,
+        `Stock consumed after payment approval for order #${orderId}`,
+        createdByUserId,
+      ],
     );
   }
   await conn.query(
@@ -193,7 +214,7 @@ async function reserveStockForOrder(orderId, items) {
 
 // Consume reservations (admin approved): permanently deduct from stock_quantity
 // and clear from reserved_stock. Safe to call once per order.
-async function consumeReservationsForOrder(orderId) {
+async function consumeReservationsForOrder(orderId, createdByUserId = null) {
   const conn = await db.promise().getConnection();
   try {
     await conn.beginTransaction();
@@ -206,12 +227,33 @@ async function consumeReservationsForOrder(orderId) {
     );
 
     for (const r of resvs) {
+      const [[product]] = await conn.query(
+        'SELECT stock_quantity FROM products WHERE id = ? FOR UPDATE',
+        [r.product_id],
+      );
+      if (!product) continue;
+      const previousStock = Number(product.stock_quantity) || 0;
+      const newStock = previousStock - Number(r.quantity);
       await conn.query(
         `UPDATE products
             SET stock_quantity = stock_quantity - ?,
                 reserved_stock = reserved_stock - ?
           WHERE id = ?`,
         [r.quantity, r.quantity, r.product_id],
+      );
+      await conn.query(
+        `INSERT INTO inventory_movements
+           (product_id, order_id, movement_type, quantity_change, previous_stock, new_stock, note, created_by_user_id)
+         VALUES (?, ?, 'sale', ?, ?, ?, ?, ?)`,
+        [
+          r.product_id,
+          orderId,
+          -Math.abs(Number(r.quantity)),
+          previousStock,
+          newStock,
+          `Stock consumed after payment approval for order #${orderId}`,
+          createdByUserId,
+        ],
       );
     }
 
@@ -287,10 +329,11 @@ async function sweepExpiredReservations() {
         WHERE state='held' AND expires_at < NOW()
           AND order_id NOT IN (
             SELECT CAST(order_id AS UNSIGNED)
-              FROM advance_payment_verifications
+             FROM advance_payment_verifications
              WHERE verification_stage = 'advance_shipping'
                AND status = 'pending'
-          )
+               AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+           )
         ORDER BY product_id FOR UPDATE`,
     );
 

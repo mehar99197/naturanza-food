@@ -117,10 +117,16 @@ const verifyCode = async (dbPool, email, code) => {
     return { valid: false, reason: "Incorrect code. Please try again." };
   }
 
-  await dbPool.query(
-    "UPDATE email_verification_codes SET is_used = TRUE, used_at = NOW() WHERE id = ?",
+  const [claimResult] = await dbPool.query(
+    `UPDATE email_verification_codes
+        SET is_used = TRUE, used_at = NOW()
+      WHERE id = ? AND is_used = FALSE AND expires_at > NOW()`,
     [record.id],
   );
+
+  if (claimResult.affectedRows !== 1) {
+    return { valid: false, reason: "This code was already used. Please request a new one." };
+  }
 
   return { valid: true, userId: record.user_id };
 };

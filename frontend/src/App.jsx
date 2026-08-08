@@ -6,7 +6,7 @@ import {
   Navigate,
   Outlet,
 } from "react-router-dom";
-import { useEffect, useLayoutEffect, useRef, useState, lazy, Suspense } from "react";
+import { Component, useEffect, useLayoutEffect, useRef, useState, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { pageTransition } from "@/lib/animations";
 import { CartProvider } from "@/context/CartContext";
@@ -141,7 +141,10 @@ function ReloadScrollRestoration() {
     }
 
     const key = `scroll:reload:${window.location.pathname}`;
-    const stored = window.sessionStorage.getItem(key);
+    let stored = null;
+    try {
+      stored = window.sessionStorage.getItem(key);
+    } catch {}
     const y = Number(stored);
     if (Number.isFinite(y)) {
       window.scrollTo({ top: y, left: 0, behavior: "auto" });
@@ -155,7 +158,9 @@ function ReloadScrollRestoration() {
 
     const saveScrollPosition = () => {
       const key = `scroll:reload:${pathnameRef.current}`;
-      window.sessionStorage.setItem(key, String(window.scrollY || 0));
+      try {
+        window.sessionStorage.setItem(key, String(window.scrollY || 0));
+      } catch {}
     };
 
     const handleVisibilityChange = () => {
@@ -187,6 +192,40 @@ function RequireSuperAdmin({ children }) {
   }
 
   return children;
+}
+
+class RouteErrorBoundary extends Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  handleReload = () => {
+    window.location.reload();
+  };
+
+  render() {
+    if (!this.state.hasError) {
+      return this.props.children;
+    }
+
+    return (
+      <main className="flex min-h-[60vh] items-center justify-center px-6 py-16 text-center">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">This page could not load</h1>
+          <p className="mt-2 text-sm text-slate-500">Please reload and try again.</p>
+          <button
+            type="button"
+            onClick={this.handleReload}
+            className="mt-5 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white"
+          >
+            Reload page
+          </button>
+        </div>
+      </main>
+    );
+  }
 }
 
 function RequirePermission({ feature, children }) {
@@ -256,6 +295,7 @@ function AppContent() {
       <WishlistToast />
       <main id="main-content" className={mainWrapperClass}>
         <AnimatePresence mode={isAdminRoute ? "sync" : "wait"} initial={false}>
+          <RouteErrorBoundary>
           <Suspense fallback={<Loader />}>
           <Routes location={location} key={isAdminRoute ? "/admin" : location.pathname}>
             {/* Public Routes */}
@@ -269,6 +309,14 @@ function AppContent() {
             />
             <Route
               path="/shop"
+              element={
+                <motion.div {...pageTransition}>
+                  <Shop />
+                </motion.div>
+              }
+            />
+            <Route
+              path="/shop/:category"
               element={
                 <motion.div {...pageTransition}>
                   <Shop />
@@ -397,6 +445,7 @@ function AppContent() {
             <Route path="*" element={<NotFound />} />
           </Routes>
           </Suspense>
+          </RouteErrorBoundary>
         </AnimatePresence>
       </main>
 
@@ -412,10 +461,14 @@ function App() {
   const initialPath =
     typeof window !== "undefined" ? window.location.pathname : "/";
   const shouldShowStartupLoader = initialPath === "/";
-  const hasVisited =
-    typeof window !== "undefined" && shouldShowStartupLoader
-      ? window.sessionStorage.getItem("hasVisitedHome")
-      : "true";
+  let hasVisited = "true";
+  if (typeof window !== "undefined" && shouldShowStartupLoader) {
+    try {
+      hasVisited = window.sessionStorage.getItem("hasVisitedHome");
+    } catch {
+      hasVisited = "true";
+    }
+  }
   const [loading, setLoading] = useState(shouldShowStartupLoader && !hasVisited);
   const [isFirstVisit] = useState(shouldShowStartupLoader && !hasVisited);
   const [savedScrollPosition] = useState(0);
@@ -435,7 +488,9 @@ function App() {
 
           setTimeout(() => {
             setLoading(false);
-            sessionStorage.setItem("hasVisitedHome", "true");
+            try {
+              sessionStorage.setItem("hasVisitedHome", "true");
+            } catch {}
 
             // Restore scroll position after loader hides
             setTimeout(() => {

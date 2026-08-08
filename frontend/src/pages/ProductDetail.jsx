@@ -239,8 +239,8 @@ export function ProductDetail() {
     const loadProduct = async () => {
       setIsLoading(true);
 
-      // QR links can target products outside the first public catalog page or
-      // products that are no longer active, so resolve those directly by ID.
+      // QR links can target products outside the first public catalog page, so
+      // resolve those directly by ID instead of relying only on the catalog cache.
       let currentProduct = getProductById(id) || null;
       if (!currentProduct && id) {
         try {

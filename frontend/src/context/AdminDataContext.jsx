@@ -46,8 +46,12 @@ export const AdminDataProvider = ({ children }) => {
     Array.isArray(payload) ? payload : payload?.data || [];
 
   const fetchCategoriesOnly = useCallback(async () => {
-    const categoriesData = await categoryAPI.getAll().catch(() => []);
-    setCategories(extractList(categoriesData));
+    try {
+      const categoriesData = await categoryAPI.getAll();
+      setCategories(extractList(categoriesData));
+    } catch (err) {
+      setError(err.message || "Failed to load categories");
+    }
   }, []);
 
   useEffect(() => {
@@ -82,11 +86,11 @@ export const AdminDataProvider = ({ children }) => {
         couponsData,
         categoriesData,
       ] = await Promise.all([
-        productAPI.getAll().catch(() => []),
-        orderAPI.getAll().catch(() => []),
-        adminAPI.getCustomers().catch(() => []),
-        adminAPI.getCoupons().catch(() => []),
-        categoryAPI.getAll().catch(() => []),
+        productAPI.getAll(),
+        orderAPI.getAll(),
+        adminAPI.getCustomers(),
+        adminAPI.getCoupons(),
+        categoryAPI.getAll(),
       ]);
 
       setProducts(

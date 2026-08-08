@@ -17,6 +17,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
 import { orderAPI } from "@/services/api";
+import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 
 const getStatusColor = (status) => {
   const colors = {
@@ -465,7 +466,10 @@ export function ProfileOrders() {
                   className="flex gap-2.5 sm:gap-4 p-2.5 sm:p-4 bg-gray-50 rounded-lg sm:rounded-xl"
                 >
                   <img
-                    src={item.image_url || item.image || "/images/products/honey.webp"}
+                    src={getAbsoluteImageUrl(
+                      item.image_url || item.image || "/images/products/honey.webp",
+                      { defaultFolder: "products" },
+                    )}
                     alt={item.product_name || item.name || "Order item"}
                     className="w-14 h-14 sm:w-20 sm:h-20 object-cover rounded-lg flex-shrink-0"
                     onError={(event) => {

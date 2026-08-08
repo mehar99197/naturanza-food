@@ -234,13 +234,17 @@ const corsOptions = {
       if (DEV_CORS_ORIGINS.includes(normalizedOrigin)) {
         return callback(null, true);
       }
-      return callback(new Error("Not allowed by CORS"));
+      const error = new Error("Not allowed by CORS");
+      error.statusCode = 403;
+      return callback(error);
     }
 
     if (ALLOWED_CORS_ORIGINS.includes(normalizedOrigin)) {
       return callback(null, true);
     }
-    return callback(new Error("Not allowed by CORS"));
+    const error = new Error("Not allowed by CORS");
+    error.statusCode = 403;
+    return callback(error);
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -262,6 +266,11 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 // Persistent user uploads first — these live outside the git-deployed tree so
 // they survive redeploys (payment screenshots, uploaded product/category images).
 const { UPLOADS_IMAGES_DIR } = require("./middleware/upload");
+// Payment screenshots contain private customer and transaction data. They are
+// served only through the authenticated admin endpoint below, never as static files.
+app.use("/images/payment-verifications", (req, res) => {
+  return res.status(404).end();
+});
 app.use("/images", express.static(UPLOADS_IMAGES_DIR));
 app.use(
   "/images",
@@ -639,4 +648,7 @@ process.on("unhandledRejection", (reason) => {
 
 process.on("uncaughtException", (error) => {
   console.error("Uncaught Exception:", error);
+  if (process.env.NODE_ENV === "production") {
+    process.exit(1);
+  }
 });

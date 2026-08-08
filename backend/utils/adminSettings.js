@@ -5,7 +5,7 @@ const DEFAULT_ADMIN_SETTINGS = {
   storeEmail: process.env.BUSINESS_SUPPORT_EMAIL || "support@naturanzafood.com",
   storePhone: process.env.BUSINESS_SUPPORT_PHONE || "+92340 9502646",
   currency: "PKR",
-  taxRate: 18,
+  taxRate: 0,
   shippingFlat: 250,
   shippingFree: 5000,
   emailNotifications: true,

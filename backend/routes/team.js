@@ -1,13 +1,14 @@
 const express = require("express");
 const { dbPool } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
+const requirePermission = require("../middleware/requirePermission");
 const { restrictBody } = require("../middleware/security");
 const asyncHandler = require("../middleware/asyncHandler");
 const { uploadProfileImage } = require("../middleware/upload");
 
 const router = express.Router();
 
-const requireAdmin = [authenticateToken, isAdmin];
+const requireAdmin = [authenticateToken, isAdmin, requirePermission("manage_team")];
 
 const normalizeText = (value) => String(value || "").trim();
 
