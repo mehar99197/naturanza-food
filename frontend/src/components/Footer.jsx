@@ -27,7 +27,7 @@ export function Footer({ variant = 'full' }) {
  useEffect(() => {
   const fetchCategories = async () => {
    try {
-    const response = await categoryAPI.getAll();
+     const response = await categoryAPI.getAll({ category_type: 'shop_by_category' });
     // Filter only active categories
     const activeCategories = (response?.categories || response || [])
      .filter(cat => cat.is_active === 1 || cat.is_active === true)

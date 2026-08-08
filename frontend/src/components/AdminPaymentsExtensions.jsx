@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Eye, Landmark, Smartphone, Wallet, X } from "lucide-react";
@@ -64,6 +64,8 @@ export function AdminPaymentsExtensions() {
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [activeScreenshot, setActiveScreenshot] = useState(null);
   const [screenshotUrls, setScreenshotUrls] = useState({});
+  const screenshotUrlsRef = useRef({});
+  const [screenshotLoadingId, setScreenshotLoadingId] = useState(null);
   const [stage2NoteById, setStage2NoteById] = useState({});
 
   const initialAccountMap = useMemo(
@@ -121,40 +123,9 @@ export function AdminPaymentsExtensions() {
     );
   }, [verificationFilter, verifications]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const objectUrls = [];
-
-    const loadScreenshots = async () => {
-      const rowsWithScreenshots = verifications.filter((verification) =>
-        verification.screenshot_url,
-      );
-
-      const entries = await Promise.all(
-        rowsWithScreenshots.map(async (verification) => {
-          try {
-            const blob = await adminAPI.getPaymentVerificationScreenshot(verification.id);
-            const url = URL.createObjectURL(blob);
-            objectUrls.push(url);
-            return [String(verification.id), url];
-          } catch {
-            return [String(verification.id), ""];
-          }
-        }),
-      );
-
-      if (!cancelled) {
-        setScreenshotUrls(Object.fromEntries(entries));
-      }
-    };
-
-    void loadScreenshots();
-
-    return () => {
-      cancelled = true;
-      objectUrls.forEach((url) => URL.revokeObjectURL(url));
-    };
-  }, [verifications]);
+  useEffect(() => () => {
+    Object.values(screenshotUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+  }, []);
 
   const pendingCount = useMemo(
     () =>
@@ -203,6 +174,28 @@ export function AdminPaymentsExtensions() {
       );
     } finally {
       setVerificationsLoading(false);
+    }
+  };
+
+  const handleViewScreenshot = async (verification) => {
+    const key = String(verification.id);
+    const cachedUrl = screenshotUrlsRef.current[key];
+    if (cachedUrl) {
+      setActiveScreenshot({ url: cachedUrl, label: verification.order_id });
+      return;
+    }
+
+    setScreenshotLoadingId(verification.id);
+    try {
+      const blob = await adminAPI.getPaymentVerificationScreenshot(verification.id);
+      const url = URL.createObjectURL(blob);
+      screenshotUrlsRef.current[key] = url;
+      setScreenshotUrls((prev) => ({ ...prev, [key]: url }));
+      setActiveScreenshot({ url, label: verification.order_id });
+    } catch (error) {
+      toast.error(error?.response?.data?.error || "Failed to load payment screenshot");
+    } finally {
+      setScreenshotLoadingId(null);
     }
   };
 
@@ -583,29 +576,28 @@ export function AdminPaymentsExtensions() {
                         )}
                       </td>
                       <td className="py-3 pr-4">
-                        {screenshotUrl ? (
+                        {verification.screenshot_url ? (
                           <button
                             type="button"
-                            onClick={() =>
-                              setActiveScreenshot({
-                                url: screenshotUrl,
-                                label: verification.order_id,
-                              })
-                            }
+                            onClick={() => void handleViewScreenshot(verification)}
                             className="flex items-center gap-2"
                           >
-                            <img
-                              src={screenshotUrl}
-                              alt={`Screenshot ${verification.order_id}`}
-                              className="h-10 w-10 rounded-lg object-cover"
-                            />
+                            {screenshotUrl ? (
+                              <img
+                                src={screenshotUrl}
+                                alt={`Screenshot ${verification.order_id}`}
+                                className="h-10 w-10 rounded-lg object-cover"
+                              />
+                            ) : (
+                              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                                {screenshotLoadingId === verification.id ? "..." : <Eye className="h-4 w-4" />}
+                              </span>
+                            )}
                             <span className="text-xs font-semibold text-emerald-700 whitespace-nowrap">
-                              View
+                              {screenshotLoadingId === verification.id ? "Loading" : "View"}
                             </span>
                             <Eye className="h-4 w-4 text-emerald-600" />
                           </button>
-                        ) : verification.screenshot_url ? (
-                          <span className="text-xs text-slate-400">Loading...</span>
                         ) : isFinalCollection ? (
                           <span className="text-xs italic text-slate-400">Not required</span>
                         ) : (

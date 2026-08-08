@@ -476,7 +476,7 @@ function App() {
   useEffect(() => {
     if (isFirstVisit) {
       // Minimum display time for loader
-      const minDisplayTime = 1500; // 1.5 seconds
+       const minDisplayTime = 300;
       const startTime = performance.now();
 
       // Wait for page to be fully loaded

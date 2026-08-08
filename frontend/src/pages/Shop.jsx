@@ -77,7 +77,6 @@ export function Shop() {
 
   useEffect(() => {
   let isMounted = true;
- let loadingTimerId;
 
  const fetchCategories = async ({ showLoader = false } = {}) => {
  try {
@@ -101,15 +100,10 @@ export function Shop() {
 
  setCategories([{ id:"all", name:"All Products", icon: ShoppingBag }, ...dynamic]);
  } catch (err) {
- } finally {
- if (showLoader) {
- // Simulate minimum loading time for better UX.
- loadingTimerId = setTimeout(() => {
- if (isMounted) {
- setIsLoading(false);
- }
- }, 800);
- }
+  } finally {
+  if (showLoader) {
+  setIsLoading(false);
+  }
  }
  };
 
@@ -123,10 +117,7 @@ export function Shop() {
  return () => {
  isMounted = false;
  clearInterval(intervalId);
- if (loadingTimerId) {
- clearTimeout(loadingTimerId);
- }
- };
+  };
  }, []);
 
  const products = useMemo(() => getActiveProducts(), [getActiveProducts]);

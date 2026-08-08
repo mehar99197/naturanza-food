@@ -1615,10 +1615,38 @@ export const returnAPI = {
 };
 
 // Category APIs
+const categoryCache = new Map();
+const CATEGORY_CACHE_TTL_MS = 30_000;
+
+const getCategoryCacheKey = (params) =>
+  JSON.stringify(
+    Object.entries(params || {})
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+
 export const categoryAPI = {
   getAll: async (params = {}) => {
-    const response = await axiosInstance.get("/categories", { params });
-    return response.data;
+    const key = getCategoryCacheKey(params);
+    const cached = categoryCache.get(key);
+    if (cached?.data && Date.now() - cached.timestamp < CATEGORY_CACHE_TTL_MS) {
+      return cached.data;
+    }
+    if (cached?.promise) {
+      return cached.promise;
+    }
+
+    const promise = axiosInstance
+      .get("/categories", { params })
+      .then((response) => {
+        categoryCache.set(key, { data: response.data, timestamp: Date.now() });
+        return response.data;
+      })
+      .catch((error) => {
+        categoryCache.delete(key);
+        throw error;
+      });
+    categoryCache.set(key, { promise, timestamp: 0 });
+    return promise;
   },
 
   getById: async (id) => {
@@ -1628,16 +1656,19 @@ export const categoryAPI = {
 
   create: async (categoryData) => {
     const response = await axiosInstance.post("/categories", categoryData);
+    categoryCache.clear();
     return response.data;
   },
 
   update: async (id, categoryData) => {
     const response = await axiosInstance.put(`/categories/${id}`, categoryData);
+    categoryCache.clear();
     return response.data;
   },
 
   delete: async (id) => {
     const response = await axiosInstance.delete(`/categories/${id}`);
+    categoryCache.clear();
     return response.data;
   },
 
