@@ -1957,10 +1957,17 @@ router.get("/products/:id/barcode-data", async (req, res) => {
         .query("UPDATE products SET barcode = ? WHERE id = ?", [barcode, product.id]);
     }
 
+    // Public product URL encoded into the QR code on the label, so a customer
+    // scanning with a phone camera lands on the product page directly. Mirrors
+    // the canonical URL the sitemap and SEO renderer publish (PUBLIC_SITE_URL).
+    const siteUrl = (process.env.PUBLIC_SITE_URL || "https://naturanzafood.com").replace(/\/+$/, "");
+    const productUrl = `${siteUrl}/product/${product.id}`;
+
     res.json({
       productId: product.id,
       productName: product.name,
       barcode,
+      productUrl,
     });
   } catch (error) {
     res.status(500).json({ error: "Database error" });
