@@ -12,7 +12,9 @@ const BACKEND_URL =
   process.env.BACKEND_URL ||
   process.env.API_URL ||
   process.env.PUBLIC_SITE_URL ||
-  `http://localhost:${process.env.PORT || 5000}`;
+  (process.env.NODE_ENV === "production"
+    ? "https://naturanzafood.com"
+    : `http://localhost:${process.env.PORT || 5000}`);
 const NORMALIZED_BACKEND_URL = String(BACKEND_URL).replace(/\/+$/, "");
 
 const buildUnsubscribeUrl = (token) =>
