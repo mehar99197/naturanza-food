@@ -18,6 +18,8 @@
  * Override the internal prefix with BARCODE_PREFIX (must stay within 200-299).
  */
 
+const crypto = require("crypto");
+
 const DEFAULT_INTERNAL_PREFIX = "200";
 const SERIAL_LENGTH = 9;
 const VALID_LENGTHS = new Set([8, 12, 13]);
@@ -74,6 +76,19 @@ const buildInternalEan13 = (productId) => {
 };
 
 /**
+ * Random internal EAN-13 for a newly created product. The database uniqueness
+ * check is performed by the product model before this value is persisted.
+ */
+const buildRandomInternalEan13 = () => {
+  const serial = String(crypto.randomInt(0, 10 ** SERIAL_LENGTH)).padStart(
+    SERIAL_LENGTH,
+    "0",
+  );
+  const body = `${resolveInternalPrefix()}${serial}`;
+  return `${body}${computeCheckDigit(body)}`;
+};
+
+/**
  * Validate + normalize an admin-supplied barcode.
  * Returns the clean digit string, or null when the input is blank.
  * Throws when the value is present but not a scannable retail symbology.
@@ -105,5 +120,6 @@ const normalizeBarcode = (value) => {
 
 module.exports = {
   buildInternalEan13,
+  buildRandomInternalEan13,
   normalizeBarcode,
 };

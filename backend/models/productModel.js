@@ -5,7 +5,11 @@ const { createSlug } = require("../utils/slugify");
 const { getAdminSettings } = require("../utils/adminSettings");
 const { insertAdminNotifications } = require("../utils/adminNotifications");
 const { fillMissingProductContent } = require("../utils/productContentDefaults");
-const { buildInternalEan13, normalizeBarcode } = require("../utils/barcode");
+const {
+  buildInternalEan13,
+  buildRandomInternalEan13,
+  normalizeBarcode,
+} = require("../utils/barcode");
 
 const createModelError = (message, statusCode, code) => {
   const error = new Error(message);
@@ -15,10 +19,8 @@ const createModelError = (message, statusCode, code) => {
 };
 
 /**
- * Resolve the barcode to persist for a product.
- * An admin-supplied value wins (a real GS1/manufacturer code); a blank value
- * falls back to the deterministic internal EAN-13 so every product stays
- * scannable at a POS terminal.
+ * Resolve a barcode for updates and legacy reprints. New product creation uses
+ * generateUniqueRandomBarcode below so blank values receive a random code.
  */
 const resolveBarcode = (value, productId) => {
   try {
@@ -46,6 +48,25 @@ const assertBarcodeIsFree = async (connection, barcode, productId) => {
 const safeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const generateUniqueRandomBarcode = async (connection, productId) => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const barcode = buildRandomInternalEan13();
+    const [rows] = await connection.query(
+      "SELECT id FROM products WHERE barcode = ? AND id <> ? LIMIT 1",
+      [barcode, productId],
+    );
+    if (rows.length === 0) {
+      return barcode;
+    }
+  }
+
+  throw createModelError(
+    "Could not generate a unique product barcode. Please try again.",
+    503,
+    "PRODUCT_BARCODE_GENERATION_FAILED",
+  );
 };
 
 const normalizeNonNegativeNumber = (value, fieldName) => {
@@ -417,9 +438,18 @@ const createProduct = async (payload = {}) => {
       ],
     );
 
-    // The internal fallback needs the auto-increment id, so the barcode is
-    // assigned right after the insert rather than inside it.
-    const barcode = resolveBarcode(payload.barcode, result.insertId);
+    // The internal fallback is random for new products. Existing/manual codes
+    // remain supported and are validated before persistence.
+    let barcode;
+    try {
+      const suppliedBarcode = normalizeBarcode(payload.barcode);
+      barcode = suppliedBarcode || await generateUniqueRandomBarcode(connection, result.insertId);
+    } catch (error) {
+      if (error.statusCode) {
+        throw error;
+      }
+      throw createModelError(error.message, 400, "PRODUCT_BARCODE_INVALID");
+    }
     await assertBarcodeIsFree(connection, barcode, result.insertId);
     await connection.query("UPDATE products SET barcode = ? WHERE id = ?", [
       barcode,
