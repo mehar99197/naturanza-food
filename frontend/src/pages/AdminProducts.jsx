@@ -1385,6 +1385,7 @@ export function AdminProducts() {
                         <ProductBarcode
                           productName={barcodeProductData.productName}
                           barcode={barcodeProductData.barcode}
+                          productUrl={barcodeProductData.productUrl}
                         />
                       ) : (
                         <p className="py-8 text-center text-sm text-slate-400">
