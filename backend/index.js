@@ -291,6 +291,41 @@ app.use(
   "/images",
   express.static(path.join(__dirname, "..", "frontend", "public", "images")),
 );
+// Uploaded media may be lost when a Hostinger deployment replaces a
+// non-persistent upload directory. Keep stale database URLs harmless by
+// returning a bundled, public placeholder instead of a JSON 404 response.
+// Payment verification files are handled by the deny-only middleware above and
+// must never fall through to this public fallback.
+app.use("/images", (req, res, next) => {
+  const requestedPath = String(req.path || "");
+  const extension = path.extname(requestedPath).toLowerCase();
+  if (!extension || ![".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp"].includes(extension)) {
+    return next();
+  }
+
+  let fallbackRelativePath = null;
+  if (requestedPath.startsWith("/products/")) {
+    fallbackRelativePath = "products/honey.webp";
+  } else if (requestedPath.startsWith("/categories/")) {
+    fallbackRelativePath = "og-image.jpg";
+  } else if (requestedPath.startsWith("/blog/")) {
+    fallbackRelativePath = "og-image.jpg";
+  }
+
+  if (!fallbackRelativePath) {
+    return next();
+  }
+
+  return res.sendFile(
+    path.join(__dirname, "..", "frontend", "public", "images", fallbackRelativePath),
+    { maxAge: "1h" },
+    (error) => {
+      if (error && !res.headersSent) {
+        next(error);
+      }
+    },
+  );
+});
 // Serve uploaded files (admin profile pictures, etc.)
 app.use(
   "/uploads",
