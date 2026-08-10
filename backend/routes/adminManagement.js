@@ -5,7 +5,6 @@ const { db } = require('../config/db');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 const { restrictBody } = require('../middleware/security');
 const requireSuperAdmin = require('../middleware/requireSuperAdmin');
-const upload = require('../middleware/uploadConfig');
 const { uploadProfileImage } = require('../middleware/upload');
 const { generateSecurePassword, logAdminAction, getClientIP } = require('../utils/adminHelpers');
 const { createPasswordResetToken } = require('../utils/passwordResetTokens');
@@ -14,6 +13,8 @@ const { revokeSessionsByUserId, touchSessionByToken } = require('../utils/sessio
 const { revokeRefreshTokensByUserId } = require('../utils/tokenStore');
 const { syncDefaultAdminPassword } = require('../utils/envSync');
 const { hasReusedPassword, addPasswordToHistory } = require('../utils/passwordHistory');
+
+const isValidAdminStatus = (status) => ['active', 'inactive'].includes(status);
 
 const parseEnumValues = (enumDefinition = "") => {
   const match = String(enumDefinition).match(/^enum\((.*)\)$/i);
@@ -113,7 +114,7 @@ router.get('/admins', authenticateToken, isAdmin, requireSuperAdmin, async (req,
 });
 
 // POST /api/admin-management/admins - Create new admin
-router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, upload.single('profile_picture'), async (req, res) => {
+router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, uploadProfileImage, async (req, res) => {
   try {
 
     const { full_name, email, phone, role, permissions } = req.body;
@@ -151,7 +152,7 @@ router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, upload.sin
 
     let profilePicture = null;
     if (req.file) {
-       profilePicture = `/images/admins/${req.file.filename}`;
+      profilePicture = req.file.url;
     }
 
     let adminPermissions = null;
@@ -215,8 +216,6 @@ router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, upload.sin
     }
 
     let emailStatus = 'sent';
-    let emailError = null;
-
     try {
       const tokenData = await createPasswordResetToken(db.promise(), userId, normalizedEmail);
 
@@ -236,7 +235,8 @@ router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, upload.sin
       }
     } catch (error) {
       emailStatus = 'failed';
-      emailError = error.message;
+      // Do not expose SMTP/provider or token-generation details to the client.
+      console.error('[admin-management] password reset email failed:', error.message);
     }
 
     const actionVerb = isReactivation ? 'reactivated' : 'created';
@@ -246,7 +246,6 @@ router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, upload.sin
           ? `Admin ${actionVerb} successfully. Password reset email sent.`
           : `Admin ${actionVerb}, but the password reset email failed to send.`,
       emailStatus,
-      emailError,
       reactivated: isReactivation,
       admin: { id: userId, email: normalizedEmail, full_name },
     });
@@ -266,6 +265,10 @@ router.patch('/admins/:id/status', authenticateToken, isAdmin, requireSuperAdmin
       return res.status(400).json({ error: 'Cannot change your own status' });
     }
 
+    if (!isValidAdminStatus(status)) {
+      return res.status(400).json({ error: 'Status must be active or inactive' });
+    }
+
     const isActive = status === 'active';
     await db.promise().query('UPDATE users SET is_active = ? WHERE id = ? AND role = "admin"', [isActive, id]);
 
@@ -276,6 +279,8 @@ router.patch('/admins/:id/status', authenticateToken, isAdmin, requireSuperAdmin
     res.status(500).json({ error: 'Failed to update admin status' });
   }
 });
+
+router.isValidAdminStatus = isValidAdminStatus;
 
 // POST /api/admin-management/admins/:id/profile-image - Upload/update admin profile image
 router.post('/admins/:id/profile-image', authenticateToken, isAdmin, uploadProfileImage, async (req, res) => {
@@ -529,58 +534,21 @@ router.post('/admins/:id/reset-password', authenticateToken, isAdmin, requireSup
       return res.status(404).json({ error: 'Admin not found' });
     }
 
-    // Generate new password
-    const newPassword = generateSecurePassword();
-    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    // Create a password reset token and send a reset link (no plaintext password)
+    const tokenData = await createPasswordResetToken(db.promise(), id, admin[0].email);
 
-    // Update password in database
-    await db.promise().query(
-      'UPDATE users SET password = ? WHERE id = ?',
-      [hashedPassword, id]
-    );
+    const emailResult = await sendPasswordResetEmail(admin[0].email, admin[0].name, tokenData.token, true);
 
-    await addPasswordToHistory(db.promise(), id, newPassword);
+    if (!emailResult.success) {
+      return res.status(500).json({ error: "Failed to send password reset email" });
+    }
 
     await revokeSessionsByUserId(db.promise(), id);
     await revokeRefreshTokensByUserId(db.promise(), id, 'password_reset');
 
-    // Send email with new password
-    const transporter = require('nodemailer').createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: process.env.SMTP_PORT || 587,
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
+    await logAdminAction(req.user.id, `Sent password reset link to admin ${admin[0].name} (${admin[0].email})`, getClientIP(req));
 
-    const mailOptions = {
-      from: `"Naturanza Food Admin" <${process.env.SMTP_USER || 'noreply@naturanza.com'}>`,
-      to: admin[0].email,
-      subject: 'Your Naturanza Admin Password Has Been Reset',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #16a34a;">Password Reset</h2>
-          <p>Hello ${admin[0].name},</p>
-          <p>Your password was reset by an administrator. Here is your new temporary password:</p>
-          <div style="background-color: #f0f8f2; padding: 15px; border-left: 4px solid #16a34a; margin: 20px 0;">
-            <p><strong>New Password:</strong> <code style="background: #fff; padding: 2px 6px; border-radius: 3px;">${newPassword}</code></p>
-          </div>
-          <p><strong>Please login and change it immediately for security purposes.</strong></p>
-          <p><a href="${process.env.ADMIN_URL || 'http://localhost:5173/admin/login'}" style="color: #16a34a;">Login to Admin Panel</a></p>
-        </div>
-      `,
-    };
-
-    try {
-      await transporter.sendMail(mailOptions);
-    } catch (emailError) {
-    }
-
-    await logAdminAction(req.user.id, `Reset password for admin ${admin[0].name} (${admin[0].email})`, getClientIP(req));
-
-    res.json({ message: `Password reset and emailed to ${admin[0].email}` });
+    res.json({ message: `Password reset link sent to ${admin[0].email}` });
   } catch (error) {
     res.status(500).json({ error: 'Failed to reset password' });
   }

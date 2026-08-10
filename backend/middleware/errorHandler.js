@@ -7,15 +7,19 @@ const notFoundHandler = (req, res, next) => {
 const errorHandler = (error, req, res, next) => {
   const statusCode = error.statusCode || 500;
   const isProduction = process.env.NODE_ENV === "production";
-  const safeMessage =
-    isProduction && statusCode >= 500
-      ? "Internal server error"
-      : error.message || "Internal server error";
 
-  const response = {
-    error: safeMessage,
-  };
+  let message;
+  if (isProduction) {
+    if (statusCode >= 500 || !error.expose) {
+      message = "Internal server error";
+    } else {
+      message = error.message || "Bad request";
+    }
+  } else {
+    message = error.message || "Internal server error";
+  }
 
+  const response = { error: message };
   if (!isProduction && error.stack) {
     response.stack = error.stack;
   }

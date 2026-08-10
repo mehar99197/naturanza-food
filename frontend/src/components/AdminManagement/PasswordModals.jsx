@@ -116,7 +116,8 @@ export function ChangePasswordModal({ admin, onClose, onSuccess }) {
                 }
                 className="w-full rounded-xl border border-emerald-200 bg-white px-4 py-3 pr-12 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                 required
-                minLength={8}
+                minLength={12}
+                pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).+"
               />
               <button
                 type="button"
@@ -227,11 +228,11 @@ export function ResetPasswordModal({ admin, onConfirm, onClose }) {
           Reset Password for {admin?.name}?
         </h3>
         <p className="mb-6 text-center text-sm text-slate-600">
-          A new password will be generated and sent to{" "}
+           A secure password reset link will be sent to{" "}
           <strong className="text-slate-900">{admin?.email}</strong>
           <br />
           <span className="text-orange-600">
-            The admin will need to login with the new password immediately.
+             The admin must use the link to choose a new password.
           </span>
         </p>
 

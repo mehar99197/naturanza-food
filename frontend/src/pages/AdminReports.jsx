@@ -51,7 +51,7 @@ export function AdminReports() {
 
       const [salesResponse, productResponse, statsResponse] = await Promise.all([
         adminAPI.getSalesReport(buildRangeParams(daysRange)),
-        adminAPI.getProductSalesReport(),
+        adminAPI.getProductSalesReport(buildRangeParams(daysRange)),
         adminAPI.getDashboardStats(),
       ]);
 

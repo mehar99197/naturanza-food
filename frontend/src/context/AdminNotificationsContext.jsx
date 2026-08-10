@@ -35,9 +35,11 @@ export const AdminNotificationsProvider = ({ children }) => {
   // Highest notification id we've seen — lets us detect a genuinely NEW
   // notification on a silent poll and chime for it (null = not initialised yet).
   const lastSeenMaxIdRef = useRef(null);
+  const requestGenerationRef = useRef(0);
 
   const loadNotifications = useCallback(
     async ({ silent = false } = {}) => {
+      const requestGeneration = ++requestGenerationRef.current;
       if (adminLoading || !isAdminAuthenticated) {
         setNotifications([]);
         setIsMuted(false);
@@ -60,6 +62,8 @@ export const AdminNotificationsProvider = ({ children }) => {
 
         const normalized = normalizeNotifications(notificationsResponse);
         const muted = Boolean(settingsResponse?.isMuted);
+
+        if (requestGeneration !== requestGenerationRef.current) return;
 
         // Ring only for a notification newer than the highest we'd seen before,
         // and not on the very first load (so existing items stay silent).

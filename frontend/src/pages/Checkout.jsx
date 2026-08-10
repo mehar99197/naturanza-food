@@ -27,6 +27,7 @@ import { formatPrice, computeStoreSaleDiscount } from "@/lib/utils";
 import api, { paymentAPI, settingsAPI, cartAPI } from "@/services/api";
 import { NoIndexSEO } from "@/components/SEO";
 import { getAbsoluteImageUrl } from "@/lib/imageUtils";
+import { safeLocalStorage } from "@/lib/storage";
 
 const http = api.axiosInstance;
 
@@ -52,7 +53,7 @@ const readStoredShippingData = (userId) => {
   }
 
   try {
-    const saved = localStorage.getItem(storageKey);
+    const saved = safeLocalStorage.getItem(storageKey);
     return saved ? JSON.parse(saved) : null;
   } catch {
     return null;
@@ -93,6 +94,7 @@ export function Checkout() {
   const [cartHydrated, setCartHydrated] = useState(false);
   const [showCartLoading, setShowCartLoading] = useState(false);
   const cartLoadStartedRef = useRef(false);
+  const couponValidationRequestRef = useRef(0);
 
   useEffect(() => {
     let loadingTimer;
@@ -144,12 +146,14 @@ export function Checkout() {
   useEffect(() => {
     if (appliedCoupon && appliedCoupon.code) {
       const revalidateCoupon = async () => {
+        const requestId = ++couponValidationRequestRef.current;
         try {
           const response = await http.post("/coupons/validate", {
             code: appliedCoupon.code,
             orderAmount: totalPrice,
           });
 
+          if (requestId !== couponValidationRequestRef.current) return;
           if (response.data.valid) {
             // Only update if discount amount has changed
             if (
@@ -165,6 +169,7 @@ export function Checkout() {
             setCouponError("Coupon is no longer valid for this order amount");
           }
         } catch (error) {
+          if (requestId !== couponValidationRequestRef.current) return;
           // If validation fails, remove the coupon
           setAppliedCoupon(null);
           setCouponError(
@@ -191,8 +196,8 @@ export function Checkout() {
     const storageKey = getShippingStorageKey(user?.id);
     if (typeof window !== "undefined" && storageKey && step === "shipping") {
       try {
-        localStorage.removeItem(STORAGE_KEY);
-        localStorage.setItem(storageKey, JSON.stringify(shippingData));
+        safeLocalStorage.removeItem(STORAGE_KEY);
+        safeLocalStorage.setItem(storageKey, JSON.stringify(shippingData));
       } catch {}
     }
   }, [shippingData, step, user?.id]);
@@ -752,6 +757,8 @@ export function Checkout() {
       ? "EasyPaisa"
       : paymentMethod === "jazzcash"
         ? "JazzCash"
+        : paymentMethod === "bank"
+          ? "Bank Transfer"
         : paymentMethod;
   const checkoutPanelClass =
     "relative overflow-hidden rounded-3xl border border-white/70 bg-white/90 p-4 sm:p-6 lg:p-8 shadow-[0_16px_45px_rgba(15,23,42,0.08)] backdrop-blur";
@@ -904,8 +911,8 @@ export function Checkout() {
       clearCart();
       try {
         const storageKey = getShippingStorageKey(user?.id);
-        if (storageKey) localStorage.removeItem(storageKey);
-        localStorage.removeItem(STORAGE_KEY);
+        if (storageKey) safeLocalStorage.removeItem(storageKey);
+        safeLocalStorage.removeItem(STORAGE_KEY);
       } catch {}
     } catch (error) {
       // DO NOT re-fetch cart on order failure - this would clear the local cart if backend cart was already empty
@@ -1143,8 +1150,8 @@ export function Checkout() {
         clearCart();
         try {
           const storageKey = getShippingStorageKey(user?.id);
-          if (storageKey) localStorage.removeItem(storageKey);
-          localStorage.removeItem(STORAGE_KEY);
+          if (storageKey) safeLocalStorage.removeItem(storageKey);
+          safeLocalStorage.removeItem(STORAGE_KEY);
         } catch {}
       } catch (submitError) {
         const statusCode = Number(submitError?.response?.status || 0);
@@ -2137,12 +2144,32 @@ export function Checkout() {
                     )}
                   </label>
 
-                </div>
+                  {/* Bank transfer */}
+                  <label className={getPaymentOptionClass(paymentMethod === "bank")}>
+                    <input
+                      type="radio"
+                      name="payment"
+                      value="bank"
+                      checked={paymentMethod === "bank"}
+                      onChange={(e) => handlePaymentMethodSelect(e.target.value)}
+                      className="h-4 w-4 flex-shrink-0 text-green-600 focus:ring-green-500 sm:h-5 sm:w-5"
+                    />
+                    <CreditCard className="h-8 w-8 flex-shrink-0 text-emerald-600 sm:h-10 sm:w-10" />
+                    <div className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold leading-tight text-gray-900 sm:text-base">
+                        Bank Transfer
+                      </span>
+                      <p className="mt-0.5 text-xs leading-tight text-gray-500">Transfer to our bank account</p>
+                    </div>
+                    {paymentMethod === "bank" && <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-green-600 sm:h-5 sm:w-5" />}
+                  </label>
+
+                 </div>
 
                 {/* Conditional Payment Fields */}
 
 
-                {(paymentMethod === "easypaisa" || paymentMethod === "jazzcash") && (
+                {(paymentMethod === "easypaisa" || paymentMethod === "jazzcash" || paymentMethod === "bank") && (
                   <div className="mb-4 rounded-2xl border border-emerald-200/80 bg-emerald-50/70 p-4 sm:mb-6 sm:p-6">
                     <h3 className="mb-2 text-sm font-semibold text-slate-800 sm:text-base">
                       {paymentMethodLabel} payment details

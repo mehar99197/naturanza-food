@@ -15,6 +15,8 @@ const normalizeImageUrl = (value) => {
   return getAbsoluteImageUrl(trimmed, { defaultFolder: 'categories' });
 };
 
+const CATEGORY_FALLBACK_IMAGE = '/images/og-image.jpg';
+
 const mapCategoryCard = (category) => {
   return {
     id: category.id,
@@ -169,6 +171,10 @@ export function Categories() {
                   {category.image ? (
                     <img
                       src={category.image}
+                      onError={(event) => {
+                        event.currentTarget.onerror = null;
+                        event.currentTarget.src = CATEGORY_FALLBACK_IMAGE;
+                      }}
                       alt={category.name}
                       className="h-full w-full object-contain transition-transform duration-500 ease-out md:group-hover:scale-[1.03]"
                     />

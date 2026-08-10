@@ -25,6 +25,7 @@ const formatMethodLabel = (value) => {
     online: "Online",
     easypaisa: "EasyPaisa",
     jazzcash: "JazzCash",
+    bank: "Bank Transfer",
     paypal: "PayPal",
   };
 
@@ -32,7 +33,7 @@ const formatMethodLabel = (value) => {
 };
 
 export function AdminPayments() {
-  const { orders, fetchOrders } = useOrders();
+  const { orders, fetchOrders, error: ordersError } = useOrders();
   const { settings } = useSettings();
   const [refundAmount, setRefundAmount] = useState(0);
   const [verifiedRevenue, setVerifiedRevenue] = useState(null);
@@ -207,6 +208,12 @@ export function AdminPayments() {
           <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
             <AlertCircle className="h-5 w-5" />
             {error}
+          </div>
+        ) : null}
+        {ordersError ? (
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
+            <AlertCircle className="h-5 w-5" />
+            {ordersError}
           </div>
         ) : null}
 

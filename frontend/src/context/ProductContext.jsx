@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { productAPI } from "@/services/api";
 
 const ProductContext = createContext(null);
@@ -109,14 +110,17 @@ export const useProducts = () => {
 };
 
 export const ProductProvider = ({ children }) => {
+  const location = useLocation();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Fetch products from backend on mount
+  // Refetch when switching between public and admin catalog views so inactive
+  // products are not lost after navigating from the storefront.
   useEffect(() => {
     fetchProducts();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   const fetchProducts = async () => {
     try {

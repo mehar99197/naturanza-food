@@ -49,6 +49,8 @@ const WhatsAppIcon = () => (
   </svg>
 );
 
+const BLOG_FALLBACK_IMAGE = '/images/og-image.jpg';
+
 // ─── Markdown renderers ────────────────────────────────────────────────────────
 
 const makeMarkdownComponents = () => ({
@@ -438,6 +440,10 @@ export function BlogPost() {
                     src={coverImage}
                     alt={post.title}
                     className="w-full h-60 sm:h-[380px] object-cover"
+                    onError={(event) => {
+                      event.currentTarget.onerror = null;
+                      event.currentTarget.src = BLOG_FALLBACK_IMAGE;
+                    }}
                   />
                 )}
                 <div className="p-6 sm:p-9">
@@ -498,6 +504,10 @@ export function BlogPost() {
                               alt={rp.title}
                               loading="lazy"
                               className="h-full w-full object-cover"
+                              onError={(event) => {
+                                event.currentTarget.onerror = null;
+                                event.currentTarget.src = BLOG_FALLBACK_IMAGE;
+                              }}
                             />
                           ) : (
                             <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-green-100 to-emerald-50">

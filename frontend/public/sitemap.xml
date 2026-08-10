@@ -121,28 +121,4 @@
     <priority>0.6</priority>
   </url>
 
-  <!--
-    IMPORTANT: Product detail pages should be dynamically generated.
-    Create backend endpoints:
-
-    1. GET /api/sitemap/products - Returns XML sitemap with all product URLs
-    2. GET /api/sitemap/categories - Returns XML sitemap with category pages
-
-    Example product URL entry:
-    <url>
-      <loc>https://naturanzafood.com/product/123</loc>
-      <lastmod>2026-05-18</lastmod>
-      <changefreq>weekly</changefreq>
-      <priority>0.7</priority>
-      <image:image>
-        <image:loc>https://naturanzafood.com/images/products/product-123.jpg</image:loc>
-        <image:title>Product Name</image:title>
-      </image:image>
-    </url>
-
-    Submit dynamic sitemaps to Google Search Console:
-    - https://naturanzafood.com/api/sitemap/products
-    - https://naturanzafood.com/api/sitemap/categories
-  -->
-
 </urlset>

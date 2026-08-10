@@ -74,7 +74,7 @@ const ADMIN_FALLBACK_IMAGES = {
   tea: "/images/products/tea.webp",
   oil: "/images/products/oil.webp",
   powder: "/images/products/ispaghol_2.webp",
-  seeds: "/images/products/ispaghol_1.png",
+   seeds: "/images/products/ispaghol_2.webp",
   supplements: "/images/products/herbs.webp",
   aloe: "/images/products/herbs.webp",
   coconut: "/images/products/coconut-oil.webp",
@@ -176,8 +176,10 @@ export function AdminProducts() {
     updateProduct,
     deleteProduct,
     fetchProducts,
+    loading: productsLoading,
+    error: productsError,
   } = useProducts();
-  const { categories } = useAdminData();
+  const { categories, loading: adminDataLoading, error: adminDataError } = useAdminData();
   const { settings } = useSettings();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -601,6 +603,12 @@ export function AdminProducts() {
             {error}
           </div>
         ) : null}
+        {productsError || adminDataError ? (
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            <AlertCircle className="h-5 w-5" />
+            {productsError || adminDataError}
+          </div>
+        ) : null}
 
         <section className="md:hidden">
           <div className="rounded-2xl border border-emerald-100 bg-white p-2.5 shadow-[0_10px_24px_rgba(15,64,28,0.08)]">
@@ -821,7 +829,9 @@ export function AdminProducts() {
                 </tr>
               </thead>
               <tbody>
-                {productRows.length > 0 ? (
+                {productsLoading || adminDataLoading ? (
+                  <tr><td colSpan={6} className="px-6 py-14 text-center text-sm font-semibold text-slate-500">Loading products...</td></tr>
+                ) : productRows.length > 0 ? (
                   productRows.map((product) => {
                     const status = normalizeStatus(product);
                     const stock = Number(product.stock_quantity || 0);

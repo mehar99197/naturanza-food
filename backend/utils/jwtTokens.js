@@ -48,7 +48,13 @@ const resolveHsSecret = () => {
   }
 
   // Development fallback: derive a high-entropy secret from configured value.
-  const seed = RAW_JWT_SECRET || `${process.cwd()}::naturanza-dev-jwt-secret`;
+  if (!RAW_JWT_SECRET) {
+    const randomSeed = crypto.randomBytes(64).toString("hex");
+    const derived = crypto.createHash("sha512").update(randomSeed, "utf8").digest("hex");
+    console.warn("JWT_SECRET is not set; using a randomly generated development secret. Sessions invalidated on restart.");
+    return derived;
+  }
+  const seed = RAW_JWT_SECRET;
   const derived = crypto.createHash("sha512").update(seed, "utf8").digest("hex");
 
   console.warn(
@@ -200,5 +206,6 @@ module.exports = {
   toExpiryDate,
   getRefreshCookieOptions,
   clearRefreshCookie,
+  REFRESH_COOKIE_NAME,
   getJwtRuntimeInfo,
 };

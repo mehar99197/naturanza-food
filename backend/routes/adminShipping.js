@@ -3,6 +3,7 @@ const router = express.Router();
 const { dbPool } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
 const requirePermission = require("../middleware/requirePermission");
+const { restrictBody } = require("../middleware/security");
 
 // All routes require authentication and admin role
 router.use(authenticateToken);
@@ -29,7 +30,7 @@ router.get("/city-fees", async (req, res) => {
 });
 
 // POST /api/admin/shipping/city-fees - create city
-router.post("/city-fees", async (req, res) => {
+router.post("/city-fees", restrictBody("city_name", "fee", "is_active"), async (req, res) => {
   try {
     const { city_name, fee = 0, is_active = true } = req.body;
     const parsedFee = parseFee(fee);
@@ -41,15 +42,24 @@ router.post("/city-fees", async (req, res) => {
       return res.status(400).json({ error: "Fee must be a non-negative number" });
     }
 
+    const normalizedCityName = city_name.trim();
+    const [[duplicate]] = await dbPool.query(
+      "SELECT id FROM city_delivery_fees WHERE LOWER(TRIM(city_name)) = LOWER(?) LIMIT 1",
+      [normalizedCityName],
+    );
+    if (duplicate) {
+      return res.status(409).json({ error: "A shipping city with this name already exists" });
+    }
+
     const [result] = await dbPool.query(
       `INSERT INTO city_delivery_fees (city_name, fee, is_active)
        VALUES (?, ?, ?)`,
-       [city_name.trim(), parsedFee, Boolean(is_active)],
+       [normalizedCityName, parsedFee, Boolean(is_active)],
     );
 
     res.status(201).json({
       id: result.insertId,
-      city_name: city_name.trim(),
+       city_name: normalizedCityName,
        fee: parsedFee,
       is_active: Boolean(is_active),
     });
@@ -59,7 +69,7 @@ router.post("/city-fees", async (req, res) => {
 });
 
 // PUT /api/admin/shipping/city-fees/:id - update city
-router.put("/city-fees/:id", async (req, res) => {
+router.put("/city-fees/:id", restrictBody("city_name", "fee", "is_active"), async (req, res) => {
   try {
     const { id } = req.params;
     const { city_name, fee, is_active } = req.body;
@@ -70,6 +80,13 @@ router.put("/city-fees/:id", async (req, res) => {
     if (city_name !== undefined) {
       if (!city_name || typeof city_name !== "string" || !city_name.trim()) {
         return res.status(400).json({ error: "City name cannot be empty" });
+      }
+      const [[duplicate]] = await dbPool.query(
+        "SELECT id FROM city_delivery_fees WHERE LOWER(TRIM(city_name)) = LOWER(?) AND id <> ? LIMIT 1",
+        [city_name.trim(), id],
+      );
+      if (duplicate) {
+        return res.status(409).json({ error: "A shipping city with this name already exists" });
       }
       updates.push("city_name = ?");
       values.push(city_name.trim());
@@ -105,7 +122,10 @@ router.put("/city-fees/:id", async (req, res) => {
       [id],
     );
 
-    res.json(cities[0] || null);
+    if (!cities.length) {
+      return res.status(404).json({ error: "Shipping city not found" });
+    }
+    res.json(cities[0]);
   } catch (error) {
     res.status(500).json({ error: "Could not update shipping city" });
   }
@@ -115,7 +135,10 @@ router.put("/city-fees/:id", async (req, res) => {
 router.delete("/city-fees/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    await dbPool.query("DELETE FROM city_delivery_fees WHERE id = ?", [id]);
+    const [result] = await dbPool.query("DELETE FROM city_delivery_fees WHERE id = ?", [id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Shipping city not found" });
+    }
     res.json({ message: "City deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: "Could not delete shipping city" });

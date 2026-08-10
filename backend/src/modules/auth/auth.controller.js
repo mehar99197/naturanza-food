@@ -6,40 +6,11 @@ const {
   logoutSession,
   serviceError,
 } = require("./auth.service");
-
-const REFRESH_COOKIE_NAME = String(env.REFRESH_COOKIE_NAME || "refreshToken");
-
-const parseRefreshMaxAgeMs = () => {
-  const ttl = String(env.REFRESH_TOKEN_TTL || "7d").trim().toLowerCase();
-
-  // Supports: 7d, 24h, 30m, 45s
-  const match = ttl.match(/^(\d+)\s*([dhms])$/i);
-  if (!match) {
-    return 7 * 24 * 60 * 60 * 1000;
-  }
-
-  const amount = Number(match[1]);
-  const unit = match[2].toLowerCase();
-
-  const unitMs = {
-    d: 24 * 60 * 60 * 1000,
-    h: 60 * 60 * 1000,
-    m: 60 * 1000,
-    s: 1000,
-  };
-
-  return amount * (unitMs[unit] || 24 * 60 * 60 * 1000);
-};
-
-const REFRESH_COOKIE_MAX_AGE_MS = parseRefreshMaxAgeMs();
-
-const getRefreshCookieOptions = () => ({
-  httpOnly: true,
-  secure: Boolean(env.COOKIE_SECURE || env.IS_PRODUCTION),
-  sameSite: "strict",
-  path: "/api/auth",
-  maxAge: REFRESH_COOKIE_MAX_AGE_MS,
-});
+const {
+  getRefreshCookieOptions,
+  clearRefreshCookie,
+  REFRESH_COOKIE_NAME,
+} = require("../../../utils/jwtTokens");
 
 const getRequestIp = (req) => {
   const xff = req.headers["x-forwarded-for"];

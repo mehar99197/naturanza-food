@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, Sparkles, Tag, ArrowRight } from 'lucide-react';
 import { useSettings } from '@/context/SettingsContext';
+import { safeSessionStorage } from '@/lib/storage';
 
 const STORAGE_KEY = 'naturanza:sale-popup:dismissed';
 const SHOW_DELAY_MS = 1200;
@@ -30,7 +31,7 @@ export function DiscountPopup() {
 
     let dismissed = '';
     try {
-      dismissed = window.sessionStorage.getItem(STORAGE_KEY) || '';
+      dismissed = safeSessionStorage.getItem(STORAGE_KEY) || '';
     } catch {
       dismissed = '';
     }
@@ -43,7 +44,7 @@ export function DiscountPopup() {
   const dismiss = () => {
     setOpen(false);
     try {
-      window.sessionStorage.setItem(STORAGE_KEY, signature);
+      safeSessionStorage.setItem(STORAGE_KEY, signature);
     } catch {
       /* ignore */
     }

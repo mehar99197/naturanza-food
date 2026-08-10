@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
 import { useAdminData } from "@/context/AdminDataContext";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
 
@@ -46,8 +47,11 @@ export function AdminCustomers() {
     deleteCustomer,
     toggleCustomerStatus,
     fetchAllData,
+    loading: adminDataLoading,
+    error: adminDataError,
   } = useAdminData();
   const { settings } = useSettings();
+  const { isSuperAdmin } = useAdminAuth();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -246,14 +250,16 @@ export function AdminCustomers() {
               <RefreshCw className="h-4 w-4" />
               Refresh
             </button>
-            <button
-              type="button"
-              onClick={openAddModal}
-              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#16a34a] px-3 text-[13px] font-semibold text-white shadow-[0_14px_30px_rgba(22,163,74,0.32)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#15803d] sm:h-11 sm:w-auto sm:rounded-2xl sm:px-4 sm:text-sm"
-            >
-              <UserPlus className="h-4 w-4" />
-              Add Customer
-            </button>
+            {isSuperAdmin ? (
+              <button
+                type="button"
+                onClick={openAddModal}
+                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#16a34a] px-3 text-[13px] font-semibold text-white shadow-[0_14px_30px_rgba(22,163,74,0.32)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#15803d] sm:h-11 sm:w-auto sm:rounded-2xl sm:px-4 sm:text-sm"
+              >
+                <UserPlus className="h-4 w-4" />
+                Add Customer
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -261,6 +267,12 @@ export function AdminCustomers() {
           <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
             <AlertCircle className="h-5 w-5" />
             {error}
+          </div>
+        ) : null}
+        {adminDataError ? (
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            <AlertCircle className="h-5 w-5" />
+            {adminDataError}
           </div>
         ) : null}
 
@@ -365,7 +377,9 @@ export function AdminCustomers() {
             </div>
 
             <div className="max-h-[48vh] space-y-2 overflow-y-auto sm:max-h-[56vh] xl:max-h-none xl:overflow-visible">
-              {customerRows.length > 0 ? (
+              {adminDataLoading ? (
+                <p className="py-10 text-center text-sm font-semibold text-slate-500">Loading customers...</p>
+              ) : customerRows.length > 0 ? (
                 customerRows.map((customer, index) => (
                   <article
                     key={customer.id}
@@ -424,14 +438,16 @@ export function AdminCustomers() {
                         <Shield className="h-3.5 w-3.5" />
                         {customer.status === "active" ? "Block" : "Activate"}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => void removeCustomer(customer.id)}
-                        className="inline-flex min-h-[34px] items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete
-                      </button>
+                      {isSuperAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => void removeCustomer(customer.id)}
+                          className="inline-flex min-h-[34px] items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </button>
+                      ) : null}
                     </div>
                   </article>
                 ))

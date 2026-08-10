@@ -101,7 +101,14 @@ router.post(
       }
 
       // Ownership: a customer may only submit verification for their own order.
-      if (order.user_id !== req.user.id && req.user.role !== "admin") {
+      const adminPermissions = Array.isArray(req.user.admin_permissions)
+        ? req.user.admin_permissions.map((value) => String(value).trim())
+        : [];
+      const canManagePayments =
+        String(req.user.role || "").toLowerCase() === "admin" &&
+        (String(req.user.admin_role || "").toLowerCase() === "super_admin" ||
+          adminPermissions.includes("manage_payments"));
+      if (order.user_id !== req.user.id && !canManagePayments) {
         return res.status(403).json({ success: false, message: "You do not have access to this order" });
       }
 
@@ -120,32 +127,89 @@ router.post(
         });
       }
 
-      const [result] = await db
-        .promise()
-        .query(
-          `INSERT INTO advance_payment_verifications
-           (order_id, customer_name, customer_phone, amount, payment_method,
-            verification_stage, transaction_id, screenshot_url, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-          [
-            orderId,
-            customerName,
-            customerPhone,
-            enforcedAmount,
-            paymentMethod,
-            verificationStage,
-            transactionId,
-            screenshotUrl,
-          ],
+      const connection = await db.promise().getConnection();
+      try {
+        await connection.beginTransaction();
+        const [[existing]] = await connection.query(
+          `SELECT id, status
+             FROM advance_payment_verifications
+            WHERE order_id = ? AND verification_stage = ?
+            FOR UPDATE`,
+          [orderId, verificationStage],
         );
 
-      return res.status(201).json({
-        success: true,
-        message: "Verification submitted successfully",
-        id: result.insertId,
-        verification_stage: verificationStage,
-        amount: enforcedAmount,
-      });
+        let verificationId;
+        if (existing) {
+          if (String(existing.status).toLowerCase() !== "rejected") {
+            await connection.rollback();
+            return res.status(409).json({
+              success: false,
+              message: "A verification for this stage is already pending or approved.",
+            });
+          }
+
+          const [updated] = await connection.query(
+            `UPDATE advance_payment_verifications
+                SET customer_name = ?, customer_phone = ?, amount = ?,
+                    payment_method = ?, transaction_id = ?, screenshot_url = ?,
+                    status = 'pending', rejection_reason = NULL,
+                    admin_note = NULL, verified_by = NULL, verified_at = NULL,
+                    created_at = CURRENT_TIMESTAMP
+              WHERE id = ? AND status = 'rejected'`,
+            [
+              customerName,
+              customerPhone,
+              enforcedAmount,
+              paymentMethod,
+              transactionId,
+              screenshotUrl,
+              existing.id,
+            ],
+          );
+          if (updated.affectedRows !== 1) {
+            await connection.rollback();
+            return res.status(409).json({
+              success: false,
+              message: "This verification was changed by another request.",
+            });
+          }
+          verificationId = existing.id;
+        } else {
+          const [inserted] = await connection.query(
+            `INSERT INTO advance_payment_verifications
+             (order_id, customer_name, customer_phone, amount, payment_method,
+              verification_stage, transaction_id, screenshot_url, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+            [
+              orderId,
+              customerName,
+              customerPhone,
+              enforcedAmount,
+              paymentMethod,
+              verificationStage,
+              transactionId,
+              screenshotUrl,
+            ],
+          );
+          verificationId = inserted.insertId;
+        }
+        await connection.commit();
+
+        return res.status(existing ? 200 : 201).json({
+          success: true,
+          message: existing
+            ? "Verification resubmitted successfully"
+            : "Verification submitted successfully",
+          id: verificationId,
+          verification_stage: verificationStage,
+          amount: enforcedAmount,
+        });
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
     } catch (error) {
       if (error && (error.code === "ER_DUP_ENTRY" || error.errno === 1062)) {
         // Distinguish duplicate-stage (uq_apv_order_stage) from duplicate-TID

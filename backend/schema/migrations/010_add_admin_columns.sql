@@ -4,11 +4,14 @@
 
 -- Add admin_role column for admin users
 ALTER TABLE users 
-ADD COLUMN admin_role ENUM('super_admin', 'admin', 'moderator') DEFAULT NULL AFTER role;
+ADD COLUMN IF NOT EXISTS admin_role ENUM('super_admin', 'staff_admin', 'admin', 'moderator') DEFAULT NULL AFTER role;
 
 -- Add admin_permissions column for granular permissions
 ALTER TABLE users 
-ADD COLUMN admin_permissions JSON DEFAULT NULL AFTER admin_role;
+ADD COLUMN IF NOT EXISTS admin_permissions JSON DEFAULT NULL AFTER admin_role;
+
+ALTER TABLE users
+MODIFY COLUMN admin_role ENUM('super_admin', 'staff_admin', 'admin', 'moderator') DEFAULT NULL;
 
 -- Update existing admin users to have super_admin role
 UPDATE users 

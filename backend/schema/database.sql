@@ -8,7 +8,7 @@ USE naturanza_food;
 CREATE TABLE IF NOT EXISTS users (
     id INT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(100) NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
+    email VARCHAR(254) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
     phone VARCHAR(20),
     address TEXT,
@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS orders (
         'delivered',
         'cancelled'
     ) DEFAULT 'pending',
-    payment_method ENUM('cod', 'card', 'online', 'easypaisa', 'jazzcash') DEFAULT 'cod',
+    payment_method ENUM('cod', 'card', 'online', 'easypaisa', 'jazzcash', 'bank') DEFAULT 'cod',
     payment_status ENUM('pending', 'partial', 'paid', 'failed') DEFAULT 'pending',
     payment_details JSON,
     shipping_address TEXT NOT NULL,
@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS stock_reservations (
 CREATE TABLE IF NOT EXISTS contacts (
     id INT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(100) NOT NULL,
-    email VARCHAR(100) NOT NULL,
+    email VARCHAR(254) NOT NULL,
     phone VARCHAR(20),
     subject VARCHAR(200),
     message TEXT NOT NULL,
@@ -563,7 +563,7 @@ CREATE TABLE IF NOT EXISTS about_content (
 
 CREATE TABLE IF NOT EXISTS newsletter_subscribers (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    email VARCHAR(120) NOT NULL UNIQUE,
+    email VARCHAR(254) NOT NULL UNIQUE,
     status ENUM('active', 'unsubscribed') NOT NULL DEFAULT 'active',
     unsubscribe_token VARCHAR(64) NOT NULL,
     source VARCHAR(40) NOT NULL DEFAULT 'footer',

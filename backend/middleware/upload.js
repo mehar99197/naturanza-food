@@ -28,7 +28,7 @@ const UPLOADS_IMAGES_DIR =
 // Configure multer for memory storage (we'll process before saving)
 const storage = multer.memoryStorage();
 
-// File filter - only accept images
+// File filter - validate extension. Content verified later by sharp in compressImage().
 const fileFilter = (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|gif|webp/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());

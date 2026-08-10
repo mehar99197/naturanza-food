@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Mail,
@@ -41,6 +41,7 @@ export function AdminMessages() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [mobileView, setMobileView] = useState("queue");
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
+  const messageRequestIdRef = useRef(0);
 
   const loadMessages = useCallback(async () => {
     try {
@@ -87,13 +88,16 @@ export function AdminMessages() {
   }, [messages, searchQuery]);
 
   const openMessage = async (messageItem) => {
+    const requestId = ++messageRequestIdRef.current;
     try {
       setSelectedMessageId(messageItem.id);
       setMobileView("detail");
       const response = await contactAPI.getById(messageItem.id);
+      if (requestId !== messageRequestIdRef.current) return;
       setSelectedMessage(response || messageItem);
       await loadMessages();
     } catch (requestError) {
+      if (requestId !== messageRequestIdRef.current) return;
       setSelectedMessageId(messageItem.id);
       setMobileView("detail");
       setSelectedMessage(messageItem);

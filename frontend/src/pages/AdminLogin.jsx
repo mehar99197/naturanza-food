@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Shield, Mail, Lock, AlertCircle, Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { safeLocalStorage } from "@/lib/storage";
 
 const REMEMBERED_EMAIL_KEY = "adminRememberedEmail";
 
@@ -56,7 +57,7 @@ export function AdminLogin() {
       return;
     }
 
-    const rememberedEmail = window.localStorage.getItem(REMEMBERED_EMAIL_KEY);
+    const rememberedEmail = safeLocalStorage.getItem(REMEMBERED_EMAIL_KEY);
     if (rememberedEmail) {
       setEmail(rememberedEmail);
       setRememberMe(true);
@@ -94,9 +95,9 @@ export function AdminLogin() {
 
     if (result.success) {
       if (rememberMe) {
-        window.localStorage.setItem(REMEMBERED_EMAIL_KEY, email.trim());
+        safeLocalStorage.setItem(REMEMBERED_EMAIL_KEY, email.trim());
       } else {
-        window.localStorage.removeItem(REMEMBERED_EMAIL_KEY);
+        safeLocalStorage.removeItem(REMEMBERED_EMAIL_KEY);
       }
 
       setFailedAttempts(0);

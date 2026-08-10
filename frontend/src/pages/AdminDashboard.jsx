@@ -158,20 +158,23 @@ export function AdminDashboard() {
     error: dashError,
     refresh: refreshDashboard,
   } = useSWRCache(DASHBOARD_CACHE_KEY, async () => {
-    const [
-      statsResponse,
-      recentOrdersResponse,
-      salesResponse,
-      productSalesResponse,
-      paymentAnalyticsResponse,
-    ] =
-      await Promise.all([
-        adminAPI.getDashboardStats(),
-        adminAPI.getRecentOrders(8),
-        adminAPI.getSalesReport(),
-        adminAPI.getProductSalesReport(),
-        adminAPI.getPaymentAnalytics().catch(() => null),
-      ]);
+    const results = await Promise.allSettled([
+      adminAPI.getDashboardStats(),
+      adminAPI.getRecentOrders(8),
+      adminAPI.getSalesReport(),
+      adminAPI.getProductSalesReport(),
+      adminAPI.getPaymentAnalytics(),
+    ]);
+    const valueAt = (index, fallback = []) =>
+      results[index]?.status === "fulfilled" ? results[index].value : fallback;
+    if (results[0]?.status === "rejected" && results[1]?.status === "rejected") {
+      throw results[0].reason;
+    }
+    const statsResponse = valueAt(0, {});
+    const recentOrdersResponse = valueAt(1, []);
+    const salesResponse = valueAt(2, []);
+    const productSalesResponse = valueAt(3, []);
+    const paymentAnalyticsResponse = valueAt(4, null);
     return {
       statsResponse,
       recentOrdersResponse,

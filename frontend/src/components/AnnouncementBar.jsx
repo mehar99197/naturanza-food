@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Info, Sparkles, Tag, X } from "lucide-react";
 import { announcementAPI } from "@/services/api";
+import { safeSessionStorage } from "@/lib/storage";
 
 const DISMISSED_STORAGE_KEY = "naturanza:announcements:dismissed";
 const ROTATION_INTERVAL_MS = 5000;
@@ -71,7 +72,7 @@ const readDismissedState = () => {
     return false;
   }
 
-  return window.sessionStorage.getItem(DISMISSED_STORAGE_KEY) === "true";
+  return safeSessionStorage.getItem(DISMISSED_STORAGE_KEY) === "true";
 };
 
 const truncateText = (value) => String(value || "").trim();
@@ -162,7 +163,7 @@ export default function AnnouncementBar() {
 
   const handleDismiss = () => {
     if (typeof window !== "undefined") {
-      window.sessionStorage.setItem(DISMISSED_STORAGE_KEY, "true");
+      safeSessionStorage.setItem(DISMISSED_STORAGE_KEY, "true");
     }
 
     setDismissed(true);

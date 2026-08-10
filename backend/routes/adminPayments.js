@@ -35,6 +35,20 @@ const insertCustomerNotification = async (conn, { userId, type, title, message, 
   }
 };
 
+const insertApprovedPaymentTransaction = async (conn, verification, adminId) => {
+  await conn.query(
+    `INSERT INTO payment_transactions
+       (order_id, user_id, transaction_type, provider, amount, status,
+        gateway_reference, payload, processed_at)
+     SELECT CAST(v.order_id AS UNSIGNED), o.user_id, 'payment', v.payment_method,
+            v.amount, 'paid', v.transaction_id, ?, NOW()
+       FROM advance_payment_verifications v
+       LEFT JOIN orders o ON o.id = CAST(v.order_id AS UNSIGNED)
+      WHERE v.id = ?`,
+    [JSON.stringify({ verification_id: verification.id, stage: verification.verification_stage, approved_by: adminId }), verification.id],
+  );
+};
+
 const ALLOWED_VERIFICATION_STATUSES = new Set([
   "pending",
   "approved",
@@ -311,7 +325,8 @@ router.put(
       // branch on verification_stage.
       const [[existing]] = await conn.query(
         `SELECT v.id, CAST(v.order_id AS UNSIGNED) AS order_id,
-                v.verification_stage, v.status, o.status AS order_status
+                 v.verification_stage, v.status, v.amount, v.payment_method,
+                 v.transaction_id, o.user_id, o.status AS order_status
            FROM advance_payment_verifications v
            LEFT JOIN orders o ON o.id = CAST(v.order_id AS UNSIGNED)
           WHERE v.id = ?
@@ -369,6 +384,8 @@ router.put(
         [nextOrderPaymentStatus, verificationId],
       );
 
+      await insertApprovedPaymentTransaction(conn, existing, req.user.id);
+
       // Mirror TID onto the order — best-effort, only applicable to stages
       // that actually have a TID (full_payment + advance_shipping). Skip for
       // final_collection (cash, no TID). Tolerate missing column (migration 011).
@@ -395,7 +412,18 @@ router.put(
       //   advance_shipping  → consume on approve so warehouse can ship
       //   final_collection  → NO-OP (stock was already consumed at stage 1)
       if (stage !== "final_collection" && orderId) {
-        await consumeReservationsOnConnection(conn, orderId, req.user.id);
+        const consumed = await consumeReservationsOnConnection(
+          conn,
+          orderId,
+          req.user.id,
+        );
+        if (consumed === 0) {
+          await conn.rollback();
+          return res.status(409).json({
+            error:
+              "This payment cannot be approved because the order's stock reservation has expired. Create a new order or restore stock first.",
+          });
+        }
       }
 
       // When stage-1 (advance_shipping) is approved, create the matching
@@ -720,8 +748,6 @@ router.put(
       });
       return res.status(500).json({
         error: "Failed to reject payment verification",
-        code: error?.code,
-        details: error?.sqlMessage || error?.message,
       });
     } finally {
       conn.release();

@@ -6,7 +6,7 @@
 
 CREATE TABLE IF NOT EXISTS newsletter_subscribers (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    email VARCHAR(120) NOT NULL UNIQUE,
+    email VARCHAR(254) NOT NULL UNIQUE,
     status ENUM('active', 'unsubscribed') NOT NULL DEFAULT 'active',
     unsubscribe_token VARCHAR(64) NOT NULL,
     source VARCHAR(40) NOT NULL DEFAULT 'footer',

@@ -1,9 +1,8 @@
 const multer = require('multer');
+const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 
-// Keep admin profile uploads beside the other persistent media, outside the
-// git-deployed application tree.
 const hostingerPersistentDir = process.env.HOME
   ? path.join(process.env.HOME, 'domains', 'naturanzafood.com', 'persistent-uploads', 'images')
   : null;
@@ -17,7 +16,6 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Configure multer storage
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadsDir);
@@ -28,23 +26,32 @@ const storage = multer.diskStorage({
   }
 });
 
-// File filter to allow only images
 const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|gif|webp/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = allowedTypes.test(file.mimetype);
 
-  if (mimetype && extname) {
-    return cb(null, true);
-  } else {
-    cb(new Error('Only image files are allowed!'));
+  if (!mimetype || !extname) {
+    return cb(new Error('Only image files are allowed!'));
   }
+  cb(null, true);
 };
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: fileFilter
 });
 
+const validateUploadedImage = async (filePath) => {
+  try {
+    await sharp(filePath).metadata();
+    return true;
+  } catch {
+    try { fs.unlinkSync(filePath); } catch (_) {}
+    return false;
+  }
+};
+
 module.exports = upload;
+module.exports.validateUploadedImage = validateUploadedImage;

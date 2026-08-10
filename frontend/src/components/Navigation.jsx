@@ -30,6 +30,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useWishlist } from "@/context/WishlistContext";
 import { userAPI } from "@/services/api";
 import { playNotificationChime, primeNotificationSound } from "@/lib/notificationSound";
+import { safeLocalStorage } from "@/lib/storage";
 
 const resolveUserImage = (user, fallbackImage) => {
   return (
@@ -203,9 +204,9 @@ export function Navigation() {
     const syncProfileImage = (forcedImage) => {
       if (typeof forcedImage !== "undefined") {
         if (forcedImage) {
-          localStorage.setItem("profileImage", forcedImage);
+          safeLocalStorage.setItem("profileImage", forcedImage);
         } else {
-          localStorage.removeItem("profileImage");
+          safeLocalStorage.removeItem("profileImage");
         }
 
         setProfileImage(forcedImage || null);
@@ -213,16 +214,16 @@ export function Navigation() {
         return;
       }
 
-      const savedImage = localStorage.getItem("profileImage");
+      const savedImage = safeLocalStorage.getItem("profileImage");
       const userImage = resolveUserImage(user, null);
       const hasUser = Boolean(user && typeof user === "object");
 
       if (userImage && userImage !== savedImage) {
-        localStorage.setItem("profileImage", userImage);
+          safeLocalStorage.setItem("profileImage", userImage);
       }
 
       if (!userImage && hasUser && savedImage) {
-        localStorage.removeItem("profileImage");
+          safeLocalStorage.removeItem("profileImage");
       }
 
       const nextImage = userImage || (hasUser ? null : savedImage || null);
@@ -269,7 +270,7 @@ export function Navigation() {
     logout();
     setProfileImage(null);
     setImageLoadFailed(false);
-    localStorage.removeItem("profileImage");
+    safeLocalStorage.removeItem("profileImage");
     navigate("/");
   };
 

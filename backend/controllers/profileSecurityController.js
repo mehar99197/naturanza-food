@@ -364,6 +364,39 @@ const changePassword = async (req, res) => {
 
   await addPasswordToHistory(db.promise(), req.user.id, newPassword);
 
+  const currentSessionId = await getCurrentSessionId({
+    userId: req.user.id,
+    token: req.token,
+  });
+  const sessionParams = [req.user.id];
+  let sessionQuery =
+    `SELECT id FROM user_sessions
+     WHERE user_id = ? AND is_active = TRUE`;
+  if (currentSessionId) {
+    sessionQuery += " AND id <> ?";
+    sessionParams.push(currentSessionId);
+  }
+  const [otherSessions] = await db.promise().query(sessionQuery, sessionParams);
+
+  const revokeParams = [req.user.id];
+  let revokeQuery =
+    `UPDATE user_sessions
+     SET is_active = FALSE, revoked_at = NOW(), last_seen_at = NOW()
+     WHERE user_id = ? AND is_active = TRUE`;
+  if (currentSessionId) {
+    revokeQuery += " AND id <> ?";
+    revokeParams.push(currentSessionId);
+  }
+  await db.promise().query(revokeQuery, revokeParams);
+
+  for (const session of otherSessions) {
+    await revokeRefreshTokensBySessionId(
+      db.promise(),
+      session.id,
+      "password_change",
+    );
+  }
+
   return res.json({
     message: isFirstTimePasswordSetup
       ? "Password set successfully. You can now sign in with email and password too."

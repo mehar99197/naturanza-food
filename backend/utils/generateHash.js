@@ -1,25 +1,21 @@
-// Utility script to generate password hash for users
-// Usage: 
-//   node utils/generateHash.js <password> <user_type>
-//   node utils/generateHash.js admin123 admin    (uses 10 salt rounds)
-//   node utils/generateHash.js user123 user      (uses 4 salt rounds)
-
 const bcrypt = require('bcryptjs');
 
-async function generateHash(password, userType = 'user') {
+async function generateHash(password) {
     try {
-        // Determine salt rounds based on user type
-        // Admin: 10 rounds (higher security for privileged accounts)
-        // Normal users: 4 rounds (faster, sufficient for regular users)
-        const saltRounds = userType.toLowerCase() === 'admin' ? 10 : 4;
-        
-        const hash = await bcrypt.hash(password, saltRounds);
-        
-       
+        const hash = await bcrypt.hash(password, 12);
+        console.log(`Hash: ${hash}`);
+        console.log(`Length: ${hash.length} characters`);
+        console.log(`Salt rounds: 12`);
     } catch (error) {
+        console.error('Error generating hash:', error.message);
     }
 }
 
-const password = process.argv[2] || 'admin123';
-const userType = process.argv[3] || 'admin';
-generateHash(password, userType);
+if (require.main === module) {
+    const password = process.argv[2];
+    if (!password) {
+        console.error("Password argument is required");
+        process.exit(1);
+    }
+    generateHash(password);
+}

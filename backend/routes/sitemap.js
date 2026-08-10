@@ -12,6 +12,15 @@ const toAbsoluteUrl = (value) => {
   if (/^https?:\/\//i.test(raw)) return raw;
   return `${BASE_URL}${raw.startsWith('/') ? '' : '/'}${raw}`;
 };
+
+const escapeXml = (value) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+
 function buildXml(urls) {
   const today = new Date().toISOString().split('T')[0];
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -20,15 +29,15 @@ function buildXml(urls) {
 `;
   urls.forEach(url => {
     xml += `  <url>
-    <loc>${url.loc}</loc>
-    <lastmod>${url.lastmod || today}</lastmod>
-    <changefreq>${url.changefreq}</changefreq>
-    <priority>${url.priority}</priority>`;
+    <loc>${escapeXml(url.loc)}</loc>
+    <lastmod>${escapeXml(url.lastmod || today)}</lastmod>
+    <changefreq>${escapeXml(url.changefreq)}</changefreq>
+    <priority>${escapeXml(url.priority)}</priority>`;
     if (url.image) {
       xml += `
     <image:image>
-      <image:loc>${url.image}</image:loc>
-      <image:title>${url.imageTitle || 'Product Image'}</image:title>
+    <image:loc>${escapeXml(url.image)}</image:loc>
+    <image:title>${escapeXml(url.imageTitle || 'Product Image')}</image:title>
     </image:image>`;
     }
     xml += `
@@ -42,7 +51,7 @@ function buildXml(urls) {
 router.get('/sitemap/products', async (req, res) => {
   try {
     const [products] = await pool.query(`
-      SELECT p.id, p.name, p.image_url, p.updated_at, c.slug as category_slug
+        SELECT p.id, p.name, p.updated_at, c.slug as category_slug
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
       WHERE p.is_active = 1
@@ -52,13 +61,11 @@ router.get('/sitemap/products', async (req, res) => {
 
     const urls = products.map(product => {
       const productUrl = `${BASE_URL}/product/${product.id}`;
-      const imageUrl = toAbsoluteUrl(product.image_url);
       return {
         loc: productUrl,
         lastmod: product.updated_at ? product.updated_at.toISOString().split('T')[0] : undefined,
         changefreq: 'weekly',
         priority: 0.7,
-        image: imageUrl,
         imageTitle: product.name
       };
     });
@@ -73,7 +80,7 @@ router.get('/sitemap/products', async (req, res) => {
 router.get('/sitemap/categories', async (req, res) => {
   try {
     const [categories] = await pool.query(
-      `SELECT slug, name, image_url
+      `SELECT slug, name
          FROM categories
         WHERE is_active = TRUE
           AND category_type IN ('shop', 'both')
@@ -84,7 +91,6 @@ router.get('/sitemap/categories', async (req, res) => {
       loc: `${BASE_URL}/shop/${encodeURIComponent(category.slug)}`,
       changefreq: 'weekly',
       priority: 0.8,
-      image: toAbsoluteUrl(category.image_url),
       imageTitle: category.name,
     }));
 

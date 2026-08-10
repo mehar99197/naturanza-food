@@ -45,6 +45,17 @@ const safeNumber = (value, fallback = 0) => {
 
 const buildInClause = (ids) => ids.map(() => '?').join(', ');
 
+const releaseCouponUsageOnConnection = async (connection, couponCode) => {
+  const normalizedCode = String(couponCode || '').trim().toUpperCase();
+  if (!normalizedCode) return;
+  await connection.query(
+    `UPDATE coupons
+        SET used_count = GREATEST(COALESCE(used_count, 0) - 1, 0)
+      WHERE code = ? AND used_count > 0`,
+    [normalizedCode],
+  );
+};
+
 const normalizePaymentMethod = (rawMethod) => {
   const nextMethod = String(rawMethod || 'cod').trim().toLowerCase();
 
@@ -52,7 +63,7 @@ const normalizePaymentMethod = (rawMethod) => {
     return 'card';
   }
 
-  if (nextMethod === 'easypaisa' || nextMethod === 'jazzcash') {
+  if (nextMethod === 'easypaisa' || nextMethod === 'jazzcash' || nextMethod === 'bank') {
     return nextMethod;
   }
 
@@ -60,11 +71,11 @@ const normalizePaymentMethod = (rawMethod) => {
     return nextMethod;
   }
 
-  return 'cod';
+  return null;
 };
 
 const getAllowedPaymentMethods = async (connection) => {
-  const fallback = new Set(['cod', 'card', 'online', 'easypaisa', 'jazzcash']);
+  const fallback = new Set(['cod', 'card', 'online', 'easypaisa', 'jazzcash', 'bank']);
 
   try {
     const [rows] = await connection.query(
@@ -103,6 +114,32 @@ const requireOrdersPermissionForAdmins = (req, res, next) => {
     return next();
   }
   return requirePermission('manage_orders')(req, res, next);
+};
+
+const requireAnyOrderReadPermission = (req, res, next) => {
+  if (String(req.user?.admin_role || '').toLowerCase() === 'super_admin') {
+    return next();
+  }
+  const permissions = Array.isArray(req.user?.admin_permissions)
+    ? req.user.admin_permissions.map((value) => String(value).trim())
+    : [];
+  if (['manage_orders', 'manage_shipping', 'manage_payments'].some((permission) => permissions.includes(permission))) {
+    return next();
+  }
+  return res.status(403).json({ error: 'You do not have permission to view orders' });
+};
+
+const requireOrderOrShippingPermission = (req, res, next) => {
+  if (String(req.user?.admin_role || '').toLowerCase() === 'super_admin') {
+    return next();
+  }
+  const permissions = Array.isArray(req.user?.admin_permissions)
+    ? req.user.admin_permissions.map((value) => String(value).trim())
+    : [];
+  if (permissions.includes('manage_orders') || permissions.includes('manage_shipping')) {
+    return next();
+  }
+  return res.status(403).json({ error: 'You do not have permission to update shipping' });
 };
 
 const restoreConsumedOrSoldInventoryOnConnection = async (
@@ -1169,7 +1206,7 @@ router.get('/my-orders', authenticateToken, async (req, res) => {
 });
 
 // Get all orders (Admin only)
-router.get('/admin/all', authenticateToken, isAdmin, requirePermission('manage_orders'), async (req, res) => {
+router.get('/admin/all', authenticateToken, isAdmin, requireAnyOrderReadPermission, async (req, res) => {
   const status = req.query.status ? String(req.query.status).trim() : null;
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
@@ -1423,6 +1460,7 @@ router.put('/:id/cancel', authenticateToken, restrictBody(), async (req, res) =>
       'cancelled',
       orderId,
     ]);
+    await releaseCouponUsageOnConnection(connection, order.coupon_code);
 
     await insertOrderStatusHistory(connection, {
       orderId,
@@ -1452,7 +1490,7 @@ router.put('/:id/cancel', authenticateToken, restrictBody(), async (req, res) =>
 });
 
 // Update shipment details (Admin only)
-router.put('/:id/shipment', authenticateToken, isAdmin, requirePermission('manage_orders'), restrictBody('courier_name', 'tracking_number', 'shipment_status', 'estimated_delivery', 'metadata'), async (req, res) => {
+router.put('/:id/shipment', authenticateToken, isAdmin, requireOrderOrShippingPermission, restrictBody('courier_name', 'tracking_number', 'shipment_status', 'estimated_delivery', 'metadata'), async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId)) {
     return res.status(400).json({ error: 'Invalid order id' });
@@ -1525,7 +1563,7 @@ router.put('/:id/shipment', authenticateToken, isAdmin, requirePermission('manag
 });
 
 // Update order status (Admin only)
-router.put('/:id/status', authenticateToken, isAdmin, requirePermission('manage_orders'), restrictBody('status', 'payment_status', 'note', 'courier_name', 'tracking_number', 'estimated_delivery'), async (req, res) => {
+router.put('/:id/status', authenticateToken, isAdmin, requireOrderOrShippingPermission, restrictBody('status', 'payment_status', 'note', 'courier_name', 'tracking_number', 'estimated_delivery'), async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId)) {
     return res.status(400).json({ error: 'Invalid order id' });
@@ -1582,6 +1620,52 @@ router.put('/:id/status', authenticateToken, isAdmin, requirePermission('manage_
     const order = orderRows[0];
     const currentPaymentStatus = String(order.payment_status || 'pending').toLowerCase();
     const nextPaymentStatus = requestedPaymentStatus || currentPaymentStatus;
+    const orderStatusRank = {
+      pending: 0,
+      confirmed: 1,
+      processing: 2,
+      shipped: 3,
+      delivered: 4,
+    };
+
+    if (order.status === 'cancelled' && nextStatusRaw !== 'cancelled') {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'Cancelled orders cannot be reopened through a status update.',
+      });
+    }
+
+    if (
+      order.status !== nextStatusRaw &&
+      nextStatusRaw !== 'cancelled' &&
+      (orderStatusRank[nextStatusRaw] === undefined ||
+        orderStatusRank[order.status] === undefined ||
+        orderStatusRank[nextStatusRaw] < orderStatusRank[order.status])
+    ) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Order status cannot move backwards' });
+    }
+
+    if (
+      ['shipped', 'delivered'].includes(nextStatusRaw) &&
+      !['partial', 'paid'].includes(currentPaymentStatus)
+    ) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'Payment must be approved before an order can be shipped or delivered.',
+      });
+    }
+
+    if (
+      requestedPaymentStatus &&
+      requestedPaymentStatus !== currentPaymentStatus &&
+      ['partial', 'paid'].includes(requestedPaymentStatus)
+    ) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'Payment approval must be completed through the payment verification workflow.',
+      });
+    }
 
     await connection.query(
       `UPDATE orders
@@ -1608,6 +1692,7 @@ router.put('/:id/status', authenticateToken, isAdmin, requirePermission('manage_
         req.user.id,
         `Stock restored after admin cancelled order #${orderId}`,
       );
+      await releaseCouponUsageOnConnection(connection, order.coupon_code);
     }
 
     if (nextStatusRaw === 'shipped' || nextStatusRaw === 'delivered') {
@@ -1733,6 +1818,7 @@ router.delete('/:id', authenticateToken, isAdmin, requirePermission('manage_orde
         req.user.id,
         `Stock restored after admin deleted order #${orderId}`,
       );
+      await releaseCouponUsageOnConnection(connection, order.coupon_code);
     }
 
     await insertNotification(

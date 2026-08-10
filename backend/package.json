@@ -30,7 +30,7 @@
     "start": "node index.js",
     "predev": "lsof -ti:5000 | xargs kill -9 2>/dev/null || echo Port 5000 is already free",
     "dev": "nodemon index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/**/*.test.js"
   },
   "keywords": [
     "ecommerce",

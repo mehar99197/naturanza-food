@@ -5,6 +5,7 @@ const createModelError = (message, statusCode, code) => {
   const error = new Error(message);
   error.statusCode = statusCode;
   error.code = code;
+  error.expose = statusCode < 500;
   return error;
 };
 

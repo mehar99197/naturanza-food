@@ -227,10 +227,6 @@ const Login = () => {
                     placeholder="Enter your password"
                     {...register("password", {
                       required: "Password is required",
-                      minLength: {
-                        value: 12,
-                        message: "Password must be at least 12 characters",
-                      },
                     })}
                     className={`${inputClassName} pr-11 ${
                       errors.password

@@ -56,7 +56,7 @@ const toDateInput = (value) => {
 };
 
 export function AdminShipping() {
-  const { orders, fetchOrders, loading, updateOrderStatus } = useOrders();
+  const { orders, fetchOrders, loading, error: ordersError, updateOrderStatus } = useOrders();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -183,7 +183,7 @@ export function AdminShipping() {
       });
 
       if (formData.shipment_status === "shipped" && selectedOrder.status !== "shipped") {
-        await updateOrderStatus(selectedOrder.id, "shipped", selectedOrder.payment_status, {
+        await updateOrderStatus(selectedOrder.id, "shipped", undefined, {
           courier_name: formData.courier_name || undefined,
           tracking_number: formData.tracking_number || undefined,
           estimated_delivery: formData.estimated_delivery || undefined,
@@ -194,7 +194,7 @@ export function AdminShipping() {
         formData.shipment_status === "delivered" &&
         selectedOrder.status !== "delivered"
       ) {
-        await updateOrderStatus(selectedOrder.id, "delivered", selectedOrder.payment_status, {
+        await updateOrderStatus(selectedOrder.id, "delivered", undefined, {
           courier_name: formData.courier_name || undefined,
           tracking_number: formData.tracking_number || undefined,
           estimated_delivery: formData.estimated_delivery || undefined,
@@ -237,6 +237,12 @@ export function AdminShipping() {
           <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
             <AlertCircle className="h-5 w-5" />
             {error}
+          </div>
+        ) : null}
+        {ordersError ? (
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            <AlertCircle className="h-5 w-5" />
+            {ordersError}
           </div>
         ) : null}
 

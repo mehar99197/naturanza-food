@@ -32,7 +32,11 @@ let cachedTemplate = null;
 
 const loadTemplate = (distDir) => {
   if (cachedTemplate) return cachedTemplate;
-  cachedTemplate = fs.readFileSync(path.join(distDir, "index.html"), "utf8");
+  const resolved = path.resolve(distDir);
+  if (!resolved.startsWith(path.resolve(__dirname, "..", "..", "frontend"))) {
+    throw new Error("distDir must be within the frontend directory");
+  }
+  cachedTemplate = fs.readFileSync(path.join(resolved, "index.html"), "utf8");
   return cachedTemplate;
 };
 
@@ -216,6 +220,17 @@ const fetchCategory = async (slug) => {
   return category;
 };
 
+const fetchBlogPost = async (slug) => {
+  const [rows] = await dbPool.query(
+    `SELECT slug, title, excerpt, image_url, is_published
+       FROM blog_posts
+      WHERE slug = ? AND is_published = TRUE
+      LIMIT 1`,
+    [slug],
+  );
+  return rows[0] || null;
+};
+
 const buildProductMeta = (product) => {
   const url = `${SITE_URL}/product/${product.id}`;
   const image = absoluteImage(product.image_url);
@@ -304,11 +319,20 @@ const resolveMeta = async (reqPath) => {
     };
   }
 
-  // Blog posts are low-risk; treat as known (indexable) until a real blog model exists.
-  if (/^\/blog\/[^/]+$/.test(pathname)) {
+  const blogMatch = pathname.match(/^\/blog\/([^/]+)$/);
+  if (blogMatch) {
+    const blogPost = await fetchBlogPost(decodeURIComponent(blogMatch[1]));
+    if (!blogPost) {
+      return { status: 404, meta: notFoundMeta(`${SITE_URL}${pathname}`) };
+    }
     return {
       status: 200,
-      meta: { ...STATIC_PAGES["/blog"], url: `${SITE_URL}${pathname}` },
+      meta: {
+        title: `${blogPost.title} | ${SITE_NAME}`,
+        description: truncate(blogPost.excerpt) || STATIC_PAGES["/blog"].description,
+        image: blogPost.image_url ? absoluteImage(blogPost.image_url) : DEFAULT_OG_IMAGE,
+        url: `${SITE_URL}${pathname}`,
+      },
     };
   }
 

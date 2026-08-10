@@ -89,10 +89,41 @@ const ADMIN_ACCESS_TOKEN_STORAGE_KEY = "adminAccessToken";
 const USER_ACCESS_TOKEN_STORAGE_KEY = "token";
 const USER_SESSION_STORAGE_KEY = "userSessionActive";
 
-const canUseWebStorage = () =>
-  typeof window !== "undefined" &&
-  typeof window.localStorage !== "undefined" &&
-  typeof window.sessionStorage !== "undefined";
+const canUseWebStorage = () => {
+  try {
+    return (
+      typeof window !== "undefined" &&
+      typeof window.localStorage !== "undefined" &&
+      typeof window.sessionStorage !== "undefined"
+    );
+  } catch (_) {
+    return false;
+  }
+};
+
+const safeStorageGet = (storage, key) => {
+  try {
+    return storage?.getItem(key) || null;
+  } catch (_) {
+    return null;
+  }
+};
+
+const safeStorageSet = (storage, key, value) => {
+  try {
+    storage?.setItem(key, value);
+  } catch (_) {
+    // Storage may be blocked or full; keep authentication in memory.
+  }
+};
+
+const safeStorageRemove = (storage, key) => {
+  try {
+    storage?.removeItem(key);
+  } catch (_) {
+    // Ignore unavailable storage.
+  }
+};
 
 const readStoredAdminAccessToken = () => {
   if (!canUseWebStorage()) {
@@ -100,7 +131,7 @@ const readStoredAdminAccessToken = () => {
   }
 
   const storedToken = String(
-    window.localStorage.getItem(ADMIN_ACCESS_TOKEN_STORAGE_KEY) || "",
+    safeStorageGet(window.sessionStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY) || "",
   ).trim();
 
   return storedToken || null;
@@ -112,7 +143,7 @@ const readStoredUserAccessToken = () => {
   }
 
   const storedToken = String(
-    window.localStorage.getItem(USER_ACCESS_TOKEN_STORAGE_KEY) || "",
+    safeStorageGet(window.sessionStorage, USER_ACCESS_TOKEN_STORAGE_KEY) || "",
   ).trim();
 
   return storedToken || null;
@@ -123,21 +154,48 @@ const readStoredUserSessionFlag = () => {
     return false;
   }
 
-  return window.localStorage.getItem(USER_SESSION_STORAGE_KEY) === "true";
+  return safeStorageGet(window.sessionStorage, USER_SESSION_STORAGE_KEY) === "true";
 };
 
 let userAccessToken = readStoredUserAccessToken();
 let adminAccessToken = readStoredAdminAccessToken();
 let userSessionActive = readStoredUserSessionFlag();
 let refreshPromise = null;
+let userAuthGeneration = 0;
+
+const refreshUserAccessToken = () => {
+  const generation = userAuthGeneration;
+  if (!refreshPromise) {
+    refreshPromise = axiosInstance
+      .post(
+        "/auth/refresh",
+        {},
+        { headers: { "X-Skip-Auth-Refresh": "true" } },
+      )
+      .then((response) => {
+        const nextToken = response.data?.accessToken || response.data?.token;
+        if (!nextToken || generation !== userAuthGeneration) {
+          return null;
+        }
+        setUserAccessToken(nextToken);
+        emitAuthSessionSync("user-token-refresh");
+        return nextToken;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+};
 
 const purgeLegacyUserTokenStorage = () => {
   if (!canUseWebStorage()) {
     return;
   }
 
-  window.localStorage.removeItem("authToken");
-  window.sessionStorage.removeItem("authToken");
+  safeStorageRemove(window.localStorage, "authToken");
+  safeStorageRemove(window.localStorage, USER_ACCESS_TOKEN_STORAGE_KEY);
+  safeStorageRemove(window.sessionStorage, "authToken");
 };
 
 const purgeLegacyAdminTokenStorage = () => {
@@ -145,7 +203,8 @@ const purgeLegacyAdminTokenStorage = () => {
     return;
   }
 
-  window.localStorage.removeItem("adminAuthToken");
+  safeStorageRemove(window.localStorage, "adminAuthToken");
+  safeStorageRemove(window.localStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY);
 };
 
 export const setUserAccessToken = (token) => {
@@ -158,11 +217,11 @@ export const setUserAccessToken = (token) => {
   }
 
   if (userAccessToken) {
-    window.localStorage.setItem(USER_ACCESS_TOKEN_STORAGE_KEY, userAccessToken);
-    window.localStorage.setItem(USER_SESSION_STORAGE_KEY, "true");
+    safeStorageSet(window.sessionStorage, USER_ACCESS_TOKEN_STORAGE_KEY, userAccessToken);
+    safeStorageSet(window.sessionStorage, USER_SESSION_STORAGE_KEY, "true");
   } else {
-    window.localStorage.removeItem(USER_ACCESS_TOKEN_STORAGE_KEY);
-    window.localStorage.removeItem(USER_SESSION_STORAGE_KEY);
+    safeStorageRemove(window.sessionStorage, USER_ACCESS_TOKEN_STORAGE_KEY);
+    safeStorageRemove(window.sessionStorage, USER_SESSION_STORAGE_KEY);
   }
 };
 
@@ -171,6 +230,7 @@ export const getUserAccessToken = () => userAccessToken;
 export const hasUserSession = () => userSessionActive;
 
 export const clearUserAccessToken = () => {
+  userAuthGeneration += 1;
   userAccessToken = null;
   userSessionActive = false;
   
@@ -178,8 +238,9 @@ export const clearUserAccessToken = () => {
     return;
   }
 
-  window.localStorage.removeItem(USER_ACCESS_TOKEN_STORAGE_KEY);
-  window.localStorage.removeItem(USER_SESSION_STORAGE_KEY);
+  safeStorageRemove(window.sessionStorage, USER_ACCESS_TOKEN_STORAGE_KEY);
+  safeStorageRemove(window.sessionStorage, USER_SESSION_STORAGE_KEY);
+  safeStorageRemove(window.localStorage, USER_ACCESS_TOKEN_STORAGE_KEY);
 };
 
 export const setAdminAccessToken = (token) => {
@@ -190,9 +251,9 @@ export const setAdminAccessToken = (token) => {
   }
 
   if (adminAccessToken) {
-    window.localStorage.setItem(ADMIN_ACCESS_TOKEN_STORAGE_KEY, adminAccessToken);
+    safeStorageSet(window.sessionStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY, adminAccessToken);
   } else {
-    window.localStorage.removeItem(ADMIN_ACCESS_TOKEN_STORAGE_KEY);
+    safeStorageRemove(window.sessionStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY);
   }
 };
 
@@ -205,7 +266,8 @@ export const clearAdminAccessToken = () => {
     return;
   }
 
-  window.localStorage.removeItem(ADMIN_ACCESS_TOKEN_STORAGE_KEY);
+  safeStorageRemove(window.sessionStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY);
+  safeStorageRemove(window.localStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY);
 };
 
 purgeLegacyUserTokenStorage();
@@ -215,16 +277,16 @@ const clearUserSessionStorage = () => {
   clearUserAccessToken();
   purgeLegacyUserTokenStorage();
   if (canUseWebStorage()) {
-    window.localStorage.removeItem("userData");
-    window.localStorage.removeItem("profileImage");
-    window.localStorage.removeItem(USER_SESSION_STORAGE_KEY);
+    safeStorageRemove(window.localStorage, "userData");
+    safeStorageRemove(window.localStorage, "profileImage");
+    safeStorageRemove(window.sessionStorage, USER_SESSION_STORAGE_KEY);
   }
 };
 
 const clearAdminSessionStorage = () => {
   clearAdminAccessToken();
   if (canUseWebStorage()) {
-    window.localStorage.removeItem("adminData");
+    safeStorageRemove(window.localStorage, "adminData");
   }
 };
 
@@ -270,7 +332,8 @@ axiosInstance.interceptors.request.use(async (config) => {
     /^\/cart(\/|$)/.test(requestUrl) ||
     /^\/orders(\/|$)/.test(requestUrl) ||
     /^\/reviews(\/|$)/.test(requestUrl) ||
-    /^\/payments(\/|$)/.test(requestUrl);
+    /^\/payments(\/|$)/.test(requestUrl) ||
+    /^\/coupons\/active(\/|$)/.test(requestUrl);
   const isAdminRoute =
     requestUrl.includes("/admin") ||
     requestUrl.includes("/admin-") ||
@@ -283,18 +346,12 @@ axiosInstance.interceptors.request.use(async (config) => {
   let token = null;
   let authScope = "none";
 
-  if (isAdminRoute || isAdminPage) {
-    token = adminToken || null;
-    authScope = token ? "admin" : "none";
-  } else if (isUserScopedRoute) {
+  if (isUserScopedRoute) {
     token = userToken || null;
     authScope = token ? "user" : "none";
-  }
-
-  // For user-scoped routes, fall back to admin token if no user token is available
-  if (!token && isUserScopedRoute && adminToken) {
-    token = adminToken;
-    authScope = "user";
+  } else if (isAdminRoute || isAdminPage) {
+    token = adminToken || null;
+    authScope = token ? "admin" : "none";
   }
 
   config._authScope = authScope;
@@ -334,7 +391,8 @@ const isUserRoute = (url) =>
   /^\/cart(\/|$)/.test(url) ||
   /^\/orders(\/|$)/.test(url) ||
   /^\/reviews(\/|$)/.test(url) ||
-  /^\/payments(\/|$)/.test(url);
+  /^\/payments(\/|$)/.test(url) ||
+  /^\/coupons\/active(\/|$)/.test(url);
 
 const CSRF_USER_MESSAGE =
   "Your security session expired. Please refresh the page and try again.";
@@ -419,29 +477,7 @@ axiosInstance.interceptors.response.use(
       originalRequest._refreshRetry = true;
 
       try {
-        if (!refreshPromise) {
-          refreshPromise = axiosInstance
-            .post(
-              "/auth/refresh",
-              {},
-              { headers: { "X-Skip-Auth-Refresh": "true" } },
-            )
-            .then((refreshResponse) => {
-              const newToken =
-                refreshResponse.data?.accessToken || refreshResponse.data?.token;
-              if (!newToken) {
-                throw new Error("Refresh token missing");
-              }
-              setUserAccessToken(newToken);
-              emitAuthSessionSync("user-token-refresh");
-              return newToken;
-            })
-            .finally(() => {
-              refreshPromise = null;
-            });
-        }
-
-        const refreshedToken = await refreshPromise;
+        const refreshedToken = await refreshUserAccessToken();
         if (refreshedToken) {
           originalRequest.headers = originalRequest.headers || {};
           originalRequest.headers.Authorization = `Bearer ${refreshedToken}`;
@@ -525,12 +561,23 @@ const hasDownloadablePayload = (payload) => {
 // Product APIs
 export const productAPI = {
   getAll: async (includeInactive = false) => {
-    const response = await axiosInstance.get("/products", {
-      params: includeInactive
-        ? { includeInactive: 'true', limit: 500 }
-        : { limit: 500 },
-    });
-    return response.data;
+    const allProducts = [];
+    const pageSize = 500;
+    for (let offset = 0; offset < pageSize * 100; offset += pageSize) {
+      const response = await axiosInstance.get("/products", {
+        params: {
+          ...(includeInactive ? { includeInactive: "true" } : {}),
+          limit: pageSize,
+          offset,
+        },
+      });
+      const page = Array.isArray(response.data)
+        ? response.data
+        : response.data?.data || [];
+      allProducts.push(...page);
+      if (page.length < pageSize) break;
+    }
+    return { data: allProducts };
   },
 
   uploadImage: async (file) => {
@@ -581,14 +628,14 @@ export const productAPI = {
   },
 
   getReviews: async (productId) => {
-    const response = await axiosInstance.get(`/products/${productId}/reviews`);
+    const response = await axiosInstance.get(`/reviews/product/${productId}`);
     return response.data;
   },
 
   addReview: async (productId, reviewData) => {
     const response = await axiosInstance.post(
-      `/products/${productId}/reviews`,
-      reviewData,
+      "/reviews",
+      { ...reviewData, product_id: productId },
     );
     return response.data;
   },
@@ -642,13 +689,11 @@ export const userAPI = {
   },
 
   refreshToken: async () => {
-    const response = await axiosInstance.post("/auth/refresh");
-    const nextToken = response.data.accessToken || response.data.token;
-    if (nextToken) {
-      setUserAccessToken(nextToken);
-      emitAuthSessionSync("user-token-refresh");
+    const nextToken = await refreshUserAccessToken();
+    if (!nextToken) {
+      throw new Error("Refresh token missing or session ended");
     }
-    return response.data;
+    return { accessToken: nextToken, token: nextToken };
   },
 
   logout: async () => {
@@ -1035,11 +1080,11 @@ export const adminAPI = {
     return response.data;
   },
 
-  getProductSalesReport: async () => {
+  getProductSalesReport: async (params = {}) => {
     if (!getAdminAccessToken()) {
       return [];
     }
-    const response = await axiosInstance.get("/admin/reports/products");
+    const response = await axiosInstance.get("/admin/reports/products", { params });
     return response.data;
   },
 
@@ -1443,10 +1488,23 @@ export const orderAPI = {
       return [];
     }
     const endpoint = hasAdminToken ? "/orders/admin/all" : "/orders/my-orders";
-    const response = await axiosInstance.get(endpoint, {
-      params: hasAdminToken ? { limit: 500 } : {},
-    });
-    return response.data;
+    if (!hasAdminToken) {
+      const response = await axiosInstance.get(endpoint);
+      return response.data;
+    }
+    const allOrders = [];
+    const pageSize = 500;
+    for (let offset = 0; offset < pageSize * 100; offset += pageSize) {
+      const response = await axiosInstance.get(endpoint, {
+        params: { limit: pageSize, offset },
+      });
+      const page = Array.isArray(response.data)
+        ? response.data
+        : response.data?.data || [];
+      allOrders.push(...page);
+      if (page.length < pageSize) break;
+    }
+    return allOrders;
   },
 
   getById: async (id) => {

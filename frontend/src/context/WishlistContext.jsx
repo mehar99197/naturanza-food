@@ -69,9 +69,9 @@ export function WishlistProvider({ children }) {
 			setItems([]);
 			return [];
 		} finally {
-			if (!silent && requestGeneration === requestGenerationRef.current) {
-				setLoading(false);
-			}
+          if (!silent) {
+            setLoading(false);
+          }
 		}
 	}, [isAuthenticated]);
 

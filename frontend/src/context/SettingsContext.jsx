@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import { adminAPI, settingsAPI, geolocationAPI } from '@/services/api';
 import { useAdminAuth } from '@/context/AdminAuthContext';
 import { setExchangeRates as setExchangeRatesStore, hasExchangeRate } from '@/lib/exchangeRates';
+import { safeLocalStorage } from '@/lib/storage';
 
 const SettingsContext = createContext();
 const SETTINGS_POLL_INTERVAL_MS = 30000;
@@ -234,7 +235,7 @@ export function SettingsProvider({ children }) {
   // currency away from the detected one.
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(CURRENCY_STORAGE_KEY);
+      safeLocalStorage.removeItem(CURRENCY_STORAGE_KEY);
     }
   }, []);
 

@@ -19,10 +19,13 @@ router.get('/', authenticateToken, isAdmin, requirePermission('manage_coupons'),
     });
 });
 
-// Get active coupons (Public - used during checkout)
-router.get('/active', (req, res) => {
+// Get active coupons (Public - used during checkout).
+// Expose only the code+description so the discount logic stays server-side;
+// the coupon code alone is sufficient for the checkout flow.
+router.get('/active', authenticateToken, (req, res) => {
     const query = `
-        SELECT id, code, description, discount_type, discount_value, min_order_amount, max_discount, expiry_date
+        SELECT code, description, discount_type, discount_value,
+               min_order_amount, max_discount
         FROM coupons
         WHERE is_active = TRUE
         AND (expiry_date IS NULL OR expiry_date > NOW())
@@ -124,6 +127,10 @@ router.post('/', authenticateToken, isAdmin, requirePermission('manage_coupons')
         code, description, discount_type, discount_value, 
         min_order_amount, max_discount, usage_limit, expiry_date 
     } = req.body;
+
+    if (!String(code || '').trim()) {
+        return res.status(400).json({ error: 'Coupon code is required' });
+    }
     
     if (!code || !discount_value) {
         return res.status(400).json({ error: 'Code and discount value are required' });

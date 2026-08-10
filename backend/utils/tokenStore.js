@@ -178,6 +178,25 @@ const isAccessTokenBlacklisted = async (db, jti) => {
   return rows.length > 0;
 };
 
+const purgeExpiredBlacklist = async (db) => {
+  const [result] = await db.query(
+    "DELETE FROM token_blacklist WHERE expires_at <= NOW()"
+  );
+  if (result.affectedRows > 0) {
+    console.log(`Purged ${result.affectedRows} expired token blacklist entries`);
+  }
+};
+
+const startBlacklistCleanup = (db, intervalMs = 60 * 60 * 1000) => {
+  const cleanup = () => {
+    purgeExpiredBlacklist(db).catch((err) =>
+      console.warn("Token blacklist cleanup failed:", err.message)
+    );
+  };
+  cleanup();
+  return setInterval(cleanup, intervalMs);
+};
+
 module.exports = {
   createRefreshTokenRecord,
   findActiveRefreshTokenRecord,
@@ -188,4 +207,5 @@ module.exports = {
   touchRefreshTokenByJti,
   blacklistAccessToken,
   isAccessTokenBlacklisted,
+  startBlacklistCleanup,
 };

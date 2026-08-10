@@ -37,6 +37,7 @@ import { NoIndexSEO } from "@/components/SEO";
 import { prefetchAdminRoute } from "@/utils/adminPrefetch";
 import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 import { featureFromPath } from "@/config/adminPermissions";
+import { safeLocalStorage, safeSessionStorage } from "@/lib/storage";
 
 const MOBILE_MEDIA_QUERY = "(max-width: 1023px)";
 const COLLAPSED_MENU_ICON_CLASS = "h-4 w-4";
@@ -124,7 +125,7 @@ function AdminLayoutShell({ children }) {
       return false;
     }
 
-    return window.localStorage.getItem("admin-sidebar-collapsed") === "true";
+    return safeLocalStorage.getItem("admin-sidebar-collapsed") === "true";
   });
 
   const persistSidebarScrollTop = (nextScrollTop) => {
@@ -133,7 +134,7 @@ function AdminLayoutShell({ children }) {
     }
 
     const normalized = Number.isFinite(nextScrollTop) ? Math.max(0, Math.floor(nextScrollTop)) : 0;
-    window.sessionStorage.setItem(SIDEBAR_SCROLL_STORAGE_KEY, String(normalized));
+    safeSessionStorage.setItem(SIDEBAR_SCROLL_STORAGE_KEY, String(normalized));
   };
 
   const activeNavItem = useMemo(() => {
@@ -216,7 +217,7 @@ function AdminLayoutShell({ children }) {
       return;
     }
 
-    window.localStorage.setItem("admin-sidebar-collapsed", String(desktopSidebarCollapsed));
+    safeLocalStorage.setItem("admin-sidebar-collapsed", String(desktopSidebarCollapsed));
   }, [desktopSidebarCollapsed]);
 
   useEffect(() => {
@@ -229,7 +230,7 @@ function AdminLayoutShell({ children }) {
       return;
     }
 
-    const savedScrollTop = Number(window.sessionStorage.getItem(SIDEBAR_SCROLL_STORAGE_KEY));
+    const savedScrollTop = Number(safeSessionStorage.getItem(SIDEBAR_SCROLL_STORAGE_KEY));
     const restoredScrollTop = Number.isFinite(savedScrollTop) ? Math.max(0, savedScrollTop) : 0;
 
     const frameId = window.requestAnimationFrame(() => {

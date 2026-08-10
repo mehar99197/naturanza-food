@@ -118,7 +118,7 @@ const getInvoiceErrorMessage = async (
 
 export function ProfileOrders() {
   const { settings } = useSettings();
-  const { orders: allOrders, loading: ordersLoading, fetchOrders } = useOrders();
+  const { orders: allOrders, loading: ordersLoading, error: ordersError, fetchOrders } = useOrders();
   const { user } = useAuth();
 
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -607,7 +607,18 @@ export function ProfileOrders() {
         </div>
       </div>
 
-      {filteredOrders.length === 0 ? (
+      {ordersError ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-8 text-center text-red-700">
+          <p className="font-semibold">Could not load your orders.</p>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white"
+          >
+            Try again
+          </button>
+        </div>
+      ) : filteredOrders.length === 0 ? (
         <div className="rounded-xl border border-gray-100 p-8 sm:p-12 text-center bg-white">
           <Package className="w-12 h-12 sm:w-16 sm:h-16 text-gray-400 mx-auto mb-3 sm:mb-4" />
           <h3 className="text-lg sm:text-xl font-semibold text-gray-900 mb-2">

@@ -203,9 +203,13 @@ const AdminResetPassword = () => {
                         {...register("password", {
                           required: "Password is required",
                           minLength: {
-                            value: 8,
-                            message: "Password must be at least 8 characters",
-                          },
+                             value: 12,
+                             message: "Password must be at least 12 characters",
+                           },
+                           pattern: {
+                             value: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/,
+                             message: "Use uppercase, lowercase, number, and special character",
+                           },
                         })}
                         className={`w-full rounded-2xl border border-green-100 bg-white px-4 py-2.5 pl-10 pr-11 text-sm text-slate-800 placeholder:text-slate-400 shadow-sm outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100 ${
                           errors.password

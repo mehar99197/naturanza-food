@@ -12,6 +12,7 @@ const createModelError = (message, statusCode, code) => {
   const error = new Error(message);
   error.statusCode = statusCode;
   error.code = code;
+  error.expose = statusCode < 500;
   return error;
 };
 
@@ -119,7 +120,7 @@ const listActiveCategories = async () => {
 
 const findById = async (categoryId) => {
   const [rows] = await dbPool.query(
-    "SELECT * FROM categories WHERE id = ? LIMIT 1",
+    "SELECT * FROM categories WHERE id = ? AND is_active = TRUE LIMIT 1",
     [categoryId],
   );
 

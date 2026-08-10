@@ -68,8 +68,7 @@ router.post(
       });
     } catch (error) {
       return res.status(500).json({ 
-        error: "Failed to process upload",
-        details: error.message 
+        error: "Failed to process upload"
       });
     }
   }

@@ -10,7 +10,7 @@ UPDATE users SET email_verified = TRUE;
 CREATE TABLE IF NOT EXISTS email_verification_codes (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
-    email VARCHAR(120) NOT NULL,
+    email VARCHAR(254) NOT NULL,
     code_hash CHAR(64) NOT NULL,
     expires_at DATETIME NOT NULL,
     attempts INT NOT NULL DEFAULT 0,

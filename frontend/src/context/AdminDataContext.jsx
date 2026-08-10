@@ -14,7 +14,7 @@ export const useAdminData = () => {
 };
 
 export const AdminDataProvider = ({ children }) => {
-  const { isAdminAuthenticated, loading: adminLoading } = useAdminAuth();
+  const { isAdminAuthenticated, loading: adminLoading, admin } = useAdminAuth();
   const location = useLocation();
   const isAdminRoute = location.pathname.startsWith("/admin");
   const [products, setProducts] = useState([]);
@@ -79,19 +79,26 @@ export const AdminDataProvider = ({ children }) => {
 
     try {
       setLoading(true);
-      const [
-        productsData,
-        ordersData,
-        customersData,
-        couponsData,
-        categoriesData,
-      ] = await Promise.all([
-        productAPI.getAll(),
-        orderAPI.getAll(),
-        adminAPI.getCustomers(),
-        adminAPI.getCoupons(),
-        categoryAPI.getAll(),
+      const isSuperAdmin = admin?.admin_role === "super_admin";
+      const permissions = Array.isArray(admin?.admin_permissions)
+        ? admin.admin_permissions.map((value) => String(value).trim())
+        : [];
+      const canLoad = (permission) => isSuperAdmin || permissions.includes(permission);
+      const results = await Promise.allSettled([
+        canLoad("manage_products") ? productAPI.getAll() : Promise.resolve([]),
+        canLoad("manage_orders") ? orderAPI.getAll() : Promise.resolve([]),
+        canLoad("manage_customers") ? adminAPI.getCustomers() : Promise.resolve([]),
+        canLoad("manage_coupons") ? adminAPI.getCoupons() : Promise.resolve([]),
+        canLoad("manage_categories") ? categoryAPI.getAll() : Promise.resolve([]),
       ]);
+      const valueAt = (index) =>
+        results[index]?.status === "fulfilled" ? results[index].value : [];
+      const failedRequests = results.filter((result) => result.status === "rejected");
+      const productsData = valueAt(0);
+      const ordersData = valueAt(1);
+      const customersData = valueAt(2);
+      const couponsData = valueAt(3);
+      const categoriesData = valueAt(4);
 
       setProducts(
         extractList(productsData),
@@ -108,13 +115,13 @@ export const AdminDataProvider = ({ children }) => {
       setCategories(
         extractList(categoriesData),
       );
-      setError(null);
+      setError(failedRequests.length ? "Some admin data could not be loaded" : null);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [isAdminAuthenticated, isAdminRoute]);
+  }, [admin, isAdminAuthenticated, isAdminRoute]);
 
   useEffect(() => {
     if (adminLoading) {

@@ -41,10 +41,10 @@ router.post('/', authenticateToken, restrictBody('product_id', 'rating', 'commen
       return res.status(400).json({ error: 'You have already reviewed this product' });
     }
 
-    // Insert review — auto-approved
+    // New reviews remain pending until an authorized admin approves them.
     const [result] = await db.promise().query(
       `INSERT INTO reviews (user_id, product_id, rating, comment, is_approved, created_at)
-       VALUES (?, ?, ?, ?, 1, NOW())`,
+       VALUES (?, ?, ?, ?, 0, NOW())`,
       [user_id, parsedProductId, parsedRating, comment || null]
     );
 

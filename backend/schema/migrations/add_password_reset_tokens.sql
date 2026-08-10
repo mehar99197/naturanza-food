@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
-    email VARCHAR(100) NOT NULL,
+    email VARCHAR(254) NOT NULL,
     token_hash CHAR(64) NOT NULL,
     expires_at DATETIME NOT NULL,
     is_used BOOLEAN DEFAULT FALSE,

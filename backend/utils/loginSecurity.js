@@ -43,6 +43,11 @@ const resetLoginFailuresAtomic = async (dbConnection, userId) => {
   }
 };
 
+const progressiveDelayMs = (failedAttempts) => {
+  if (failedAttempts <= 0) return 0;
+  return Math.min(failedAttempts * 1500, 30000);
+};
+
 const isAccountLockedAtomic = async (dbConnection, userRecord) => {
   try {
     const [rows] = await dbConnection.query(
@@ -132,6 +137,7 @@ module.exports = {
   isAccountLockedAtomic,
   checkAccountLockout,
   lockAccountAtomic,
+  progressiveDelayMs,
   unlockAccountAtomic,
   createLoginAttemptKey,
   LOGIN_MAX_ATTEMPTS,

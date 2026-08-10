@@ -298,6 +298,10 @@ export function Hero() {
                         <img
                           src={slideImage}
                           alt={slide.headline}
+                            onError={(event) => {
+                              event.currentTarget.onerror = null;
+                              event.currentTarget.src = fallbackHeroImage;
+                            }}
                           className="relative z-10 w-full h-auto object-contain drop-shadow-2xl max-h-[150px] sm:max-h-[220px] md:max-h-none"
                           loading={index === 0 ? 'eager' : 'lazy'}
                         />

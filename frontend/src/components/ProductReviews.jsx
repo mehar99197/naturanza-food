@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Star } from 'lucide-react';
+import { safeLocalStorage } from '@/lib/storage';
 
 // Mock reviews removed - now using real reviews from database
 const DEFAULT_REVIEWS = [];
@@ -79,7 +80,7 @@ export function ProductReviews({
  date: new Date().toISOString(),
  rating,
  comment: comment.trim(),
- userAvatar: user?.profileImage || user?.avatar || localStorage.getItem('profileImage') || '',
+ userAvatar: user?.profileImage || user?.avatar || safeLocalStorage.getItem('profileImage') || '',
  };
 
  try {

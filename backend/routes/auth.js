@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const { OAuth2Client } = require("google-auth-library");
 const { db } = require("../config/db");
@@ -19,6 +20,7 @@ const {
 const {
   createUserSession,
   updateSessionToken,
+  hashToken,
   revokeSessionByToken,
   revokeSessionById,
   revokeSessionsByUserId,
@@ -69,6 +71,7 @@ const {
   recordFailedLoginAtomic,
   resetLoginFailuresAtomic,
   checkAccountLockout,
+  progressiveDelayMs,
 } = require("../utils/loginSecurity");
 
 const googleClient = new OAuth2Client();
@@ -78,6 +81,7 @@ const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
 );
 const LOCATION_CACHE_TTL_MS = 1000 * 60 * 60 * 6;
 const ipLocationCache = new Map();
+const lastResetSent = new Map();
 const LOGIN_MAX_ATTEMPTS =
   Number.parseInt(process.env.LOGIN_MAX_ATTEMPTS || "5", 10) || 5;
 const LOGIN_LOCK_MINUTES =
@@ -89,6 +93,11 @@ setInterval(() => {
   for (const [key, entry] of ipLocationCache.entries()) {
     if (now - entry.timestamp > LOCATION_CACHE_TTL_MS) {
       ipLocationCache.delete(key);
+    }
+  }
+  for (const [key, time] of lastResetSent.entries()) {
+    if (now - time > 120_000) {
+      lastResetSent.delete(key);
     }
   }
 }, LOCATION_CACHE_TTL_MS);
@@ -105,22 +114,6 @@ const isAdminAccount = (user) =>
 //
 // These refusals deliberately carry no `redirect` and never name the admin
 // panel. An unauthenticated visitor typing an address into a public form has
-// proven nothing, so pointing them at the panel would just hand a guesser the
-// door to attack. The portal is disclosed only once the person has proven the
-// account is theirs — correct password, valid Google token, or a verified email
-// code — which is why the login / google / verify-email paths still redirect.
-const ADMIN_EMAIL_SIGNUP_BLOCKED = {
-  error:
-    "This email address can't be used to create a customer account. Please use a different email address.",
-  code: "EMAIL_NOT_AVAILABLE",
-};
-
-const ADMIN_EMAIL_RECOVERY_BLOCKED = {
-  error:
-    "This email address can't be used to recover a customer account. Please use a different email address, or contact support if you need help.",
-  code: "EMAIL_NOT_AVAILABLE",
-};
-
 const getAllowedGoogleClientIds = () => {
   const configuredIds = [
     process.env.GOOGLE_CLIENT_ID,
@@ -494,7 +487,7 @@ router.post("/register", async (req, res) => {
 
     if (existingUsers.length > 0) {
       if (isAdminAccount(existingUsers[0])) {
-        return res.status(403).json(ADMIN_EMAIL_SIGNUP_BLOCKED);
+        return res.status(400).json({ error: "Email already registered" });
       }
 
       // A prior signup that was never verified: steer them to verification
@@ -632,7 +625,7 @@ router.post("/resend-verification", async (req, res) => {
     // An admin row that was never marked verified would otherwise let the
     // storefront mail a signup code to an admin address on demand.
     if (isAdminAccount(users[0])) {
-      return res.status(403).json(ADMIN_EMAIL_SIGNUP_BLOCKED);
+      return genericOk();
     }
 
     const user = users[0];
@@ -747,6 +740,9 @@ router.post("/login", async (req, res) => {
         });
       }
 
+      const delayMs = progressiveDelayMs(LOGIN_MAX_ATTEMPTS - newLockStatus.attemptsLeft);
+      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+
       // Uniform response (no attemptsLeft) so an attacker cannot distinguish a
       // real account from an unknown email via the response body.
       return res.status(401).json({
@@ -768,9 +764,7 @@ router.post("/login", async (req, res) => {
       });
 
       return res.status(403).json({
-        error: "Admin accounts must use the admin login page.",
-        isAdmin: true,
-        redirect: "/admin/login",
+        error: "Please use the admin login page for staff accounts.",
       });
     }
 
@@ -787,6 +781,7 @@ router.post("/login", async (req, res) => {
         failureReason: "Email not verified",
       });
 
+      connection.release();
       return res.status(403).json({
         error: "Please verify your email before logging in. Check your inbox for the verification code.",
         code: "EMAIL_NOT_VERIFIED",
@@ -936,7 +931,7 @@ router.post("/google", async (req, res) => {
     }
 
     const randomPassword = await bcrypt.hash(
-      `google_${payload.sub}_${Date.now()}`,
+      crypto.randomBytes(32).toString("hex"),
       12,
     );
 
@@ -1019,6 +1014,7 @@ router.get("/profile", authenticateToken, (req, res) => {
         return res.status(404).json({ error: "User not found" });
       }
 
+      res.setHeader("Cache-Control", "no-store");
       res.json(results[0]);
     },
   );
@@ -1078,111 +1074,118 @@ router.put("/profile", authenticateToken, restrictBody('name', 'email', 'phone',
 });
 
 // Change password
-router.put("/change-password", authenticateToken, restrictBody('currentPassword', 'newPassword'), async (req, res) => {
-  try {
-    const currentPassword = String(req.body?.currentPassword || "");
-    const newPassword = String(req.body?.newPassword || "");
-
-    if (!newPassword) {
-      return res
-        .status(400)
-        .json({ error: "New password is required" });
-    }
-
-    const passwordValidation = strongPassword.safeParse(newPassword);
-    if (!passwordValidation.success) {
-      return res.status(400).json({
-        error:
-          passwordValidation.error.issues[0]?.message ||
-          "Password does not meet security requirements",
-      });
-    }
-
-    const connection = await db.promise().getConnection();
-
+router.put(
+  "/change-password",
+  authenticateToken,
+  restrictBody("currentPassword", "newPassword"),
+  async (req, res) => {
+    let connection;
     try {
+      const currentPassword = String(req.body?.currentPassword || "");
+      const newPassword = String(req.body?.newPassword || "");
+
+      if (!newPassword) {
+        return res.status(400).json({ error: "New password is required" });
+      }
+
+      const passwordValidation = strongPassword.safeParse(newPassword);
+      if (!passwordValidation.success) {
+        return res.status(400).json({
+          error:
+            passwordValidation.error.issues[0]?.message ||
+            "Password does not meet security requirements",
+        });
+      }
+
+      connection = await db.promise().getConnection();
       await ensurePasswordHistoryTable(connection);
 
-      db.query(
-        "SELECT password, password_set_by_user FROM users WHERE id = ?",
+      const [rows] = await connection.query(
+        "SELECT password, password_set_by_user FROM users WHERE id = ? LIMIT 1",
         [req.user.id],
-        async (err, results) => {
-          if (err) {
-            connection.release();
-            return res.status(500).json({ error: "Database error" });
-          }
-
-          if (!results.length) {
-            connection.release();
-            return res.status(404).json({ error: "User not found" });
-          }
-
-          const requiresCurrentPassword = toBooleanFlag(
-            results[0].password_set_by_user,
-            true,
-          );
-
-          if (requiresCurrentPassword && !currentPassword) {
-            connection.release();
-            return res
-              .status(400)
-              .json({ error: "Current password is required" });
-          }
-
-          if (requiresCurrentPassword) {
-            const isValidPassword = await bcrypt.compare(
-              currentPassword,
-              results[0].password,
-            );
-            if (!isValidPassword) {
-              connection.release();
-              return res
-                .status(401)
-                .json({ error: "Current password is incorrect" });
-            }
-          }
-
-          const reusedPassword = await hasReusedPassword(
-            connection,
-            req.user.id,
-            newPassword,
-            5
-          );
-
-          if (reusedPassword) {
-            connection.release();
-            return res.status(400).json({
-              error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
-            });
-          }
-
-          const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-          db.query(
-            "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
-            [hashedPassword, req.user.id],
-            async (err, result) => {
-              if (err) {
-                connection.release();
-                return res.status(500).json({ error: "Error updating password" });
-              }
-
-              await addPasswordToHistory(connection, req.user.id, newPassword);
-              connection.release();
-
-              res.json({ message: "Password changed successfully" });
-            },
-          );
-        },
       );
+      if (!rows.length) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const requiresCurrentPassword = toBooleanFlag(
+        rows[0].password_set_by_user,
+        true,
+      );
+      if (requiresCurrentPassword && !currentPassword) {
+        return res.status(400).json({ error: "Current password is required" });
+      }
+      if (
+        requiresCurrentPassword &&
+        !(await bcrypt.compare(currentPassword, rows[0].password))
+      ) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+
+      if (await hasReusedPassword(connection, req.user.id, newPassword, 5)) {
+        return res.status(400).json({
+          error:
+            "You cannot reuse any of your last 5 passwords. Please choose a different password.",
+        });
+      }
+
+      const tokenHash = hashToken(req.token);
+      const [[currentSession]] = await connection.query(
+        "SELECT id FROM user_sessions WHERE user_id = ? AND token_hash = ? AND is_active = TRUE LIMIT 1",
+        [req.user.id, tokenHash],
+      );
+
+      await connection.beginTransaction();
+      await connection.query(
+        "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
+        [await bcrypt.hash(newPassword, 12), req.user.id],
+      );
+      await addPasswordToHistory(connection, req.user.id, newPassword);
+
+      if (currentSession?.id) {
+        await connection.query(
+          `UPDATE user_sessions
+           SET is_active = FALSE, revoked_at = NOW(), last_seen_at = NOW()
+           WHERE user_id = ? AND id <> ? AND is_active = TRUE`,
+          [req.user.id, currentSession.id],
+        );
+        await connection.query(
+          `UPDATE refresh_tokens
+           SET revoked_at = NOW(), revoked_reason = 'password_change'
+           WHERE user_id = ? AND session_id <> ? AND revoked_at IS NULL`,
+          [req.user.id, currentSession.id],
+        );
+      } else {
+        await connection.query(
+          `UPDATE user_sessions
+           SET is_active = FALSE, revoked_at = NOW(), last_seen_at = NOW()
+           WHERE user_id = ? AND is_active = TRUE`,
+          [req.user.id],
+        );
+        await connection.query(
+          `UPDATE refresh_tokens
+           SET revoked_at = NOW(), revoked_reason = 'password_change'
+           WHERE user_id = ? AND revoked_at IS NULL`,
+          [req.user.id],
+        );
+      }
+      await connection.commit();
+
+      return res.json({ message: "Password changed successfully" });
     } catch (error) {
-      connection.release();
-      throw error;
+      if (connection) {
+        try {
+          await connection.rollback();
+        } catch (_) {
+          // Preserve the original failure.
+        }
+      }
+      return res.status(500).json({ error: "Server error" });
+    } finally {
+      connection?.release();
     }
-  } catch (error) {
-    res.status(500).json({ error: "Server error" });
-  }
-});
+  },
+);
 
 // Upload/Update profile image
 router.post(
@@ -1248,113 +1251,58 @@ router.get("/addresses", authenticateToken, (req, res) => {
 });
 
 // Upsert default address from checkout/profile
-router.put("/addresses/default", authenticateToken, restrictBody('recipient_name', 'phone', 'line1', 'address', 'city', 'postal_code', 'state', 'country', 'line2', 'label'), (req, res) => {
-  const recipientName = String(req.body?.recipient_name || "").trim();
-  const phone = String(req.body?.phone || "").trim();
-  const line1 = String(req.body?.line1 || req.body?.address || "").trim();
-  const city = String(req.body?.city || "").trim();
-  const postalCode = String(req.body?.postal_code || "").trim();
-  const state = String(req.body?.state || "").trim();
-  const country = String(req.body?.country || "Pakistan").trim();
-  const line2 = String(req.body?.line2 || "").trim() || null;
-  const label = String(req.body?.label || "Default").trim();
+router.put(
+  "/addresses/default",
+  authenticateToken,
+  restrictBody("recipient_name", "phone", "line1", "address", "city", "postal_code", "state", "country", "line2", "label"),
+  async (req, res) => {
+    const recipientName = String(req.body?.recipient_name || "").trim();
+    const phone = String(req.body?.phone || "").trim();
+    const line1 = String(req.body?.line1 || req.body?.address || "").trim();
+    const city = String(req.body?.city || "").trim();
+    const postalCode = String(req.body?.postal_code || "").trim();
+    const state = String(req.body?.state || "").trim();
+    const country = String(req.body?.country || "Pakistan").trim();
+    const line2 = String(req.body?.line2 || "").trim() || null;
+    const label = String(req.body?.label || "Default").trim();
 
-  if (!recipientName || !phone || !line1 || !city) {
-    return res
-      .status(400)
-      .json({ error: "Recipient name, phone, address and city are required" });
-  }
+    if (!recipientName || !phone || !line1 || !city) {
+      return res.status(400).json({
+        error: "Recipient name, phone, address and city are required",
+      });
+    }
 
-  db.query(
-    "SELECT id FROM user_addresses WHERE user_id = ? AND is_default = TRUE LIMIT 1",
-    [req.user.id],
-    (findErr, existingRows) => {
-      if (findErr) {
-        return res.status(500).json({ error: "Database error" });
-      }
-
-      const finalizeResponse = (addressId) => {
-        db.query(
-          "SELECT * FROM user_addresses WHERE id = ? LIMIT 1",
-          [addressId],
-          (readErr, readRows) => {
-            if (readErr || readRows.length === 0) {
-              return res.status(500).json({ error: "Could not load address" });
-            }
-
-            return res.json({
-              message: "Default address saved successfully",
-              address: readRows[0],
-            });
-          },
-        );
-      };
-
-      if (existingRows.length > 0) {
-        const updateQuery = `
-                    UPDATE user_addresses
-                    SET label = ?, recipient_name = ?, phone = ?, line1 = ?, line2 = ?,
-                        city = ?, state = ?, postal_code = ?, country = ?, is_active = TRUE
-                    WHERE id = ? AND user_id = ?
-                `;
-
-        db.query(
-          updateQuery,
-          [
-            label,
-            recipientName,
-            phone,
-            line1,
-            line2,
-            city,
-            state || null,
-            postalCode || null,
-            country,
-            existingRows[0].id,
-            req.user.id,
-          ],
-          (updateErr) => {
-            if (updateErr) {
-              return res.status(500).json({ error: "Error updating address" });
-            }
-
-            return finalizeResponse(existingRows[0].id);
-          },
-        );
-
-        return;
-      }
-
-      db.query(
-        `INSERT INTO user_addresses
-                (user_id, label, recipient_name, phone, line1, line2, city, state, postal_code, country, is_default)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
-        [
-          req.user.id,
-          label,
-          recipientName,
-          phone,
-          line1,
-          line2,
-          city,
-          state || null,
-          postalCode || null,
-          country,
-        ],
-        (insertErr, insertResult) => {
-          if (insertErr) {
-            return res.status(500).json({ error: "Error saving address" });
-          }
-
-          return finalizeResponse(insertResult.insertId);
-        },
+    const connection = await db.promise().getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.query("SELECT id FROM users WHERE id = ? FOR UPDATE", [req.user.id]);
+      await connection.query(
+        "UPDATE user_addresses SET is_default = FALSE WHERE user_id = ?",
+        [req.user.id],
       );
-    },
-  );
-});
+      const [inserted] = await connection.query(
+        `INSERT INTO user_addresses
+         (user_id, label, recipient_name, phone, line1, line2, city, state, postal_code, country, is_default)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
+        [req.user.id, label, recipientName, phone, line1, line2, city, state || null, postalCode || null, country],
+      );
+      const [[address]] = await connection.query(
+        "SELECT * FROM user_addresses WHERE id = ? AND user_id = ? LIMIT 1",
+        [inserted.insertId, req.user.id],
+      );
+      await connection.commit();
+      return res.json({ message: "Default address saved successfully", address });
+    } catch (error) {
+      await connection.rollback();
+      return res.status(500).json({ error: "Could not save default address" });
+    } finally {
+      connection.release();
+    }
+  },
+);
 
 // Add a new address
-router.post("/addresses", authenticateToken, restrictBody('recipient_name', 'phone', 'line1', 'city', 'state', 'postal_code', 'country', 'label', 'line2'), (req, res) => {
+router.post("/addresses", authenticateToken, restrictBody('recipient_name', 'phone', 'line1', 'city', 'state', 'postal_code', 'country', 'label', 'line2', 'is_default'), async (req, res) => {
   const recipientName = String(req.body?.recipient_name || "").trim();
   const phone = String(req.body?.phone || "").trim();
   const line1 = String(req.body?.line1 || "").trim();
@@ -1372,67 +1320,34 @@ router.post("/addresses", authenticateToken, restrictBody('recipient_name', 'pho
       .json({ error: "Recipient name, phone, address and city are required" });
   }
 
-  const insertAddress = () => {
-    db.query(
+  const connection = await db.promise().getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.query("SELECT id FROM users WHERE id = ? FOR UPDATE", [req.user.id]);
+    if (makeDefault) {
+      await connection.query(
+        "UPDATE user_addresses SET is_default = FALSE WHERE user_id = ?",
+        [req.user.id],
+      );
+    }
+    const [inserted] = await connection.query(
       `INSERT INTO user_addresses
-            (user_id, label, recipient_name, phone, line1, line2, city, state, postal_code, country, is_default)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        req.user.id,
-        label,
-        recipientName,
-        phone,
-        line1,
-        line2,
-        city,
-        state || null,
-        postalCode || null,
-        country,
-        makeDefault,
-      ],
-      (insertErr, insertResult) => {
-        if (insertErr) {
-          return res.status(500).json({ error: "Error creating address" });
-        }
-
-        db.query(
-          "SELECT * FROM user_addresses WHERE id = ?",
-          [insertResult.insertId],
-          (readErr, rows) => {
-            if (readErr || rows.length === 0) {
-              return res
-                .status(500)
-                .json({ error: "Address created but could not be loaded" });
-            }
-
-            return res.status(201).json({
-              message: "Address added successfully",
-              address: rows[0],
-            });
-          },
-        );
-      },
+       (user_id, label, recipient_name, phone, line1, line2, city, state, postal_code, country, is_default)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [req.user.id, label, recipientName, phone, line1, line2, city, state || null, postalCode || null, country, makeDefault],
     );
-  };
-
-  if (!makeDefault) {
-    insertAddress();
-    return;
+    const [[address]] = await connection.query(
+      "SELECT * FROM user_addresses WHERE id = ? AND user_id = ?",
+      [inserted.insertId, req.user.id],
+    );
+    await connection.commit();
+    return res.status(201).json({ message: "Address added successfully", address });
+  } catch (error) {
+    await connection.rollback();
+    return res.status(500).json({ error: "Error creating address" });
+  } finally {
+    connection.release();
   }
-
-  db.query(
-    "UPDATE user_addresses SET is_default = FALSE WHERE user_id = ?",
-    [req.user.id],
-    (resetErr) => {
-      if (resetErr) {
-        return res
-          .status(500)
-          .json({ error: "Error resetting default address" });
-      }
-
-      insertAddress();
-    },
-  );
 });
 
 // Update existing address
@@ -1764,6 +1679,16 @@ router.post("/forgot-password", async (req, res) => {
       success: true,
     };
 
+    // Per-email cooldown to prevent flooding a single inbox.
+    const COOLDOWN_MS = 90_000; // 90 seconds
+
+    if (lastResetSent.has(normalizedEmail)) {
+      const elapsed = Date.now() - lastResetSent.get(normalizedEmail);
+      if (elapsed < COOLDOWN_MS) {
+        return res.json(successResponse);
+      }
+    }
+
     // Find user by email
     const [users] = await db
       .promise()
@@ -1776,14 +1701,10 @@ router.post("/forgot-password", async (req, res) => {
 
     const user = users[0];
 
-    // An admin address must never receive a customer reset link: that link
-    // points at the customer reset page, which would let an admin password be
-    // changed from the storefront. Say so plainly rather than silently doing
-    // nothing, so the admin knows to use the admin portal. This does disclose
-    // that the address is an admin one — an accepted trade for not leaving a
-    // customer-side path to an admin password.
+    // Admin accounts: silently return the generic success response to avoid
+    // email enumeration. An admin should use the admin panel reset flow instead.
     if (isAdminAccount(user)) {
-      return res.status(403).json(ADMIN_EMAIL_RECOVERY_BLOCKED);
+      return res.json(successResponse);
     }
 
     // Check if user account is active
@@ -1794,14 +1715,9 @@ router.post("/forgot-password", async (req, res) => {
     // Create password reset token
     const tokenData = await createPasswordResetToken(db.promise(), user.id, user.email);
 
-    // Send password reset email
-    const emailResult = await sendPasswordResetEmail(user.email, user.name, tokenData.token);
-
-    if (!emailResult.success) {
-      // Still return success to user (don't reveal email sending issues)
-      // But log the error for debugging
-    } else {
-    }
+    // Fire-and-forget email send to avoid timing oracle
+    void sendPasswordResetEmail(user.email, user.name, tokenData.token);
+    lastResetSent.set(normalizedEmail, Date.now());
 
     return res.json(successResponse);
   } catch (error) {
@@ -1862,7 +1778,7 @@ router.post("/reset-password", async (req, res) => {
     // passwords change only through POST /api/admin/reset-password.
     if (userRows.length && isAdminAccount(userRows[0])) {
       connection.release();
-      return res.status(403).json({ ...ADMIN_EMAIL_RECOVERY_BLOCKED, success: false });
+      return res.status(400).json({ success: false, error: "Invalid or expired reset link." });
     }
 
     if (userRows.length && userRows[0].password) {

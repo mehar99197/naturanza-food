@@ -14,12 +14,18 @@ const { ensureProductionSchema } = require("./utils/schemaCompatibility");
 const config = {
     host: process.env.DB_HOST || "localhost",
     port: Number.parseInt(process.env.DB_PORT || "3306", 10),
-    user: process.env.DB_USER || "root",
-    password: process.env.DB_PASSWORD !== undefined ? process.env.DB_PASSWORD : "",
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD || undefined,
     database: process.env.DB_NAME || "naturanza_food",
 };
 
-const shouldSeed = process.argv.includes("--with-seed") || process.argv.length <= 2;
+if (!config.user || !config.password) {
+    console.error("DB_USER and DB_PASSWORD must be set in .env");
+    process.exit(1);
+}
+
+const seedRequestedExplicitly = process.argv.includes("--with-seed");
+const shouldSeed = seedRequestedExplicitly || process.argv.length <= 2;
 
 const parseSqlStatements = (sqlText) => {
     const withoutLineComments = sqlText
@@ -107,7 +113,11 @@ async function setupDatabase() {
                     ignoreDuplicateErrors: true,
                 });
             } else {
-                console.log("5) Seed file (seed-test-data.sql) not found, skipping seed data.");
+                const message = "Seed file (seed-test-data.sql) not found; no seed data was loaded.";
+                if (seedRequestedExplicitly) {
+                    throw new Error(message);
+                }
+                console.warn(`5) ${message}`);
             }
         }
 

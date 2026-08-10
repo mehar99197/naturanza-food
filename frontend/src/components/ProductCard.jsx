@@ -3,7 +3,6 @@ import { Heart, ShoppingCart, Star } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useSettings } from '@/context/SettingsContext';
 import { useAuth } from '@/context/AuthContext';
-import { useReviews } from '@/context/ReviewContext';
 import { useWishlist } from '@/context/WishlistContext';
 import { formatPrice, getProductPricing } from '@/lib/utils';
 import { motion } from 'framer-motion';
@@ -16,7 +15,7 @@ const LOCAL_CARD_IMAGES = {
  tea: '/images/products/tea.webp',
  oil: '/images/products/oil.webp',
  powder: '/images/products/ispaghol_2.webp',
- seeds: '/images/products/ispaghol_1.png',
+ seeds: '/images/products/ispaghol_2.webp',
  supplements: '/images/products/herbs.webp',
  aloe: '/images/products/herbs.webp',
  coconut: '/images/products/coconut-oil.webp',
@@ -98,7 +97,6 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  const { addToCart } = useCart();
  const { settings } = useSettings();
  const { isAuthenticated } = useAuth();
- const { getProductReviewStats } = useReviews();
  const { isInWishlist, isUpdating, toggleWishlist } = useWishlist();
  const navigate = useNavigate();
  const isListView = viewMode === 'list';
@@ -144,9 +142,8 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  Sale: 'bg-red-500',
  };
 
- const { reviewCount, averageRating } = getProductReviewStats(productId);
- const effectiveReviewCount = reviewCount || 0;
- const effectiveRating = averageRating || 0;
+  const effectiveReviewCount = Number(product.review_count ?? product.reviewCount ?? 0);
+  const effectiveRating = Number(product.average_rating ?? product.averageRating ?? product.rating ?? 0);
  const filledStars = Math.round(effectiveRating);
  const cardImage = resolveCardImage(product);
 
@@ -173,6 +170,7 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
 
  <OptimizedImage
  src={cardImage}
+  fallbackSrc={LOCAL_CARD_IMAGES.default}
  alt={product.name}
  imgClassName="block w-full h-full max-w-full max-h-full object-contain object-center"
  wrapperClassName="block w-full h-full"
@@ -272,6 +270,7 @@ export function ProductCard({ product, viewMode = 'grid', compact = false }) {
  <div className={`shop-card-image relative overflow-hidden ${bgColor} flex items-center justify-center ${compact ? 'h-36 sm:h-40 p-2.5' : 'h-44 sm:h-48 p-3 sm:p-3.5'}`}>
  <OptimizedImage
  src={cardImage}
+  fallbackSrc={LOCAL_CARD_IMAGES.default}
  alt={product.name}
  imgClassName="block w-full h-full max-w-full max-h-full object-contain object-center"
  wrapperClassName="block w-full h-full"

@@ -8,6 +8,14 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const escapeHtml = (value) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 const queueLowStockEmail = (lowStockEvent, excludeUserId) => {
   if (!lowStockEvent) {
     return;
@@ -26,8 +34,8 @@ const queueLowStockEmail = (lowStockEvent, excludeUserId) => {
       const html = `
         <div style="font-family: Arial, sans-serif; color: #1f2937;">
           <h2 style="margin: 0 0 8px; color: #0f172a;">Low Stock Alert</h2>
-          <p style="margin: 0 0 10px;">${lowStockEvent.product_name} is low on stock.</p>
-          <p style="margin: 0;">Remaining: ${lowStockEvent.stock_quantity}</p>
+           <p style="margin: 0 0 10px;">${escapeHtml(lowStockEvent.product_name)} is low on stock.</p>
+           <p style="margin: 0;">Remaining: ${escapeHtml(lowStockEvent.stock_quantity)}</p>
         </div>
       `;
 
@@ -84,7 +92,11 @@ const getProductByBarcode = async (req, res) => {
 const createProduct = async (req, res) => {
   const payload = req.body || {};
 
-  if (!payload.name || payload.price === undefined || payload.price === null) {
+  if (
+    !String(payload.name || "").trim() ||
+    payload.price === undefined ||
+    payload.price === null
+  ) {
     return res.status(400).json({ error: "Product name and price are required" });
   }
 

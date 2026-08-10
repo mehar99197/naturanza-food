@@ -16,7 +16,7 @@ const ensureTableStatements = [
   `CREATE TABLE IF NOT EXISTS email_verification_codes (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
-    email VARCHAR(120) NOT NULL,
+    email VARCHAR(254) NOT NULL,
     code_hash CHAR(64) NOT NULL,
     expires_at DATETIME NOT NULL,
     attempts INT NOT NULL DEFAULT 0,
@@ -31,7 +31,7 @@ const ensureTableStatements = [
   `CREATE TABLE IF NOT EXISTS password_reset_tokens (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
-    email VARCHAR(100) NOT NULL,
+    email VARCHAR(254) NOT NULL,
     token_hash CHAR(64) NOT NULL,
     expires_at DATETIME NOT NULL,
     is_used BOOLEAN DEFAULT FALSE,
@@ -539,6 +539,12 @@ const ensureIndex = async (db, tableName, indexName, createSql) => {
   await db.query(createSql);
 };
 
+const widenEmailColumnIfPresent = async (db, tableName) => {
+  const [tables] = await db.query("SHOW TABLES LIKE ?", [tableName]);
+  if (!tables.length) return;
+  await db.query(`ALTER TABLE \`${tableName}\` MODIFY COLUMN email VARCHAR(254) NOT NULL`);
+};
+
 const removeDuplicateReviews = async (db) => {
   const [duplicates] = await db.query(
     `SELECT user_id, product_id, MAX(id) AS keep_id
@@ -769,6 +775,28 @@ const ensureProductionSchema = async (db) => {
       "ENUM('full_payment', 'advance_shipping', 'final_collection') NOT NULL DEFAULT 'full_payment'",
     admin_note: "TEXT NULL",
   });
+  await widenEmailColumnIfPresent(db, "users");
+  await widenEmailColumnIfPresent(db, "contacts");
+  await widenEmailColumnIfPresent(db, "password_reset_tokens");
+  await widenEmailColumnIfPresent(db, "newsletter_subscribers");
+
+  await ensureColumns(db, "admin_settings", {
+    address: "VARCHAR(255) NOT NULL DEFAULT 'Pakistan'",
+    support_hours: "VARCHAR(120) NOT NULL DEFAULT 'Available 24/7'",
+    facebook_url: "VARCHAR(255) NOT NULL DEFAULT ''",
+    instagram_url: "VARCHAR(255) NOT NULL DEFAULT ''",
+    twitter_url: "VARCHAR(255) NOT NULL DEFAULT ''",
+    youtube_url: "VARCHAR(255) NOT NULL DEFAULT ''",
+    whatsapp_number: "VARCHAR(30) NOT NULL DEFAULT ''",
+    whatsapp_enabled: "BOOLEAN NOT NULL DEFAULT TRUE",
+    map_latitude: "DECIMAL(10, 7) NOT NULL DEFAULT 31.5204000",
+    map_longitude: "DECIMAL(10, 7) NOT NULL DEFAULT 74.3587000",
+    map_location_label: "VARCHAR(120) NOT NULL DEFAULT 'Pakistan, Lahore'",
+    newsletter_welcome_promo_code: "VARCHAR(40) NOT NULL DEFAULT ''",
+    store_discount_active: "BOOLEAN NOT NULL DEFAULT FALSE",
+    store_discount_percentage: "DECIMAL(5, 2) NOT NULL DEFAULT 0",
+    store_discount_label: "VARCHAR(60) NOT NULL DEFAULT 'Store Sale'",
+  });
   await db.query(
     "ALTER TABLE advance_payment_verifications MODIFY COLUMN payment_method ENUM('jazzcash','easypaisa','bank','cod') NOT NULL",
   );
@@ -793,7 +821,7 @@ const ensureProductionSchema = async (db) => {
 
   await ensureColumns(db, "orders", ordersColumnDefinitions);
   await db.query(
-    "ALTER TABLE orders MODIFY COLUMN payment_method ENUM('cod', 'card', 'online', 'easypaisa', 'jazzcash') DEFAULT 'cod'",
+    "ALTER TABLE orders MODIFY COLUMN payment_method ENUM('cod', 'card', 'online', 'easypaisa', 'jazzcash', 'bank') DEFAULT 'cod'",
   );
   await ensureIndex(
     db,

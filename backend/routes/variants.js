@@ -7,6 +7,17 @@ const { restrictBody } = require('../middleware/security');
 // Get database connection from global
 const getDb = () => global.db;
 
+const parseJsonSafely = (value, fallback) => {
+    if (typeof value !== 'string') {
+        return value ?? fallback;
+    }
+    try {
+        return JSON.parse(value);
+    } catch {
+        return fallback;
+    }
+};
+
 // Get all variants for a product
 router.get('/product/:productId', (req, res) => {
     const { productId } = req.params;
@@ -26,9 +37,7 @@ router.get('/product/:productId', (req, res) => {
         // Parse JSON attributes
         const variants = results.map(variant => ({
             ...variant,
-            attributes: typeof variant.attributes === 'string' 
-                ? JSON.parse(variant.attributes) 
-                : variant.attributes
+            attributes: parseJsonSafely(variant.attributes, {})
         }));
 
         res.json({ data: variants });
@@ -54,9 +63,7 @@ router.get('/attributes/:productId', (req, res) => {
         // Parse JSON values
         const attributes = results.map(attr => ({
             ...attr,
-            attribute_values: typeof attr.attribute_values === 'string'
-                ? JSON.parse(attr.attribute_values)
-                : attr.attribute_values
+            attribute_values: parseJsonSafely(attr.attribute_values, [])
         }));
 
         res.json({ data: attributes });
@@ -213,3 +220,4 @@ router.post('/attributes/:productId', authenticateToken, isAdmin, requirePermiss
 });
 
 module.exports = router;
+module.exports.parseJsonSafely = parseJsonSafely;

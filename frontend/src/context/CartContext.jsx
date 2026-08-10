@@ -16,6 +16,7 @@ export function CartProvider({ children }) {
  const [loading, setLoading] = useState(false);
  const [error, setError] = useState(null);
  const requestGenerationRef = useRef(0);
+ const quantityMutationQueuesRef = useRef(new Map());
 
  const fetchCart = useCallback(async () => {
   const requestGeneration = ++requestGenerationRef.current;
@@ -141,22 +142,32 @@ export function CartProvider({ children }) {
  }
  }, [isAuthenticated, fetchCart]);
 
- const updateQuantity = useCallback(async (productId, quantity) => {
- if (!isAuthenticated) return;
+  const updateQuantity = useCallback(async (productId, quantity) => {
+  if (!isAuthenticated) return;
+  const key = String(productId);
+  const previous = quantityMutationQueuesRef.current.get(key) || Promise.resolve();
+  const operation = previous.catch(() => {}).then(async () => {
+    if (quantity <= 0) {
+      await removeFromCart(productId);
+      return;
+    }
 
- if (quantity <= 0) {
- await removeFromCart(productId);
- return;
- }
-
- try {
- setError(null);
- await cartAPI.update(productId, quantity);
- await fetchCart();
- } catch (err) {
- setError(err.response?.data?.error || 'Failed to update quantity');
- }
- }, [isAuthenticated, removeFromCart, fetchCart]);
+    try {
+      setError(null);
+      await cartAPI.update(productId, quantity);
+      await fetchCart();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to update quantity');
+    }
+  });
+  const settled = operation.finally(() => {
+    if (quantityMutationQueuesRef.current.get(key) === settled) {
+      quantityMutationQueuesRef.current.delete(key);
+    }
+  });
+  quantityMutationQueuesRef.current.set(key, settled);
+  return settled;
+  }, [isAuthenticated, removeFromCart, fetchCart]);
 
  const clearCart = useCallback(async () => {
  if (!isAuthenticated) return;

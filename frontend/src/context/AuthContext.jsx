@@ -213,10 +213,14 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
       if (!getUserAccessToken() || !hasUserSession()) {
-        clearUserAccessToken();
-        applyUserState(null);
-        setError(null);
-        return;
+        try {
+          await userAPI.refreshToken();
+        } catch (_) {
+          clearUserAccessToken();
+          applyUserState(null);
+          setError(null);
+          return;
+        }
       }
 
       const initialProfile = await fetchProfileIfAvailable();
@@ -310,9 +314,32 @@ export const AuthProvider = ({ children }) => {
       void refreshProfile();
     };
 
+    const handleStorageSync = (event) => {
+      if (event?.key !== "userData") {
+        return;
+      }
+      if (!event.newValue) {
+        clearUserAccessToken();
+        applyUserState(null);
+        setLoading(false);
+        return;
+      }
+      try {
+        const nextUser = normalizeUserObject(JSON.parse(event.newValue));
+        if (nextUser) {
+          applyUserState(nextUser);
+        }
+      } catch (_) {
+        clearUserAccessToken();
+        applyUserState(null);
+      }
+    };
+
     window.addEventListener(AUTH_SESSION_SYNC_EVENT, handleSessionSync);
+    window.addEventListener("storage", handleStorageSync);
     return () => {
       window.removeEventListener(AUTH_SESSION_SYNC_EVENT, handleSessionSync);
+      window.removeEventListener("storage", handleStorageSync);
     };
   }, []);
 

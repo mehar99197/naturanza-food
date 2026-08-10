@@ -7,6 +7,7 @@ import {
   userAPI,
 } from '@/services/api';
 import { NoIndexSEO } from '@/components/SEO';
+import { safeLocalStorage } from '@/lib/storage';
 
 /**
  * OAuth Callback Handler
@@ -71,7 +72,7 @@ const OAuthCallback = () => {
 
  // Store access token in memory only.
  setUserAccessToken(token);
- localStorage.setItem('userData', JSON.stringify(userData));
+ safeLocalStorage.setItem('userData', JSON.stringify(userData));
 
  // Validate token and sync auth context.
  userAPI

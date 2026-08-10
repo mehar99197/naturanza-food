@@ -65,11 +65,20 @@ export function AdminAbout() {
   const [toast, setToast] = useState(false);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [loadedSuccessfully, setLoadedSuccessfully] = useState(false);
 
   useEffect(() => {
     aboutAPI.getAdminContent()
-      .then((data) => { if (data && typeof data === 'object') setContent({ ...DEFAULTS, ...data }); })
-      .catch(() => setError('Could not load About content'))
+      .then((data) => {
+        if (data && typeof data === 'object') {
+          setContent({ ...DEFAULTS, ...data });
+          setLoadedSuccessfully(true);
+        }
+      })
+      .catch(() => {
+        setLoadedSuccessfully(false);
+        setError('Could not load About content');
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -132,6 +141,10 @@ export function AdminAbout() {
   };
 
   const handleSave = async () => {
+    if (!loadedSuccessfully) {
+      setError('About content was not loaded. Refresh before saving.');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -188,7 +201,7 @@ export function AdminAbout() {
           </div>
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || !loadedSuccessfully}
             className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 px-6 text-sm font-bold text-white shadow-lg shadow-emerald-500/30 transition hover:from-emerald-600 hover:to-green-700 disabled:opacity-60"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

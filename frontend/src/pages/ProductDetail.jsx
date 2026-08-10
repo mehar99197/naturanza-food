@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Star,
@@ -24,13 +24,13 @@ import { useProducts } from '@/context/ProductContext';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/context/SettingsContext';
-import { useReviews } from '@/context/ReviewContext';
 import { productAPI, reviewAPI } from '@/services/api';
 import { useWishlist } from '@/context/WishlistContext';
 import { formatPrice, getProductPricing } from '@/lib/utils';
 import { convertFromPkr, hasExchangeRate } from '@/lib/exchangeRates';
 import { getAbsoluteImageUrl, getApiBaseUrl } from '@/lib/imageUtils';
 import { getProductContentDefaults, getProductContentText } from '@/lib/productContentDefaults';
+import { safeLocalStorage } from '@/lib/storage';
 import { ProductCard } from '@/components/ProductCard';
 import { ProductDetailSkeleton } from '@/components/Skeletons/ProductDetailSkeleton';
 import ProductReviews from '@/components/ProductReviews';
@@ -52,7 +52,7 @@ const PRODUCT_FALLBACK_IMAGES = {
   powder: '/images/products/ispaghol_2.webp',
   ispaghol: '/images/products/ispaghol_2.webp',
   psyllium: '/images/products/ispaghol_2.webp',
-  seeds: '/images/products/ispaghol_1.png',
+  seeds: '/images/products/ispaghol_2.webp',
   supplements: '/images/products/herbs.webp',
   aloe: '/images/products/herbs.webp',
   herbs: '/images/products/herbs.webp',
@@ -202,7 +202,6 @@ export function ProductDetail() {
   const { addToCart } = useCart();
   const { isAuthenticated, user } = useAuth();
   const { settings } = useSettings();
-  const { addReview, getProductReviews, getProductReviewStats } = useReviews();
   const { isInWishlist, isUpdating, toggleWishlist } = useWishlist();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -222,9 +221,9 @@ export function ProductDetail() {
 
   // Clear mock reviews from localStorage on component mount
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.removeItem('productReviews');
-      localStorage.removeItem('product_reviews');
+    if (typeof window !== 'undefined') {
+      safeLocalStorage.removeItem('productReviews');
+      safeLocalStorage.removeItem('product_reviews');
     }
   }, []);
 
@@ -351,11 +350,14 @@ export function ProductDetail() {
   // Fetch reviews from API instead of localStorage
   const [productReviews, setProductReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(true);
+  const reviewRequestIdRef = useRef(0);
 
   const fetchProductReviews = useCallback(async () => {
+    const requestId = ++reviewRequestIdRef.current;
     try {
       setReviewsLoading(true);
       const data = await reviewAPI.getProductReviews(id);
+      if (requestId !== reviewRequestIdRef.current) return;
       setProductReviews(
         (data || []).map((review) => ({
           id: review.id,
@@ -367,10 +369,13 @@ export function ProductDetail() {
         }))
       );
     } catch (error) {
+      if (requestId !== reviewRequestIdRef.current) return;
       console.error('Error fetching reviews:', error);
       setProductReviews([]);
     } finally {
-      setReviewsLoading(false);
+      if (requestId === reviewRequestIdRef.current) {
+        setReviewsLoading(false);
+      }
     }
   }, [id]);
 
@@ -378,8 +383,10 @@ export function ProductDetail() {
     fetchProductReviews();
   }, [fetchProductReviews]);
 
-  const { reviewCount: liveReviewCount, averageRating: liveAverageRating } =
-    getProductReviewStats(id);
+  const liveReviewCount = productReviews.length;
+  const liveAverageRating = liveReviewCount
+    ? productReviews.reduce((sum, review) => sum + Number(review.rating || 0), 0) / liveReviewCount
+    : 0;
 
   const displayedRating =
     liveReviewCount > 0 ? Number(liveAverageRating || 0) : Number(product?.rating || 0);
@@ -534,36 +541,12 @@ export function ProductDetail() {
         comment: newReview.comment || '',
       });
 
-      // Immediately add the new review to the UI with user profile image
-      const newReviewWithImage = {
-        id: data.review.id,
-        name: data.review.customer_name || user?.name || 'You',
-        rating: data.review.rating,
-        date: data.review.created_at,
-        comment: data.review.comment || '',
-        userAvatar: getAbsoluteImageUrl(data.review.customer_image) || user?.profileImage || user?.profile_image || '',
-      };
-      
-      // Add to local state for instant UI update
-      setProductReviews((prev) => [newReviewWithImage, ...prev]);
-      addReview(id, {
-        id: data.review.id,
-        rating: data.review.rating,
-        comment: data.review.comment || '',
-        date: data.review.created_at,
-        userName: data.review.customer_name || user?.name || 'You',
-        userAvatar:
-          getAbsoluteImageUrl(data.review.customer_image) ||
-          user?.profileImage ||
-          user?.profile_image ||
-          '',
-      });
       reviewEvents.reviewSubmitted({
         productId: id,
         review: data.review,
       });
       
-      showFeedback('Review submitted successfully.');
+      showFeedback('Review submitted and is awaiting approval.');
 
     } catch (error) {
       console.error('Error submitting review:', error);

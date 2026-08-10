@@ -133,6 +133,7 @@ const sendEmail = async ({ to, subject, html, text, unsubscribeUrl }) => {
  */
 const generatePasswordResetEmail = (userName, resetLink, expiryMinutes = 60) => {
   const currentYear = new Date().getFullYear();
+  const safeUserName = userName ? escapeHtml(userName) : "";
   
   return `
 <!DOCTYPE html>
@@ -176,7 +177,7 @@ const generatePasswordResetEmail = (userName, resetLink, expiryMinutes = 60) => 
               </h2>
               
               <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
-                Hi${userName ? ` <strong>${userName}</strong>` : ""},
+                Hi${safeUserName ? ` <strong>${safeUserName}</strong>` : ""},
               </p>
               
               <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
@@ -187,7 +188,7 @@ const generatePasswordResetEmail = (userName, resetLink, expiryMinutes = 60) => 
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
                 <tr>
                   <td align="center" style="padding: 8px 0 32px;">
-                    <a href="${resetLink}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #16a34a 0%, #059669 100%); color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 12px; font-size: 16px; font-weight: 600; box-shadow: 0 4px 14px rgba(22, 163, 74, 0.4);">
+                    <a href="${escapeHtml(resetLink)}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #16a34a 0%, #059669 100%); color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 12px; font-size: 16px; font-weight: 600; box-shadow: 0 4px 14px rgba(22, 163, 74, 0.4);">
                       Reset Password
                     </a>
                   </td>
@@ -199,7 +200,7 @@ const generatePasswordResetEmail = (userName, resetLink, expiryMinutes = 60) => 
                 If the button doesn't work, copy and paste this link into your browser:
               </p>
               <p style="margin: 0 0 24px; padding: 12px 16px; background-color: #f1f5f9; border-radius: 8px; word-break: break-all;">
-                <a href="${resetLink}" style="color: #16a34a; text-decoration: none; font-size: 13px;">${resetLink}</a>
+                <a href="${escapeHtml(resetLink)}" style="color: #16a34a; text-decoration: none; font-size: 13px;">${escapeHtml(resetLink)}</a>
               </p>
               
               <!-- Warning -->
@@ -303,19 +304,22 @@ const generateNewsletterWelcomeEmail = ({
 }) => {
   const currentYear = new Date().getFullYear();
   const discountLabel = formatPromoDiscount(promoCoupon);
-  const promoBlock = promoCode
+  const safeStoreName = escapeHtml(storeName || "Naturanza Food");
+  const safePromoCode = promoCode ? escapeHtml(promoCode) : "";
+  const safeDiscountLabel = escapeHtml(discountLabel);
+  const promoBlock = safePromoCode
     ? `
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border: 2px dashed #16a34a; border-radius: 12px; margin: 24px 0;">
                 <tr>
                   <td style="padding: 24px; text-align: center;">
                     <p style="margin: 0 0 8px; color: #065f46; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">
-                      Welcome Gift — ${discountLabel}
+                      Welcome Gift — ${safeDiscountLabel}
                     </p>
                     <p style="margin: 0 0 12px; color: #047857; font-size: 14px;">
                       Use this code at checkout on your first order:
                     </p>
                     <p style="margin: 0; padding: 12px 24px; display: inline-block; background-color: #16a34a; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: 3px; border-radius: 8px; font-family: 'Courier New', monospace;">
-                      ${promoCode}
+                      ${safePromoCode}
                     </p>
                   </td>
                 </tr>
@@ -329,7 +333,7 @@ const generateNewsletterWelcomeEmail = ({
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Welcome to ${storeName}</title>
+  <title>Welcome to ${safeStoreName}</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0fdf4;">
   <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f0fdf4;">
@@ -349,7 +353,7 @@ const generateNewsletterWelcomeEmail = ({
           <tr>
             <td style="padding: 40px;">
               <p style="margin: 0 0 20px; color: #1e293b; font-size: 16px; line-height: 1.6;">
-                Thank you for subscribing to <strong>${storeName}</strong>! You're now part of our community of people who care about pure, natural, and healthy food.
+                Thank you for subscribing to <strong>${safeStoreName}</strong>! You're now part of our community of people who care about pure, natural, and healthy food.
               </p>
               <p style="margin: 0 0 16px; color: #475569; font-size: 15px; line-height: 1.6;">
                 Here's what you can expect from us:
@@ -363,21 +367,21 @@ const generateNewsletterWelcomeEmail = ({
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
                 <tr>
                   <td align="center" style="padding: 8px 0 24px;">
-                    <a href="${siteUrl}/shop" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #16a34a 0%, #059669 100%); color: #ffffff; text-decoration: none; padding: 14px 36px; border-radius: 12px; font-size: 16px; font-weight: 600;">
+                    <a href="${escapeHtml(siteUrl)}/shop" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #16a34a 0%, #059669 100%); color: #ffffff; text-decoration: none; padding: 14px 36px; border-radius: 12px; font-size: 16px; font-weight: 600;">
                       Start Shopping
                     </a>
                   </td>
                 </tr>
               </table>
               <p style="margin: 0; color: #64748b; font-size: 13px; line-height: 1.6; text-align: center;">
-                Didn't subscribe? You can <a href="${unsubscribeUrl}" style="color: #16a34a;">unsubscribe here</a>.
+                Didn't subscribe? You can <a href="${escapeHtml(unsubscribeUrl)}" style="color: #16a34a;">unsubscribe here</a>.
               </p>
             </td>
           </tr>
           <tr>
             <td style="background-color: #f8fafc; padding: 20px 40px; border-top: 1px solid #e2e8f0;">
               <p style="margin: 0; color: #94a3b8; font-size: 12px; text-align: center;">
-                © ${currentYear} ${storeName}. All rights reserved.
+                © ${currentYear} ${safeStoreName}. All rights reserved.
               </p>
             </td>
           </tr>
@@ -435,13 +439,14 @@ Didn't subscribe? Unsubscribe: ${unsubscribeUrl}
  */
 const generateNewsletterBroadcastEmail = ({ storeName, subject, bodyHtml, unsubscribeUrl }) => {
   const currentYear = new Date().getFullYear();
+  const safeStoreName = escapeHtml(storeName || "Naturanza Food");
   return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${subject}</title>
+  <title>${escapeHtml(subject)}</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0fdf4;">
   <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f0fdf4;">
@@ -451,7 +456,7 @@ const generateNewsletterBroadcastEmail = ({ storeName, subject, bodyHtml, unsubs
           <tr>
             <td style="background: linear-gradient(135deg, #16a34a 0%, #059669 100%); padding: 28px 40px; text-align: center;">
               <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 700;">
-                ${storeName}
+                ${safeStoreName}
               </h1>
             </td>
           </tr>
@@ -463,11 +468,11 @@ const generateNewsletterBroadcastEmail = ({ storeName, subject, bodyHtml, unsubs
           <tr>
             <td style="background-color: #f8fafc; padding: 20px 40px; border-top: 1px solid #e2e8f0; text-align: center;">
               <p style="margin: 0 0 6px; color: #64748b; font-size: 12px;">
-                You are receiving this because you subscribed to ${storeName} updates.
+                You are receiving this because you subscribed to ${safeStoreName} updates.
               </p>
               <p style="margin: 0; color: #94a3b8; font-size: 12px;">
-                <a href="${unsubscribeUrl}" style="color: #94a3b8; text-decoration: underline;">Unsubscribe</a>
-                &nbsp;·&nbsp; © ${currentYear} ${storeName}
+                <a href="${escapeHtml(unsubscribeUrl)}" style="color: #94a3b8; text-decoration: underline;">Unsubscribe</a>
+                &nbsp;·&nbsp; © ${currentYear} ${safeStoreName}
               </p>
             </td>
           </tr>
@@ -541,10 +546,16 @@ const generatePaymentStatusEmail = ({
     : "linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)";
   const statusLabel = isApproved ? "Approved" : "Rejected";
   const heading = isApproved ? "Payment Approved" : "Payment Could Not Be Verified";
-  const formattedAmount = `${currency || "Rs"} ${Number(amount || 0).toLocaleString("en-PK")}`;
+  const formattedAmount = `${escapeHtml(currency || "Rs")} ${Number(amount || 0).toLocaleString("en-PK")}`;
+  const safeCustomerName = escapeHtml(customerName || "Customer");
+  const safeStoreName = escapeHtml(storeName || "Naturanza Food");
+  const safeOrderId = String(orderId).replace(/[^0-9a-zA-Z_-]/g, "");
+  const safeStageLabel = escapeHtml(stageLabel || "Payment");
+  const safeRejectionReason = rejectionReason ? escapeHtml(rejectionReason) : "";
+  const safeFormattedAmount = escapeHtml(formattedAmount);
 
   const reasonBlock =
-    !isApproved && rejectionReason
+    !isApproved && safeRejectionReason
       ? `
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #fef2f2; border-left: 4px solid #dc2626; border-radius: 8px; margin: 20px 0;">
                 <tr>
@@ -553,7 +564,7 @@ const generatePaymentStatusEmail = ({
                       Reason
                     </p>
                     <p style="margin: 0; color: #7f1d1d; font-size: 14px; line-height: 1.55;">
-                      ${rejectionReason}
+                      ${safeRejectionReason}
                     </p>
                   </td>
                 </tr>
@@ -563,8 +574,8 @@ const generatePaymentStatusEmail = ({
 
   const ctaText = isApproved ? "Track Your Order" : "View Order & Retry Payment";
   const bodyIntro = isApproved
-    ? `Great news — we've received and verified your <strong>${stageLabel}</strong> payment of <strong>${formattedAmount}</strong> for Order <strong>#${orderId}</strong>. Your order is now moving forward.`
-    : `Unfortunately, we could not verify your <strong>${stageLabel}</strong> payment of <strong>${formattedAmount}</strong> for Order <strong>#${orderId}</strong>. Please review the reason below and resubmit, or contact support so we can help.`;
+    ? `Great news — we've received and verified your <strong>${safeStageLabel}</strong> payment of <strong>${safeFormattedAmount}</strong> for Order <strong>#${safeOrderId}</strong>. Your order is now moving forward.`
+    : `Unfortunately, we could not verify your <strong>${safeStageLabel}</strong> payment of <strong>${safeFormattedAmount}</strong> for Order <strong>#${safeOrderId}</strong>. Please review the reason below and resubmit, or contact support so we can help.`;
 
   return `
 <!DOCTYPE html>
@@ -572,7 +583,7 @@ const generatePaymentStatusEmail = ({
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${heading} — Order #${orderId}</title>
+  <title>${heading} — Order #${safeOrderId}</title>
 </head>
 <body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background-color:#f0fdf4;">
   <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color:#f0fdf4;">
@@ -583,13 +594,13 @@ const generatePaymentStatusEmail = ({
             <td style="background:${accentGradient};padding:32px 40px;text-align:center;">
               <h1 style="margin:0;color:#fff;font-size:24px;font-weight:700;">${heading}</h1>
               <p style="margin:8px 0 0;color:rgba(255,255,255,0.92);font-size:13px;letter-spacing:0.5px;text-transform:uppercase;">
-                Order #${orderId} · ${statusLabel}
+                Order #${safeOrderId} · ${statusLabel}
               </p>
             </td>
           </tr>
           <tr>
             <td style="padding:36px 40px;color:#1f2937;font-size:15px;line-height:1.7;">
-              <p style="margin:0 0 16px;">Assalam o Alaikum <strong>${customerName || "Customer"}</strong>,</p>
+              <p style="margin:0 0 16px;">Assalam o Alaikum <strong>${safeCustomerName}</strong>,</p>
               <p style="margin:0 0 20px;">${bodyIntro}</p>
               ${reasonBlock}
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f8fafc;border-radius:10px;margin:8px 0 24px;">
@@ -598,15 +609,15 @@ const generatePaymentStatusEmail = ({
                     <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
                       <tr>
                         <td style="color:#64748b;font-size:13px;padding:4px 0;">Order</td>
-                        <td style="text-align:right;color:#0f172a;font-size:13px;font-weight:600;padding:4px 0;">#${orderId}</td>
+                        <td style="text-align:right;color:#0f172a;font-size:13px;font-weight:600;padding:4px 0;">#${safeOrderId}</td>
                       </tr>
                       <tr>
                         <td style="color:#64748b;font-size:13px;padding:4px 0;">Stage</td>
-                        <td style="text-align:right;color:#0f172a;font-size:13px;font-weight:600;padding:4px 0;">${stageLabel}</td>
+                        <td style="text-align:right;color:#0f172a;font-size:13px;font-weight:600;padding:4px 0;">${safeStageLabel}</td>
                       </tr>
                       <tr>
                         <td style="color:#64748b;font-size:13px;padding:4px 0;">Amount</td>
-                        <td style="text-align:right;color:${accentColor};font-size:13px;font-weight:700;padding:4px 0;">${formattedAmount}</td>
+                        <td style="text-align:right;color:${accentColor};font-size:13px;font-weight:700;padding:4px 0;">${safeFormattedAmount}</td>
                       </tr>
                       <tr>
                         <td style="color:#64748b;font-size:13px;padding:4px 0;">Status</td>
@@ -619,7 +630,7 @@ const generatePaymentStatusEmail = ({
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
                 <tr>
                   <td align="center" style="padding:6px 0 12px;">
-                    <a href="${siteUrl}/orders" target="_blank" style="display:inline-block;background:${accentGradient};color:#fff;text-decoration:none;padding:13px 28px;border-radius:10px;font-size:15px;font-weight:600;">
+                    <a href="${escapeHtml(siteUrl)}/orders" target="_blank" style="display:inline-block;background:${accentGradient};color:#fff;text-decoration:none;padding:13px 28px;border-radius:10px;font-size:15px;font-weight:600;">
                       ${ctaText}
                     </a>
                   </td>
@@ -633,7 +644,7 @@ const generatePaymentStatusEmail = ({
           <tr>
             <td style="background:#f8fafc;padding:18px 40px;border-top:1px solid #e2e8f0;text-align:center;">
               <p style="margin:0;color:#94a3b8;font-size:12px;">
-                © ${currentYear} ${storeName}. All rights reserved.
+                © ${currentYear} ${safeStoreName}. All rights reserved.
               </p>
             </td>
           </tr>
@@ -688,7 +699,7 @@ const sendPaymentStatusEmail = async ({
  * Send a 6-digit email verification code for new self-signup accounts.
  */
 const sendVerificationCodeEmail = async (email, userName, code, expiryMinutes = 15) => {
-  const greetingName = userName ? ` ${userName}` : "";
+  const greetingName = userName ? ` ${escapeHtml(userName)}` : "";
   const html = `
   <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f7f4;padding:32px 0;font-family:Arial,Helvetica,sans-serif;">
     <tr><td align="center">

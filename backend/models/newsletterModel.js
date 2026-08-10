@@ -7,6 +7,7 @@ const createModelError = (message, statusCode, code) => {
   const error = new Error(message);
   error.statusCode = statusCode;
   error.code = code;
+  error.expose = statusCode < 500;
   return error;
 };
 
@@ -50,8 +51,9 @@ const subscribe = async ({ email, source = "footer" }) => {
     await dbPool.query(
       `UPDATE newsletter_subscribers
        SET status = 'active',
-           reactivated_at = CURRENT_TIMESTAMP,
-           source = ?
+            reactivated_at = CURRENT_TIMESTAMP,
+            unsubscribed_at = NULL,
+            source = ?
        WHERE id = ?`,
       [String(source || "footer").slice(0, 40), existing.id],
     );
@@ -113,8 +115,8 @@ const listSubscribers = async ({ status = null, search = null, limit = 200 } = {
      FROM newsletter_subscribers
      ${where}
      ORDER BY subscribed_at DESC
-     LIMIT ${safeLimit}`,
-    params,
+     LIMIT ?`,
+    [...params, safeLimit],
   );
 
   return rows;

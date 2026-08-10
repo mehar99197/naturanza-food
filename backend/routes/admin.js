@@ -887,8 +887,7 @@ router.get("/dashboard/stats", async (req, res) => {
                 SUM(CASE WHEN status = 'shipped' THEN 1 ELSE 0 END) AS shippedOrders,
                 SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) AS deliveredOrders,
                 SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelledOrders
-             FROM orders
-             WHERE payment_status = 'paid'`,
+              FROM orders`,
     );
 
     const [[contactStats]] = await db
@@ -946,8 +945,7 @@ router.get("/dashboard/recent-orders", async (req, res) => {
       SELECT o.*, u.name as customer_name, u.email as customer_email
       FROM orders o
       JOIN users u ON o.user_id = u.id
-      WHERE o.payment_status = 'paid'
-      ORDER BY o.created_at DESC
+       ORDER BY o.created_at DESC
       LIMIT ?
     `, [limit]);
     res.json(results);
@@ -1068,7 +1066,7 @@ router.get("/reports/sales", async (req, res) => {
     const params = [];
 
     if (start_date && end_date) {
-      query += " AND created_at BETWEEN ? AND ?";
+      query += " AND created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)";
       params.push(start_date, end_date);
     }
 
@@ -1084,7 +1082,8 @@ router.get("/reports/sales", async (req, res) => {
 // Product sales report
 router.get("/reports/products", async (req, res) => {
   try {
-    const [results] = await db.promise().query(`
+    const { start_date, end_date } = req.query;
+    let query = `
       SELECT 
           p.id, 
           p.name, 
@@ -1096,10 +1095,14 @@ router.get("/reports/products", async (req, res) => {
       JOIN orders o ON oi.order_id = o.id
       WHERE o.status != 'cancelled'
         AND o.payment_status = 'paid'
-      GROUP BY p.id
-      ORDER BY total_sold DESC
-      LIMIT 20
-    `);
+    `;
+    const params = [];
+    if (start_date && end_date) {
+      query += " AND o.created_at >= ? AND o.created_at < DATE_ADD(?, INTERVAL 1 DAY)";
+      params.push(start_date, end_date);
+    }
+    query += " GROUP BY p.id ORDER BY total_sold DESC LIMIT 20";
+    const [results] = await db.promise().query(query, params);
     res.json(results);
   } catch (error) {
     res.status(500).json({ error: "Database error" });
@@ -1154,6 +1157,34 @@ router.get("/reviews", async (req, res) => {
   }
 });
 
+
+// Approve or reject a review
+router.patch(
+  "/reviews/:id/approval",
+  restrictBody("is_approved"),
+  async (req, res) => {
+    try {
+      const reviewId = Number(req.params.id);
+      if (!Number.isInteger(reviewId) || typeof req.body?.is_approved !== "boolean") {
+        return res.status(400).json({ error: "Invalid review approval payload" });
+      }
+
+      const [result] = await db.promise().query(
+        "UPDATE reviews SET is_approved = ? WHERE id = ?",
+        [req.body.is_approved ? 1 : 0, reviewId],
+      );
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+      return res.json({
+        message: req.body.is_approved ? "Review approved" : "Review rejected",
+        is_approved: req.body.is_approved,
+      });
+    } catch (error) {
+      return res.status(500).json({ error: "Failed to update review approval" });
+    }
+  },
+);
 
 // DELETE review
 router.delete("/reviews/:id", async (req, res) => {
@@ -1905,6 +1936,24 @@ router.put("/returns/:id/status", restrictBody('status', 'note', 'refund_amount'
     }
 
     const request = rows[0];
+
+    const allowedTransitions = {
+      requested: new Set(["approved", "rejected"]),
+      approved: new Set(["received", "rejected"]),
+      received: new Set(["refunded", "rejected"]),
+      rejected: new Set(),
+      refunded: new Set(),
+    };
+    const currentReturnStatus = String(request.status || "").toLowerCase();
+    if (
+      currentReturnStatus !== String(status).toLowerCase() &&
+      !allowedTransitions[currentReturnStatus]?.has(String(status).toLowerCase())
+    ) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: `Invalid return transition from ${currentReturnStatus} to ${status}`,
+      });
+    }
 
     if (request.status === "refunded" && status === "refunded") {
       await connection.rollback();

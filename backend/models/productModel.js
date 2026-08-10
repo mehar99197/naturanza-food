@@ -15,6 +15,7 @@ const createModelError = (message, statusCode, code) => {
   const error = new Error(message);
   error.statusCode = statusCode;
   error.code = code;
+  error.expose = statusCode < 500;
   return error;
 };
 
@@ -385,7 +386,7 @@ const findByBarcode = async (code) => {
     `SELECT p.*, c.name AS category_name
      FROM products p
      LEFT JOIN categories c ON p.category_id = c.id
-     WHERE p.barcode = ?
+      WHERE p.barcode = ? AND p.is_active = TRUE
      LIMIT 1`,
     [barcode],
   );
@@ -401,6 +402,9 @@ const findByBarcode = async (code) => {
 const createProduct = async (payload = {}) => {
   return withTransaction(async (connection) => {
     const name = String(payload.name || "").trim();
+    if (!name) {
+      throw createModelError("Product name is required", 400, "PRODUCT_NAME_REQUIRED");
+    }
     const imageUrl = payload.image_url ? String(payload.image_url).trim() : null;
     const galleryImages = normalizeGalleryImages(payload.gallery_images);
     const slug = await generateUniqueSlug(
@@ -506,6 +510,9 @@ const updateProduct = async (productId, payload = {}) => {
 
     if (hasOwn("name")) {
       const name = String(payload.name || "").trim();
+      if (!name) {
+        throw createModelError("Product name cannot be empty", 400, "PRODUCT_NAME_REQUIRED");
+      }
       fields.push("name = ?");
       params.push(name);
 

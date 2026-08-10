@@ -20,7 +20,7 @@ const adminResetPasswordSchema = z
 
 const registerSchema = z.object({
   name: z.string().trim().min(2).max(100),
-  email: z.string().trim().email().max(120),
+  email: z.string().trim().email().max(254),
   password: strongPassword,
   phone: z
     .string()
@@ -37,7 +37,7 @@ const registerSchema = z.object({
 }).strict();
 
 const loginSchema = z.object({
-  email: z.string().trim().email().max(120),
+  email: z.string().trim().email().max(254),
   password: z.string().min(1).max(128),
 }).strict();
 
@@ -46,7 +46,7 @@ const googleLoginSchema = z.object({
 }).strict();
 
 const forgotPasswordSchema = z.object({
-  email: z.string().trim().email().max(120),
+  email: z.string().trim().email().max(254),
 }).strict();
 
 const resetPasswordSchema = z.object({
@@ -55,12 +55,12 @@ const resetPasswordSchema = z.object({
 }).strict();
 
 const verifyEmailSchema = z.object({
-  email: z.string().trim().email().max(120),
+  email: z.string().trim().email().max(254),
   code: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code"),
 }).strict();
 
 const resendVerificationSchema = z.object({
-  email: z.string().trim().email().max(120),
+  email: z.string().trim().email().max(254),
 }).strict();
 
 module.exports = {

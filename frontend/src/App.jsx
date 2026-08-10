@@ -23,6 +23,7 @@ import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { CartDrawer } from "@/components/CartDrawer";
 import { Loader } from "@/components/Loader";
+import { safeSessionStorage } from "@/lib/storage";
 import { WishlistToast } from "@/components/WishlistToast";
 import { AdminLayout } from "@/components/AdminLayout";
 import AnnouncementBar from "@/components/AnnouncementBar";
@@ -143,7 +144,7 @@ function ReloadScrollRestoration() {
     const key = `scroll:reload:${window.location.pathname}`;
     let stored = null;
     try {
-      stored = window.sessionStorage.getItem(key);
+      stored = safeSessionStorage.getItem(key);
     } catch {}
     const y = Number(stored);
     if (Number.isFinite(y)) {
@@ -159,7 +160,7 @@ function ReloadScrollRestoration() {
     const saveScrollPosition = () => {
       const key = `scroll:reload:${pathnameRef.current}`;
       try {
-        window.sessionStorage.setItem(key, String(window.scrollY || 0));
+        safeSessionStorage.setItem(key, String(window.scrollY || 0));
       } catch {}
     };
 
@@ -295,7 +296,7 @@ function AppContent() {
       <WishlistToast />
       <main id="main-content" className={mainWrapperClass}>
         <AnimatePresence mode={isAdminRoute ? "sync" : "wait"} initial={false}>
-          <RouteErrorBoundary>
+          <RouteErrorBoundary key={location.key || location.pathname}>
           <Suspense fallback={<Loader />}>
           <Routes location={location} key={isAdminRoute ? "/admin" : location.pathname}>
             {/* Public Routes */}
@@ -464,7 +465,7 @@ function App() {
   let hasVisited = "true";
   if (typeof window !== "undefined" && shouldShowStartupLoader) {
     try {
-      hasVisited = window.sessionStorage.getItem("hasVisitedHome");
+      hasVisited = safeSessionStorage.getItem("hasVisitedHome");
     } catch {
       hasVisited = "true";
     }
@@ -489,7 +490,7 @@ function App() {
           setTimeout(() => {
             setLoading(false);
             try {
-              sessionStorage.setItem("hasVisitedHome", "true");
+              safeSessionStorage.setItem("hasVisitedHome", "true");
             } catch {}
 
             // Restore scroll position after loader hides

@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 
 export default function AdminCoupons() {
- const { coupons, addCoupon, updateCoupon, deleteCoupon, toggleCouponStatus } = useAdminData();
+ const { coupons, addCoupon, updateCoupon, deleteCoupon, toggleCouponStatus, loading: adminDataLoading, error: adminDataError } = useAdminData();
  const { settings } = useSettings();
  const currency = settings.currency || 'PKR';
  const [showForm, setShowForm] = useState(false);
@@ -59,8 +59,9 @@ export default function AdminCoupons() {
  discount_value: parseFloat(formData.discount_value),
  min_order_amount: formData.min_order_amount ? parseFloat(formData.min_order_amount) : 0,
  max_discount: formData.max_discount ? parseFloat(formData.max_discount) : null,
- usage_limit: formData.usage_limit ? parseInt(formData.usage_limit) : null,
- expiry_date: formData.expiry_date || null
+  usage_limit: formData.usage_limit ? parseInt(formData.usage_limit) : null,
+  expiry_date: formData.expiry_date || null,
+  ...(editingCoupon ? { is_active: Boolean(formData.is_active) } : {}),
  };
 
  try {
@@ -89,8 +90,9 @@ export default function AdminCoupons() {
  discount_value: coupon.discount_value,
  min_order_amount: coupon.min_order_amount || '',
  max_discount: coupon.max_discount || '',
- usage_limit: coupon.usage_limit || '',
- expiry_date: coupon.expiry_date ? new Date(coupon.expiry_date).toISOString().split('T')[0] : ''
+  usage_limit: coupon.usage_limit || '',
+  expiry_date: coupon.expiry_date ? new Date(coupon.expiry_date).toISOString().split('T')[0] : '',
+  is_active: Boolean(coupon.is_active),
  });
  setShowForm(true);
  };
@@ -193,12 +195,21 @@ export default function AdminCoupons() {
  </div>
 
  {/* Error Message */}
- {error && (
+  {error && (
  <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
  <AlertCircle className="h-5 w-5" />
  {error}
  </div>
- )}
+  )}
+  {adminDataError && (
+  <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
+  <AlertCircle className="h-5 w-5" />
+  {adminDataError}
+  </div>
+  )}
+  {adminDataLoading && (
+  <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">Loading coupons...</div>
+  )}
 
  {/* Statistics Cards */}
  <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">

@@ -12,13 +12,14 @@ const toNumber = (value, fallback) => {
 const dbConfig = {
   host: process.env.DB_HOST || "localhost",
   port: toNumber(process.env.DB_PORT, 3306),
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD !== undefined ? process.env.DB_PASSWORD : "",
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD || undefined,
   database: process.env.DB_NAME || "naturanza_food",
   waitForConnections: true,
   connectionLimit: toNumber(process.env.DB_CONNECTION_LIMIT, 10),
   queueLimit: 0,
   charset: "utf8mb4",
+  ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: true } : undefined,
 };
 
 const dbPool = mysql.createPool(dbConfig);
@@ -93,7 +94,6 @@ const db = {
 module.exports = {
   db,
   dbPool,
-  dbConfig,
   testDatabaseConnection,
   withTransaction,
 };

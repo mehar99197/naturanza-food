@@ -12,6 +12,19 @@ const createUserSession = async (
   }
 
   const tokenHash = hashToken(token);
+
+  const MAX_SESSIONS = 10;
+  await db.query(
+    `DELETE FROM user_sessions
+     WHERE user_id = ? AND id NOT IN (
+       SELECT id FROM (
+         SELECT id FROM user_sessions WHERE user_id = ? AND is_active = TRUE
+         ORDER BY last_seen_at DESC LIMIT ?
+       ) AS keep
+     )`,
+    [userId, userId, MAX_SESSIONS - 1],
+  );
+
   const [result] = await db.query(
     `INSERT INTO user_sessions (user_id, token_hash, login_provider, ip_address, user_agent, is_active, last_seen_at)
      VALUES (?, ?, ?, ?, ?, TRUE, NOW())`,

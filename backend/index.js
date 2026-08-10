@@ -19,6 +19,7 @@ const {
   CSRF_COOKIE_NAME,
   CSRF_COOKIE_MAX_AGE,
 } = require("./middleware/csrf");
+const { startBlacklistCleanup } = require("./utils/tokenStore");
 
 if (!process.env.GOOGLE_CLIENT_ID) {
   console.warn(
@@ -35,7 +36,7 @@ const normalizedRateLimitFlag = String(
 const ENABLE_RATE_LIMITS =
   normalizedRateLimitFlag === "false"
     ? false
-    : normalizedRateLimitFlag === "true" || process.env.NODE_ENV === "production" || true;
+    : normalizedRateLimitFlag === "true" || process.env.NODE_ENV === "production";
 const DEFAULT_ADMIN_EMAIL =
   String(process.env.DEFAULT_ADMIN_EMAIL || "")
     .trim()
@@ -91,10 +92,12 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
+        // React currently renders dynamic style attributes and a few runtime
+        // style blocks. Keep inline styles allowed, but never allow inline JS.
         styleSrc: ["'self'", "'unsafe-inline'", "https:"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https:"],
-        imgSrc: ["'self'", "data:", "https:", "http:"],
-        connectSrc: ["'self'", "https:", "http:"],
+        scriptSrc: ["'self'", "https:"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'", "https:"],
         fontSrc: ["'self'", "https:", "data:"],
         objectSrc: ["'none'"],
         mediaSrc: ["'self'"],
@@ -105,9 +108,17 @@ app.use(
     },
     crossOriginEmbedderPolicy: false,
     crossOriginOpenerPolicy: { policy: "unsafe-none" },
-    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginResourcePolicy: { policy: "same-origin" },
   }),
 );
+
+app.use((req, res, next) => {
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), payment=()",
+  );
+  next();
+});
 
 // 2. Rate Limiting - General API protection
 const apiLimiter = rateLimit({
@@ -137,7 +148,7 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipFailedRequests: false,
-  skipSuccessfulRequests: true,
+  skipSuccessfulRequests: false,
 });
 
 // Fetching a CSRF token is the prerequisite for every unsafe request, so
@@ -259,8 +270,8 @@ const corsOptions = {
   exposedHeaders: ["Content-Disposition", "Content-Type", "Content-Length"],
 };
 app.use(cors(corsOptions));
-app.use(express.json({ limit: "10mb" })); // Limit payload size
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 // Serve static files (images)
 // Persistent user uploads first — these live outside the git-deployed tree so
@@ -317,16 +328,15 @@ const ensureDefaultAdminAccount = async () => {
       const adminRoleValue = String(existingUser.admin_role || "")
         .trim()
         .toLowerCase();
-      const needsRoleUpdate = roleValue !== "admin";
-      const needsAdminRoleUpdate = adminRoleValue !== "super_admin";
-      const needsActivation = !existingUser.is_active;
 
-      if (needsRoleUpdate || needsAdminRoleUpdate || needsActivation) {
-        await dbPool.query(
-          "UPDATE users SET role = 'admin', admin_role = 'super_admin', is_active = TRUE WHERE id = ?",
-          [existingUser.id],
+      // Never turn an existing customer, staff admin, or disabled account into
+      // a super-admin during a normal application restart. Bootstrapping must be
+      // additive only; privilege changes belong to an explicit admin workflow.
+      if (roleValue !== "admin" || adminRoleValue !== "super_admin" || !existingUser.is_active) {
+        console.warn(
+          `Default admin seed skipped for existing account ${DEFAULT_ADMIN_EMAIL}: ` +
+            "the account is not already an active super-admin.",
         );
-        console.log(`Default admin account updated: ${DEFAULT_ADMIN_EMAIL}`);
       }
     } else {
       const hashedPassword = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 12);
@@ -356,6 +366,9 @@ const ensureDatabaseCompatibility = async () => {
       "Could not ensure production schema compatibility:",
       error.message,
     );
+    if (process.env.NODE_ENV === "production") {
+      throw error;
+    }
   }
   await ensureDefaultAdminAccount();
 };
@@ -407,7 +420,6 @@ if (csrfEnabled !== "false" && process.env.NODE_ENV !== "development") {
 }
 
 // Routes
-const { authRouter } = require("./src/modules/auth/auth.routes");
 const legacyAuthRoutes = require("./routes/auth");
 const profileRoutes = require("./routes/profile");
 const productRoutes = require("./routes/products");
@@ -481,9 +493,9 @@ if (ENABLE_RATE_LIMITS) {
 }
 
 // Mount routes
-// Keep legacy auth endpoints first so overlapping auth flows remain consistent.
+// The legacy router is the active auth implementation. The modular auth stack
+// is not mounted because it uses a different token/schema contract.
 app.use("/api/auth", legacyAuthRoutes);
-app.use("/api/auth", authRouter);
 app.use("/api/profile", profileRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/categories", categoryRoutes);
@@ -599,6 +611,9 @@ const startServer = () => {
     // never reaches the queue) permanently blocking inventory.
     startReservationSweeper({ intervalMs: 5 * 60_000 });
     console.log("Stock reservation sweeper running (5-minute interval).");
+
+    startBlacklistCleanup(dbPool, 60 * 60_000);
+    console.log("Token blacklist cleanup running (hourly interval).");
   });
 
   server.on("error", (err) => {

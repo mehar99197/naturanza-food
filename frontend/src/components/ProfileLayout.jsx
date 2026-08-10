@@ -15,6 +15,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { userAPI } from "@/services/api";
 import { NoIndexSEO } from "@/components/SEO";
+import { safeLocalStorage } from "@/lib/storage";
 
 const menuItems = [
   {
@@ -96,7 +97,7 @@ export default function ProfileLayout() {
   const [toastType, setToastType] = useState("success");
   const [toastMessage, setToastMessage] = useState("");
   const [profileImage, setProfileImage] = useState(() => {
-    const savedImage = localStorage.getItem("profileImage");
+    const savedImage = safeLocalStorage.getItem("profileImage");
     return resolveProfileImage(user, savedImage);
   });
 
@@ -115,7 +116,7 @@ export default function ProfileLayout() {
   };
 
   useEffect(() => {
-    const savedImage = localStorage.getItem("profileImage");
+    const savedImage = safeLocalStorage.getItem("profileImage");
     const userImage = resolveProfileImage(user, null);
     const hasUser = Boolean(user && typeof user === "object");
 
@@ -127,7 +128,7 @@ export default function ProfileLayout() {
       suppressStaleImageRef.current = false;
 
       if (userImage !== savedImage) {
-        localStorage.setItem("profileImage", userImage);
+      safeLocalStorage.setItem("profileImage", userImage);
       }
 
       setProfileImage(userImage);
@@ -136,7 +137,7 @@ export default function ProfileLayout() {
 
     if (hasUser) {
       suppressStaleImageRef.current = false;
-      localStorage.removeItem("profileImage");
+      safeLocalStorage.removeItem("profileImage");
       setProfileImage(null);
       return;
     }
@@ -181,7 +182,7 @@ export default function ProfileLayout() {
       }
 
       setProfileImage(nextImage);
-      localStorage.setItem("profileImage", nextImage);
+      safeLocalStorage.setItem("profileImage", nextImage);
       setShowImageMenu(false);
       showToast("Profile image updated successfully!");
       emitProfileImageUpdated(nextImage);
@@ -205,7 +206,7 @@ export default function ProfileLayout() {
       // Keep UI cleared if backend/user refresh briefly returns stale image.
       suppressStaleImageRef.current = true;
       setProfileImage(null);
-      localStorage.removeItem("profileImage");
+      safeLocalStorage.removeItem("profileImage");
       setShowImageMenu(false);
       showToast("Profile image removed successfully!");
       emitProfileImageUpdated(null);
@@ -231,7 +232,7 @@ export default function ProfileLayout() {
   const handleLogout = () => {
     suppressStaleImageRef.current = false;
     setShowImageMenu(false);
-    localStorage.removeItem("profileImage");
+    safeLocalStorage.removeItem("profileImage");
     emitProfileImageUpdated(null);
     logout();
     navigate("/");

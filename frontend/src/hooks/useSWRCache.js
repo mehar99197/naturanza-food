@@ -78,11 +78,15 @@ export function useSWRCache(key, fetcher, opts = {}) {
     if (!entry) {
       // First-ever load for this key → block UI on the initial fetch.
       setLoading(true);
-      runFetch().finally(() => setLoading(false));
+      runFetch()
+        .finally(() => setLoading(false))
+        .catch(() => {});
     } else if (!isFresh) {
       // Have data but stale → render cached, fetch in background.
       setRevalidating(true);
-      runFetch().finally(() => setRevalidating(false));
+      runFetch()
+        .finally(() => setRevalidating(false))
+        .catch(() => {});
     }
     // Fresh cache: no fetch needed, data already returned synchronously above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -92,6 +96,8 @@ export function useSWRCache(key, fetcher, opts = {}) {
     setRevalidating(true);
     try {
       return await runFetch();
+    } catch (_) {
+      return null;
     } finally {
       setRevalidating(false);
     }
