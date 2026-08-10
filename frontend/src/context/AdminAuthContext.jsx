@@ -3,7 +3,6 @@ import {
   AUTH_SESSION_SYNC_EVENT,
   adminAPI,
   clearAdminAccessToken,
-  getAdminAccessToken,
 } from "@/services/api";
 import { FEATURE_PERMISSIONS } from "@/config/adminPermissions";
 
@@ -64,14 +63,7 @@ export const AdminAuthProvider = ({ children }) => {
 
   // Check for existing admin token on mount
   useEffect(() => {
-    const token = getAdminAccessToken();
     const adminData = safeLocalStorage.getItem("adminData");
-
-    if (!token) {
-      safeLocalStorage.removeItem("adminData");
-      setLoading(false);
-      return;
-    }
 
     if (adminData) {
       try {
@@ -95,14 +87,6 @@ export const AdminAuthProvider = ({ children }) => {
       return undefined;
     } else {
       const syncAdminSessionState = async () => {
-        const token = getAdminAccessToken();
-
-        if (!token) {
-          safeLocalStorage.removeItem("adminData");
-          setAdmin(null);
-          return;
-        }
-
         const adminData = safeLocalStorage.getItem("adminData");
         if (adminData) {
           try {

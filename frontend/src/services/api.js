@@ -881,9 +881,6 @@ export const adminAPI = {
   },
 
   verify: async () => {
-    if (!getAdminAccessToken()) {
-      return { success: false, status: 401 };
-    }
     try {
       const response = await axiosInstance.get("/admin/verify");
       return response.data;

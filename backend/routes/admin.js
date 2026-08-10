@@ -6,7 +6,13 @@ const { authenticateToken, isAdmin } = require("../middleware/auth");
 const requirePermission = require("../middleware/requirePermission");
 const requireSuperAdmin = require("../middleware/requireSuperAdmin");
 const { restrictBody } = require("../middleware/security");
-const { issueAccessToken, verifyAccessToken, toExpiryDate } = require("../utils/jwtTokens");
+const {
+  issueAccessToken,
+  verifyAccessToken,
+  toExpiryDate,
+  getAccessCookieOptions,
+  clearAccessCookie,
+} = require("../utils/jwtTokens");
 const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/tokenStore");
 const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
 const { getAboutContent, updateAboutContent } = require("../utils/aboutContent");
@@ -447,6 +453,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
 
     const accessToken = issueAccessToken(user);
     const token = accessToken.token;
+    res.cookie("adminAccessToken", token, getAccessCookieOptions());
 
     try {
       await createUserSession(db.promise(), {
@@ -545,6 +552,7 @@ router.post("/logout", authenticateToken, isAdmin, restrictBody(), (req, res) =>
   const token = getBearerToken(req);
 
   const finalizeLogout = () => {
+    clearAccessCookie(res);
     res.json({
       success: true,
       message: "Logged out successfully",

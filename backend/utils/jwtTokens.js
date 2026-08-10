@@ -181,9 +181,24 @@ const getRefreshCookieOptions = () => ({
   path: "/",
 });
 
+const getAccessCookieOptions = () => ({
+  httpOnly: true,
+  secure: shouldUseSecureCookies(),
+  sameSite: resolveSameSite(),
+  maxAge: ACCESS_TOKEN_MINUTES * 60 * 1000,
+  path: "/",
+});
+
 const clearRefreshCookie = (res) => {
   res.clearCookie(REFRESH_COOKIE_NAME, {
     ...getRefreshCookieOptions(),
+    maxAge: 0,
+  });
+};
+
+const clearAccessCookie = (res) => {
+  res.clearCookie("adminAccessToken", {
+    ...getAccessCookieOptions(),
     maxAge: 0,
   });
 };
@@ -205,7 +220,9 @@ module.exports = {
   verifyRefreshToken,
   toExpiryDate,
   getRefreshCookieOptions,
+  getAccessCookieOptions,
   clearRefreshCookie,
+  clearAccessCookie,
   REFRESH_COOKIE_NAME,
   getJwtRuntimeInfo,
 };
