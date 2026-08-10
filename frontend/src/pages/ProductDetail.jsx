@@ -391,12 +391,15 @@ export function ProductDetail() {
   const displayedRating =
     liveReviewCount > 0 ? Number(liveAverageRating || 0) : Number(product?.rating || 0);
 
-  const stockQuantity = Number(product?.stock_quantity ?? product?.stock ?? 0);
-  const hasStock = Boolean(
-    product?.inStock || product?.is_in_stock || stockQuantity > 0,
-  );
+  const stockQuantity = Number(product?.stock_quantity ?? product?.stock ?? NaN);
+  const hasExplicitAvailability = typeof product?.is_in_stock === 'boolean';
+  const hasStock = hasExplicitAvailability
+    ? product.is_in_stock
+    : Boolean(product?.inStock || stockQuantity > 0);
   const maxAllowedQty =
-    Number.isFinite(stockQuantity) && stockQuantity > 0 ? stockQuantity : null;
+    !hasExplicitAvailability && Number.isFinite(stockQuantity) && stockQuantity > 0
+      ? stockQuantity
+      : null;
 
   const pricing = getProductPricing(product, settings);
   const currentPrice = pricing.salePrice;
@@ -733,7 +736,7 @@ export function ProductDetail() {
           image_url: productImages[0],
           averageRating: liveReviewCount > 0 ? displayedRating : undefined,
           reviewCount: liveReviewCount > 0 ? liveReviewCount : undefined,
-          stock_quantity: hasStock ? maxAllowedQty || 1 : 0,
+          is_in_stock: hasStock,
         }}
       />
 

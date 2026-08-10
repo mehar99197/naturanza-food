@@ -233,7 +233,13 @@ export function ProductSEO({ product, category }) {
       type="product"
       url={productUrl}
       price={product.price}
-      availability={product.stock_quantity > 0 ? 'in stock' : 'out of stock'}
+      availability={
+        (typeof product.is_in_stock === 'boolean'
+          ? product.is_in_stock
+          : Number(product.stock_quantity) > 0)
+          ? 'in stock'
+          : 'out of stock'
+      }
     />
   );
 }

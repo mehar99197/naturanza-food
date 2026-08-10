@@ -110,6 +110,31 @@ ADMIN_URL=https://naturanzafood.com/admin/login
 
 With `ENFORCE_HTTPS=true`, the server redirects HTTP → HTTPS automatically.
 
+### 4.1 FTP and DNS security hardening
+
+The web application does not need FTP. In hPanel, disable the public FTP service
+or remove the `ftp.naturanzafood.com` DNS record and use SFTP/SSH or the Hostinger
+File Manager instead.
+
+If FTP must remain enabled, require `AUTH TLS`, disable anonymous access, use a
+certificate whose SAN includes `ftp.naturanzafood.com`, restrict access to trusted
+IP addresses, and rotate every FTP password after changing the configuration.
+
+For domain and email protection, complete these provider-side controls before
+production use:
+
+- Enable DNSSEC for `naturanzafood.com`.
+- Add CAA records allowing only the certificate authority actually used by the site.
+- Enable DKIM for every service that sends mail for the domain.
+- Keep SPF limited to the real senders, then change the final mechanism from `~all`
+  to `-all` after validating delivery.
+- Change DMARC from `p=none` to `p=quarantine`, then `p=reject` after reviewing
+  aggregate reports. Use a monitored `rua` mailbox.
+- Add MTA-STS and TLS-RPT records if the domain receives business-sensitive email.
+
+These DNS and FTP controls are managed by Hostinger/DNS providers and cannot be
+enforced by the Node.js process or by a GitHub deployment alone.
+
 ---
 
 ## 5. Update Google OAuth

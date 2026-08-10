@@ -10,13 +10,14 @@ const ALLOWED_PAYMENT_METHODS = new Set(["jazzcash", "easypaisa", "bank"]);
 const WALLET_METHODS = new Set(["jazzcash", "easypaisa"]);
 const TID_REGEX = /^\d{11}$/;
 
-// GET /api/payments/accounts/active (public - no auth required for checkout)
-router.get("/accounts/active", async (req, res) => {
+// Checkout is authenticated, so keep receiving account details off the public
+// internet and out of unauthenticated catalog scraping.
+router.get("/accounts/active", authenticateToken, async (req, res) => {
   try {
     const [rows] = await db
       .promise()
       .query(
-        `SELECT id, type, account_number, account_name
+        `SELECT type, account_number, account_name
          FROM payment_accounts
          WHERE is_active = TRUE
          ORDER BY FIELD(type, 'jazzcash', 'easypaisa', 'bank'), id`,

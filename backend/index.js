@@ -30,6 +30,29 @@ if (!process.env.GOOGLE_CLIENT_ID) {
 const app = express();
 const PORT = process.env.PORT || 5000;
 const jwtRuntime = getJwtRuntimeInfo();
+
+// Keep framework fingerprints out of responses. Hostinger may still add its
+// own edge headers, but the application must not advertise Express/Node.
+app.disable("x-powered-by");
+
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+  "script-src 'self' https://accounts.google.com https://apis.google.com https://www.googletagmanager.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "style-src-attr 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "connect-src 'self' https://accounts.google.com https://apis.google.com https://www.google-analytics.com",
+  "font-src 'self' https://fonts.gstatic.com data:",
+  "media-src 'self'",
+  "frame-src 'self' https://accounts.google.com https://www.openstreetmap.org",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
+  "upgrade-insecure-requests",
+].join("; ");
 const normalizedRateLimitFlag = String(
   process.env.ENABLE_RATE_LIMITS || "",
 ).trim().toLowerCase();
@@ -92,18 +115,31 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        // React currently renders dynamic style attributes and a few runtime
-        // style blocks. Keep inline styles allowed, but never allow inline JS.
-        styleSrc: ["'self'", "'unsafe-inline'", "https:"],
-        scriptSrc: ["'self'", "https:"],
-        imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'", "https:"],
-        fontSrc: ["'self'", "https:", "data:"],
+        baseUri: ["'self'"],
         objectSrc: ["'none'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          "https://accounts.google.com",
+          "https://apis.google.com",
+          "https://www.googletagmanager.com",
+        ],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        styleSrcAttr: ["'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        connectSrc: [
+          "'self'",
+          "https://accounts.google.com",
+          "https://apis.google.com",
+          "https://www.google-analytics.com",
+        ],
+        fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
         mediaSrc: ["'self'"],
-        // The Contact page embeds the OpenStreetMap iframe.
         frameSrc: ["'self'", "https://accounts.google.com", "https://www.openstreetmap.org"],
         workerSrc: ["'self'", "blob:"],
+        manifestSrc: ["'self'"],
+        upgradeInsecureRequests: [],
       },
     },
     crossOriginEmbedderPolicy: false,
@@ -111,6 +147,16 @@ app.use(
     crossOriginResourcePolicy: { policy: "same-origin" },
   }),
 );
+
+// Hostinger's edge has previously replaced Helmet's policy with the weak
+// `upgrade-insecure-requests` directive. Set the complete policy explicitly so
+// the origin response remains protected when the app is deployed directly.
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+  }
+  next();
+});
 
 app.use((req, res, next) => {
   res.setHeader(

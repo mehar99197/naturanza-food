@@ -1,0 +1,5 @@
+Contact: mailto:support@naturanzafood.com
+Expires: 2027-08-10T00:00:00.000Z
+Preferred-Languages: en, ur
+Canonical: https://naturanzafood.com/.well-known/security.txt
+Policy: https://github.com/mehar99197/naturanza-food/blob/main/SECURITY.md

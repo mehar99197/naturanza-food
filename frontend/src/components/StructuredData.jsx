@@ -162,7 +162,9 @@ export function ProductStructuredData({ product }) {
       "priceCurrency": displayCurrency,
       "price": displayProductPrice,
       "priceValidUntil": new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      "availability": product.stock_quantity > 0
+      "availability": (typeof product.is_in_stock === "boolean"
+        ? product.is_in_stock
+        : Number(product.stock_quantity) > 0)
         ? "https://schema.org/InStock"
         : "https://schema.org/OutOfStock",
       "itemCondition": "https://schema.org/NewCondition",

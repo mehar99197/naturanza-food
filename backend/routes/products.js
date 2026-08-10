@@ -9,9 +9,15 @@ const { uploadProductImage } = require("../middleware/upload");
 
 router.get("/featured/list", asyncHandler(productController.getFeaturedProducts));
 // Multi-segment routes stay above "/:id" so a scanned code is never read as an id.
-router.get("/barcode/:code", asyncHandler(productController.getProductByBarcode));
+router.get(
+  "/barcode/:code",
+  authenticateToken,
+  isAdmin,
+  requirePermission("manage_products"),
+  asyncHandler(productController.getProductByBarcode),
+);
 router.get("/", optionalAuthenticateToken, asyncHandler(productController.getProducts));
-router.get("/:id", asyncHandler(productController.getProductById));
+router.get("/:id", optionalAuthenticateToken, asyncHandler(productController.getProductById));
 
 router.post(
   "/",

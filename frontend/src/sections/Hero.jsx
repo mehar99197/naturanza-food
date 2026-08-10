@@ -113,7 +113,7 @@ const buildSlideChips = (slide, settings) => {
     });
   }
 
-  if (Number.isFinite(slide.stockQty) && slide.stockQty > 0) {
+  if (slide.inStock) {
     chips.push({
       key: 'stock',
       label: 'In stock',
@@ -163,7 +163,9 @@ export function Hero() {
             const ratingValue = Number(p?.average_rating || p?.rating || 0);
             const reviewCount = Number(p?.review_count || p?.reviews_count || p?.reviewCount || 0);
             const categoryLabel = String(p?.category_name || p?.category || '').trim();
-            const stockQty = Number(p?.stock_quantity ?? p?.stock ?? NaN);
+            const inStock = typeof p?.is_in_stock === "boolean"
+              ? p.is_in_stock
+              : Number(p?.stock_quantity ?? p?.stock ?? 0) > 0;
 
             return {
               id: p.id,
@@ -184,7 +186,7 @@ export function Hero() {
               reviewCount: Number.isFinite(reviewCount) ? reviewCount : 0,
               category: categoryLabel,
               isOrganic: p?.is_organic === true || p?.is_organic === 1,
-              stockQty: Number.isFinite(stockQty) ? stockQty : null,
+              inStock,
             };
           });
           setSlides(mapped);

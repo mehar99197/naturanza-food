@@ -43,3 +43,44 @@ test('variant JSON parsing safely falls back for malformed values', () => {
   assert.deepEqual(variants.parseJsonSafely('{broken', {}), {});
   assert.deepEqual(variants.parseJsonSafely(null, []), []);
 });
+
+test('public settings omit operational controls', () => {
+  const { toPublicSettings } = require('../utils/adminSettings');
+
+  const publicSettings = toPublicSettings({
+    storeName: 'Naturanza Food',
+    storeEmail: 'support@naturanzafood.com',
+    emailNotifications: true,
+    orderNotifications: true,
+    lowStockAlerts: true,
+    lowStockThreshold: 10,
+  });
+
+  assert.equal(publicSettings.emailNotifications, undefined);
+  assert.equal(publicSettings.orderNotifications, undefined);
+  assert.equal(publicSettings.lowStockAlerts, undefined);
+  assert.equal(publicSettings.lowStockThreshold, undefined);
+});
+
+test('public products expose availability without inventory details', () => {
+  const { toPublicProduct } = require('../controllers/productController');
+
+  const publicProduct = toPublicProduct({
+    id: 7,
+    name: 'Honey',
+    stock_quantity: 20,
+    reserved_stock: 5,
+    barcode: '2000000000007',
+    qr_code_url: 'https://naturanzafood.com/product/7',
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-02T00:00:00.000Z',
+    images: [{ id: 1, image_url: '/images/products/honey.webp', created_at: 'now' }],
+  });
+
+  assert.equal(publicProduct.is_in_stock, true);
+  assert.equal(publicProduct.stock_quantity, undefined);
+  assert.equal(publicProduct.reserved_stock, undefined);
+  assert.equal(publicProduct.barcode, undefined);
+  assert.equal(publicProduct.qr_code_url, undefined);
+  assert.deepEqual(publicProduct.images, [{ image_url: '/images/products/honey.webp', alt_text: null }]);
+});

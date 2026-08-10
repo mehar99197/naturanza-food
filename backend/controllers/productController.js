@@ -8,6 +8,40 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const isAdminRequest = (req) =>
+  String(req?.user?.role || "").trim().toLowerCase() === "admin";
+
+// Storefront responses only need availability, not the exact inventory ledger
+// or internal identifiers. Admin requests keep the complete product record.
+const toPublicProduct = (product = {}) => {
+  const publicProduct = { ...product };
+  const stockQuantity = Number(publicProduct.stock_quantity);
+  const reservedStock = Number(publicProduct.reserved_stock);
+
+  delete publicProduct.stock_quantity;
+  delete publicProduct.reserved_stock;
+  delete publicProduct.barcode;
+  delete publicProduct.qr_code_url;
+  delete publicProduct.created_at;
+  delete publicProduct.updated_at;
+
+  publicProduct.is_in_stock =
+    Number.isFinite(stockQuantity) &&
+    stockQuantity - (Number.isFinite(reservedStock) ? reservedStock : 0) > 0;
+
+  if (Array.isArray(publicProduct.images)) {
+    publicProduct.images = publicProduct.images.map((image) => ({
+      image_url: image?.image_url || null,
+      alt_text: image?.alt_text || null,
+    }));
+  }
+
+  return publicProduct;
+};
+
+const serializeProducts = (products, req) =>
+  isAdminRequest(req) ? products : products.map(toPublicProduct);
+
 const escapeHtml = (value) =>
   String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -48,10 +82,11 @@ const queueLowStockEmail = (lowStockEvent, excludeUserId) => {
 
 const getFeaturedProducts = async (req, res) => {
   const products = await productModel.listFeaturedProducts(10);
-  res.json({ data: products });
+  res.json({ data: serializeProducts(products, req) });
 };
 
 const getProducts = async (req, res) => {
+  const adminRequest = isAdminRequest(req);
   const products = await productModel.listProducts({
     category: req.query.category,
     search: req.query.search,
@@ -62,10 +97,10 @@ const getProducts = async (req, res) => {
     offset: req.query.offset || 0,
     includeInactive:
       req.query.includeInactive === 'true' &&
-      String(req.user?.role || '').toLowerCase() === 'admin',
+      adminRequest,
   });
 
-  res.json({ data: products });
+  res.json({ data: adminRequest ? products : products.map(toPublicProduct) });
 };
 
 const getProductById = async (req, res) => {
@@ -75,7 +110,7 @@ const getProductById = async (req, res) => {
     return res.status(404).json({ error: "Product not found" });
   }
 
-  return res.json(product);
+  return res.json(isAdminRequest(req) ? product : toPublicProduct(product));
 };
 
 // POS lookup: a store's scanner reads the label and resolves it to a product.
@@ -157,6 +192,7 @@ const updateStock = async (req, res) => {
 };
 
 module.exports = {
+  toPublicProduct,
   getFeaturedProducts,
   getProducts,
   getProductById,
