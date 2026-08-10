@@ -89,46 +89,6 @@ axiosInstance.interceptors.response.use(
 
 export const AUTH_SESSION_SYNC_EVENT = "naturanza:auth-session-sync";
 
-const ADMIN_ACCESS_TOKEN_STORAGE_KEY = "adminAccessToken";
-const USER_ACCESS_TOKEN_STORAGE_KEY = "token";
-const USER_SESSION_STORAGE_KEY = "userSessionActive";
-
-const canUseWebStorage = () => {
-  try {
-    return (
-      typeof window !== "undefined" &&
-      typeof window.localStorage !== "undefined" &&
-      typeof window.sessionStorage !== "undefined"
-    );
-  } catch (_) {
-    return false;
-  }
-};
-
-const safeStorageGet = (storage, key) => {
-  try {
-    return storage?.getItem(key) || null;
-  } catch (_) {
-    return null;
-  }
-};
-
-const safeStorageSet = (storage, key, value) => {
-  try {
-    storage?.setItem(key, value);
-  } catch (_) {
-    // Storage may be blocked or full; keep authentication in memory.
-  }
-};
-
-const safeStorageRemove = (storage, key) => {
-  try {
-    storage?.removeItem(key);
-  } catch (_) {
-    // Ignore unavailable storage.
-  }
-};
-
 // Access tokens are memory-only. The refresh token remains in an HttpOnly
 // cookie, preventing XSS from reading a reusable browser-storage token.
 let userAccessToken = null;
@@ -162,25 +122,6 @@ const refreshUserAccessToken = () => {
   return refreshPromise;
 };
 
-const purgeLegacyUserTokenStorage = () => {
-  if (!canUseWebStorage()) {
-    return;
-  }
-
-  safeStorageRemove(window.localStorage, "authToken");
-  safeStorageRemove(window.localStorage, USER_ACCESS_TOKEN_STORAGE_KEY);
-  safeStorageRemove(window.sessionStorage, "authToken");
-};
-
-const purgeLegacyAdminTokenStorage = () => {
-  if (!canUseWebStorage()) {
-    return;
-  }
-
-  safeStorageRemove(window.localStorage, "adminAuthToken");
-  safeStorageRemove(window.localStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY);
-};
-
 export const setUserAccessToken = (token) => {
   userAccessToken = token ? String(token) : null;
 
@@ -197,7 +138,6 @@ export const clearUserAccessToken = () => {
   userAccessToken = null;
   userSessionActive = false;
   
-  purgeLegacyUserTokenStorage();
 };
 
 export const setAdminAccessToken = (token) => {
@@ -210,27 +150,14 @@ export const getAdminAccessToken = () => adminAccessToken;
 export const clearAdminAccessToken = () => {
   adminAccessToken = null;
 
-  purgeLegacyAdminTokenStorage();
 };
-
-purgeLegacyUserTokenStorage();
-purgeLegacyAdminTokenStorage();
 
 const clearUserSessionStorage = () => {
   clearUserAccessToken();
-  purgeLegacyUserTokenStorage();
-  if (canUseWebStorage()) {
-    safeStorageRemove(window.localStorage, "userData");
-    safeStorageRemove(window.localStorage, "profileImage");
-    safeStorageRemove(window.sessionStorage, USER_SESSION_STORAGE_KEY);
-  }
 };
 
 const clearAdminSessionStorage = () => {
   clearAdminAccessToken();
-  if (canUseWebStorage()) {
-    safeStorageRemove(window.localStorage, "adminData");
-  }
 };
 
 const emitAuthSessionSync = (source) => {

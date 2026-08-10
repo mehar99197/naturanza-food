@@ -148,9 +148,7 @@ app.use(
   }),
 );
 
-// Hostinger's edge has previously replaced Helmet's policy with the weak
-// `upgrade-insecure-requests` directive. Set the complete policy explicitly so
-// the origin response remains protected when the app is deployed directly.
+// Keep the complete policy on every production origin response.
 app.use((req, res, next) => {
   if (process.env.NODE_ENV === "production") {
     res.setHeader("Content-Security-Policy", CONTENT_SECURITY_POLICY);
