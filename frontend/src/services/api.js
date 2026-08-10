@@ -9,6 +9,10 @@ const resolveApiBaseUrl = () => {
   if (typeof window !== "undefined") {
     const protocol = String(window.location.protocol || "http:");
     const hostname = String(window.location.hostname || "localhost");
+    if (import.meta.env.PROD) {
+      return "/api";
+    }
+
     const apiPort = Number.parseInt(
       String(import.meta.env.VITE_API_PORT || "5000"),
       10,
@@ -125,41 +129,11 @@ const safeStorageRemove = (storage, key) => {
   }
 };
 
-const readStoredAdminAccessToken = () => {
-  if (!canUseWebStorage()) {
-    return null;
-  }
-
-  const storedToken = String(
-    safeStorageGet(window.sessionStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY) || "",
-  ).trim();
-
-  return storedToken || null;
-};
-
-const readStoredUserAccessToken = () => {
-  if (!canUseWebStorage()) {
-    return null;
-  }
-
-  const storedToken = String(
-    safeStorageGet(window.sessionStorage, USER_ACCESS_TOKEN_STORAGE_KEY) || "",
-  ).trim();
-
-  return storedToken || null;
-};
-
-const readStoredUserSessionFlag = () => {
-  if (!canUseWebStorage()) {
-    return false;
-  }
-
-  return safeStorageGet(window.sessionStorage, USER_SESSION_STORAGE_KEY) === "true";
-};
-
-let userAccessToken = readStoredUserAccessToken();
-let adminAccessToken = readStoredAdminAccessToken();
-let userSessionActive = readStoredUserSessionFlag();
+// Access tokens are memory-only. The refresh token remains in an HttpOnly
+// cookie, preventing XSS from reading a reusable browser-storage token.
+let userAccessToken = null;
+let adminAccessToken = null;
+let userSessionActive = false;
 let refreshPromise = null;
 let userAuthGeneration = 0;
 
@@ -212,17 +186,6 @@ export const setUserAccessToken = (token) => {
 
   userSessionActive = Boolean(userAccessToken);
 
-  if (!canUseWebStorage()) {
-    return;
-  }
-
-  if (userAccessToken) {
-    safeStorageSet(window.sessionStorage, USER_ACCESS_TOKEN_STORAGE_KEY, userAccessToken);
-    safeStorageSet(window.sessionStorage, USER_SESSION_STORAGE_KEY, "true");
-  } else {
-    safeStorageRemove(window.sessionStorage, USER_ACCESS_TOKEN_STORAGE_KEY);
-    safeStorageRemove(window.sessionStorage, USER_SESSION_STORAGE_KEY);
-  }
 };
 
 export const getUserAccessToken = () => userAccessToken;
@@ -234,27 +197,12 @@ export const clearUserAccessToken = () => {
   userAccessToken = null;
   userSessionActive = false;
   
-  if (!canUseWebStorage()) {
-    return;
-  }
-
-  safeStorageRemove(window.sessionStorage, USER_ACCESS_TOKEN_STORAGE_KEY);
-  safeStorageRemove(window.sessionStorage, USER_SESSION_STORAGE_KEY);
-  safeStorageRemove(window.localStorage, USER_ACCESS_TOKEN_STORAGE_KEY);
+  purgeLegacyUserTokenStorage();
 };
 
 export const setAdminAccessToken = (token) => {
   adminAccessToken = token ? String(token) : null;
 
-  if (!canUseWebStorage()) {
-    return;
-  }
-
-  if (adminAccessToken) {
-    safeStorageSet(window.sessionStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY, adminAccessToken);
-  } else {
-    safeStorageRemove(window.sessionStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY);
-  }
 };
 
 export const getAdminAccessToken = () => adminAccessToken;
@@ -262,12 +210,7 @@ export const getAdminAccessToken = () => adminAccessToken;
 export const clearAdminAccessToken = () => {
   adminAccessToken = null;
 
-  if (!canUseWebStorage()) {
-    return;
-  }
-
-  safeStorageRemove(window.sessionStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY);
-  safeStorageRemove(window.localStorage, ADMIN_ACCESS_TOKEN_STORAGE_KEY);
+  purgeLegacyAdminTokenStorage();
 };
 
 purgeLegacyUserTokenStorage();

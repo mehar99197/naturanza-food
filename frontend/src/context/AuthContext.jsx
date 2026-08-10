@@ -20,6 +20,10 @@ const resolveApiBaseUrl = () => {
   if (typeof window !== "undefined") {
     const protocol = String(window.location.protocol || "http:");
     const hostname = String(window.location.hostname || "localhost");
+    if (import.meta.env.PROD) {
+      return "/api";
+    }
+
     const apiPort = Number.parseInt(
       String(import.meta.env.VITE_API_PORT || "5000"),
       10,
