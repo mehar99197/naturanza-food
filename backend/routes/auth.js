@@ -436,10 +436,13 @@ const issueAuthSession = async (req, res, userRecord, provider = "password") => 
     userAgent: req.headers["user-agent"] || null,
   });
 
+  // Remove a legacy host-only cookie before issuing the shared apex-domain
+  // cookie, otherwise browsers can send both values after a www -> apex move.
+  clearRefreshCookie(res, req);
   res.cookie(
     JWT_RUNTIME.refreshCookieName,
     refresh.token,
-    getRefreshCookieOptions(),
+    getRefreshCookieOptions(req),
   );
 
   return {
@@ -1845,7 +1848,7 @@ router.post("/refresh", restrictBody(), async (req, res) => {
   const refreshToken = req.cookies?.[JWT_RUNTIME.refreshCookieName];
 
   if (!refreshToken) {
-    clearRefreshCookie(res);
+    clearRefreshCookie(res, req);
     return res.status(401).json({ error: "Refresh token is required" });
   }
 
@@ -1853,7 +1856,7 @@ router.post("/refresh", restrictBody(), async (req, res) => {
   try {
     refreshPayload = verifyRefreshToken(refreshToken);
   } catch (error) {
-    clearRefreshCookie(res);
+    clearRefreshCookie(res, req);
     return res.status(401).json({ error: "Invalid or expired refresh token" });
   }
 
@@ -1872,7 +1875,17 @@ router.post("/refresh", restrictBody(), async (req, res) => {
       refreshRecord.isRevoked ||
       refreshRecord.isExpired
     ) {
-      if (Number.isInteger(refreshUserId) && refreshUserId > 0) {
+      const rotationAgeMs = refreshRecord?.revoked_at
+        ? Date.now() - new Date(refreshRecord.revoked_at).getTime()
+        : Number.POSITIVE_INFINITY;
+      const isRecentRotationRace =
+        refreshRecord?.isRevoked &&
+        refreshRecord.revoked_reason === "rotated" &&
+        Number.isFinite(rotationAgeMs) &&
+        rotationAgeMs >= 0 &&
+        rotationAgeMs <= 30_000;
+
+      if (!isRecentRotationRace && Number.isInteger(refreshUserId) && refreshUserId > 0) {
         await revokeRefreshTokensByUserId(
           db.promise(),
           refreshUserId,
@@ -1880,8 +1893,14 @@ router.post("/refresh", restrictBody(), async (req, res) => {
         );
       }
 
-      clearRefreshCookie(res);
-      return res.status(401).json({ error: "Invalid or expired refresh token" });
+      if (!isRecentRotationRace) {
+        clearRefreshCookie(res, req);
+      }
+      return res.status(401).json({
+        error: isRecentRotationRace
+          ? "Refresh token was already rotated"
+          : "Invalid or expired refresh token",
+      });
     }
 
     const [sessionRows] = await db.promise().query(
@@ -1895,7 +1914,7 @@ router.post("/refresh", restrictBody(), async (req, res) => {
         refreshRecord.session_id,
         "session_inactive",
       );
-      clearRefreshCookie(res);
+      clearRefreshCookie(res, req);
       return res.status(401).json({ error: "Session revoked. Please log in again." });
     }
 
@@ -1915,7 +1934,7 @@ router.post("/refresh", restrictBody(), async (req, res) => {
         refreshRecord.user_id,
         "account_inactive",
       );
-      clearRefreshCookie(res);
+      clearRefreshCookie(res, req);
       return res.status(401).json({ error: "Session invalid. Please log in again." });
     }
 
@@ -1939,10 +1958,11 @@ router.post("/refresh", restrictBody(), async (req, res) => {
     await touchRefreshTokenByJti(db.promise(), nextRefresh.jti);
     await updateSessionToken(db.promise(), refreshRecord.session_id, nextAccess.token);
 
+    clearRefreshCookie(res, req);
     res.cookie(
       JWT_RUNTIME.refreshCookieName,
       nextRefresh.token,
-      getRefreshCookieOptions(),
+      getRefreshCookieOptions(req),
     );
 
     return res.json({
@@ -1952,7 +1972,9 @@ router.post("/refresh", restrictBody(), async (req, res) => {
       user: buildUserResponse(user),
     });
   } catch (error) {
-    clearRefreshCookie(res);
+    if (error?.code !== "REFRESH_TOKEN_ALREADY_ROTATED") {
+      clearRefreshCookie(res, req);
+    }
     return res.status(401).json({ error: "Invalid or expired refresh token" });
   }
 });
@@ -2006,7 +2028,7 @@ router.post("/logout", restrictBody(), async (req, res) => {
   } catch (error) {
     // Keep logout success response deterministic for clients.
   } finally {
-    clearRefreshCookie(res);
+    clearRefreshCookie(res, req);
   }
 
   return res.json({

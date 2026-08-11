@@ -365,14 +365,10 @@ export const AuthProvider = ({ children }) => {
         }
 
         try {
-          const refreshResponse = await userAPI.refreshToken();
-          const newToken = refreshResponse?.accessToken || refreshResponse?.token;
-          if (newToken) {
-            setUserAccessToken(newToken);
-            emitAuthSessionSync("user-token-refresh");
-          }
+          await userAPI.refreshToken();
         } catch (error) {
-          // Silently ignore refresh failures - session will end naturally
+          clearUserAccessToken();
+          emitAuthSessionSync("user-token-refresh-failed");
         }
       }, refreshInterval);
     };
@@ -627,7 +623,7 @@ export const AuthProvider = ({ children }) => {
     resetPassword,
     updateProfile,
     refreshProfile,
-    isAuthenticated: !!user,
+    isAuthenticated: !loading && !!user,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

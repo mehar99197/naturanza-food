@@ -130,6 +130,11 @@ export function Checkout() {
 
   // Fetch available coupons
   useEffect(() => {
+    if (authLoading || !isAuthenticated) {
+      setAvailableCoupons([]);
+      return undefined;
+    }
+
     const fetchAvailableCoupons = async () => {
       try {
         const response = await http.get("/coupons/active");
@@ -140,7 +145,8 @@ export function Checkout() {
       }
     };
     fetchAvailableCoupons();
-  }, []);
+    return undefined;
+  }, [authLoading, isAuthenticated]);
 
   // Recalculate coupon discount when cart total changes
   useEffect(() => {
@@ -306,7 +312,7 @@ export function Checkout() {
   }, [user]);
 
   useEffect(() => {
-    if (!user?.id) {
+    if (authLoading || !isAuthenticated || !user?.id) {
       setSavedAddresses([]);
       setSelectedAddressId(null);
       return;
@@ -356,7 +362,7 @@ export function Checkout() {
     };
 
     loadSavedAddresses();
-  }, [user?.id]);
+  }, [authLoading, isAuthenticated, user?.id]);
 
   // Payment state
   const [paymentMethod, setPaymentMethod] = useState("cod");
@@ -396,7 +402,11 @@ export function Checkout() {
     let isMounted = true;
 
     const loadPaymentAccounts = async () => {
-      if (!user) {
+      if (authLoading) {
+        return;
+      }
+
+      if (!isAuthenticated || !user?.id) {
         if (isMounted) {
           setActivePaymentAccounts([]);
           setPaymentAccountsLoaded(true);
@@ -425,13 +435,17 @@ export function Checkout() {
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [authLoading, isAuthenticated, user?.id]);
 
   useEffect(() => {
     let isMounted = true;
 
     const loadPaymentMethods = async () => {
-      if (!user) {
+      if (authLoading) {
+        return;
+      }
+
+      if (!isAuthenticated || !user?.id) {
         if (isMounted) {
           setActivePaymentMethods([]);
           setPaymentMethodsError("");
@@ -468,7 +482,7 @@ export function Checkout() {
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [authLoading, isAuthenticated, user?.id]);
 
   // Fetch WhatsApp number (falls back to settings context if API fails)
   useEffect(() => {

@@ -454,7 +454,8 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
 
     const accessToken = issueAccessToken(user);
     const token = accessToken.token;
-    res.cookie("adminAccessToken", token, getAccessCookieOptions());
+    clearAccessCookie(res, req);
+    res.cookie("adminAccessToken", token, getAccessCookieOptions(req));
 
     try {
       await createUserSession(db.promise(), {
@@ -553,7 +554,7 @@ router.post("/logout", authenticateToken, isAdmin, restrictBody(), (req, res) =>
   const token = getBearerToken(req);
 
   const finalizeLogout = () => {
-    clearAccessCookie(res);
+    clearAccessCookie(res, req);
     res.json({
       success: true,
       message: "Logged out successfully",
@@ -1750,6 +1751,12 @@ router.post("/payment-methods", restrictBody('code', 'label', 'description', 'so
       });
     }
 
+    if (normalizedCode === "cod" && !toBoolean(is_active, true)) {
+      return res.status(400).json({
+        error: "Cash on Delivery is required by the storefront and cannot be disabled",
+      });
+    }
+
     const [result] = await db.promise().query(
       `INSERT INTO payment_methods
              (code, label, description, sort_order, supports_online, is_active)
@@ -1818,6 +1825,12 @@ router.put("/payment-methods/:id", restrictBody('code', 'label', 'description', 
       });
     }
 
+    if (normalizedCode === "cod" && !toBoolean(is_active, true)) {
+      return res.status(400).json({
+        error: "Cash on Delivery is required by the storefront and cannot be disabled",
+      });
+    }
+
     const [result] = await db.promise().query(
       `UPDATE payment_methods
              SET code = ?,
@@ -1868,6 +1881,19 @@ router.delete("/payment-methods/:id", async (req, res) => {
     const paymentMethodId = Number(req.params.id);
     if (!Number.isInteger(paymentMethodId)) {
       return res.status(400).json({ error: "Invalid payment method id" });
+    }
+
+    const [[paymentMethod]] = await db.promise().query(
+      "SELECT code FROM payment_methods WHERE id = ? LIMIT 1",
+      [paymentMethodId],
+    );
+    if (!paymentMethod) {
+      return res.status(404).json({ error: "Payment method not found" });
+    }
+    if (String(paymentMethod.code || "").trim().toLowerCase() === "cod") {
+      return res.status(400).json({
+        error: "Cash on Delivery is required by the storefront and cannot be deleted",
+      });
     }
 
     const [result] = await db

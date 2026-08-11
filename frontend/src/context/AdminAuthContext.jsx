@@ -65,12 +65,19 @@ export const AdminAuthProvider = ({ children }) => {
   useEffect(() => {
     const adminData = safeLocalStorage.getItem("adminData");
 
+    if (!adminData) {
+      setLoading(false);
+      return;
+    }
+
     if (adminData) {
       try {
         const parsedAdmin = JSON.parse(adminData);
         setAdmin(parsedAdmin);
       } catch (error) {
         safeLocalStorage.removeItem("adminData");
+        setLoading(false);
+        return;
       }
     }
 
@@ -108,11 +115,23 @@ export const AdminAuthProvider = ({ children }) => {
           return;
         }
 
+        if (source === "admin-token-invalid") {
+          clearAdminAuthState();
+          setLoading(false);
+          return;
+        }
+
         void syncAdminSessionState();
       };
 
       const handleStorageSync = (event) => {
         if (event?.key && event.key !== "adminData") {
+          return;
+        }
+
+        if (!safeLocalStorage.getItem("adminData")) {
+          clearAdminAuthState();
+          setLoading(false);
           return;
         }
 

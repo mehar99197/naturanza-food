@@ -96,16 +96,80 @@ let adminAccessToken = null;
 let userSessionActive = false;
 let refreshPromise = null;
 let userAuthGeneration = 0;
+const REFRESH_LOCK_KEY = "naturanza:user-refresh-lock";
+const REFRESH_LOCK_NAME = "naturanza-user-refresh";
+const REFRESH_LOCK_LEASE_MS = 15_000;
+
+const delay = (milliseconds) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const withCrossTabRefreshLock = async (operation) => {
+  if (typeof navigator !== "undefined" && navigator.locks?.request) {
+    return navigator.locks.request(REFRESH_LOCK_NAME, operation);
+  }
+
+  if (typeof window === "undefined") {
+    return operation();
+  }
+
+  let storage;
+  try {
+    storage = window.localStorage;
+  } catch {
+    return operation();
+  }
+  if (!storage) {
+    return operation();
+  }
+
+  const owner = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const deadline = Date.now() + REFRESH_LOCK_LEASE_MS;
+
+  while (Date.now() < deadline) {
+    let currentValue;
+    try {
+      currentValue = storage.getItem(REFRESH_LOCK_KEY);
+    } catch {
+      return operation();
+    }
+    const currentExpiry = Number(currentValue?.split(":").pop() || 0);
+
+    if (!currentValue || currentExpiry <= Date.now()) {
+      const lockValue = `${owner}:${Date.now() + REFRESH_LOCK_LEASE_MS}`;
+      try {
+        storage.setItem(REFRESH_LOCK_KEY, lockValue);
+      } catch {
+        return operation();
+      }
+
+      if (storage.getItem(REFRESH_LOCK_KEY) === lockValue) {
+        try {
+          return await operation();
+        } finally {
+          if (storage.getItem(REFRESH_LOCK_KEY) === lockValue) {
+            storage.removeItem(REFRESH_LOCK_KEY);
+          }
+        }
+      }
+    }
+
+    await delay(100);
+  }
+
+  // Modern browsers use navigator.locks; this fallback must not strand a user.
+  return operation();
+};
 
 const refreshUserAccessToken = () => {
   const generation = userAuthGeneration;
   if (!refreshPromise) {
-    refreshPromise = axiosInstance
-      .post(
+    refreshPromise = withCrossTabRefreshLock(() =>
+      axiosInstance.post(
         "/auth/refresh",
         {},
         { headers: { "X-Skip-Auth-Refresh": "true" } },
-      )
+      ),
+    )
       .then((response) => {
         const nextToken = response.data?.accessToken || response.data?.token;
         if (!nextToken || generation !== userAuthGeneration) {
@@ -202,8 +266,7 @@ axiosInstance.interceptors.request.use(async (config) => {
     /^\/cart(\/|$)/.test(requestUrl) ||
     /^\/orders(\/|$)/.test(requestUrl) ||
     /^\/reviews(\/|$)/.test(requestUrl) ||
-    /^\/payments(\/|$)/.test(requestUrl) ||
-    /^\/coupons\/active(\/|$)/.test(requestUrl);
+    /^\/payments(\/|$)/.test(requestUrl);
   const isAdminRoute =
     requestUrl.includes("/admin") ||
     requestUrl.includes("/admin-") ||
@@ -261,8 +324,7 @@ const isUserRoute = (url) =>
   /^\/cart(\/|$)/.test(url) ||
   /^\/orders(\/|$)/.test(url) ||
   /^\/reviews(\/|$)/.test(url) ||
-  /^\/payments(\/|$)/.test(url) ||
-  /^\/coupons\/active(\/|$)/.test(url);
+  /^\/payments(\/|$)/.test(url);
 
 const CSRF_USER_MESSAGE =
   "Your security session expired. Please refresh the page and try again.";
@@ -353,6 +415,8 @@ axiosInstance.interceptors.response.use(
           originalRequest.headers.Authorization = `Bearer ${refreshedToken}`;
           return axiosInstance(originalRequest);
         }
+        clearUserSessionStorage();
+        emitAuthSessionSync("user-token-refresh-failed");
       } catch (refreshError) {
         // Refresh failed - clear user session
         clearUserSessionStorage();

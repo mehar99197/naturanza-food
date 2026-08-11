@@ -611,6 +611,10 @@ const ensurePaymentMethodsSeed = async (db) => {
     );
   }
 
+  // COD is a core storefront method and is always rendered by checkout. Repair
+  // older databases where an admin toggle left the UI and order API mismatched.
+  await db.query("UPDATE payment_methods SET is_active = TRUE WHERE code = 'cod'");
+
   // No card/online gateway is integrated in this application. Keep those
   // methods unavailable instead of presenting a payment option that can never
   // be verified.

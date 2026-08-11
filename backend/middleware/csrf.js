@@ -1,6 +1,15 @@
 const crypto = require("crypto");
+const { getCookieDomain } = require("../utils/jwtTokens");
 
-const CSRF_SECRET = process.env.CSRF_SECRET || crypto.randomBytes(32).toString("hex");
+const configuredCsrfSecret = String(process.env.CSRF_SECRET || "").trim();
+const jwtSecret = String(process.env.JWT_SECRET || "").trim();
+const CSRF_SECRET = configuredCsrfSecret ||
+  (jwtSecret
+    ? crypto
+        .createHash("sha256")
+        .update(`naturanza-csrf:${jwtSecret}`, "utf8")
+        .digest("hex")
+    : crypto.randomBytes(32).toString("hex"));
 const CSRF_TOKEN_LENGTH = 32;
 const CSRF_HEADER_NAME = "x-csrf-token";
 const CSRF_COOKIE_NAME = "csrf_token";
@@ -95,13 +104,23 @@ const csrfMiddleware = (options = {}) => {
     if (!existingToken) {
       const newToken = generateToken();
       const signedToken = createSignedToken(newToken);
+      const cookieDomain = getCookieDomain(req);
 
+      res.clearCookie(CSRF_COOKIE_NAME, { path: "/" });
+      if (cookieDomain) {
+        res.clearCookie(CSRF_COOKIE_NAME, {
+          path: "/",
+          domain: cookieDomain,
+          maxAge: 0,
+        });
+      }
       res.cookie(CSRF_COOKIE_NAME, signedToken, {
         httpOnly: true,
         secure: cookieSecure,
         sameSite: cookieSameSite,
         maxAge: CSRF_COOKIE_MAX_AGE,
         path: "/",
+        ...(cookieDomain ? { domain: cookieDomain } : {}),
       });
 
       existingToken = signedToken;

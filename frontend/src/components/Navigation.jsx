@@ -163,7 +163,7 @@ export function Navigation() {
   // change, and on a 45s interval. When the count rises (a new notification
   // arrived) we ring a soft chime.
   useEffect(() => {
-    if (!user?.id) {
+    if (loading || !user?.id) {
       setNotifUnreadCount(0);
       prevNotifUnreadRef.current = null;
       return undefined;
@@ -197,7 +197,7 @@ export function Navigation() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [user?.id, location.pathname]);
+  }, [loading, user?.id, location.pathname]);
 
   // Load and sync profile image from user object and localStorage
   useEffect(() => {

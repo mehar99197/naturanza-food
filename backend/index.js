@@ -9,7 +9,12 @@ const hpp = require("hpp");
 require("dotenv").config();
 const { dbPool, db, testDatabaseConnection } = require("./config/db");
 const { ensureProductionSchema } = require("./utils/schemaCompatibility");
-const { getJwtRuntimeInfo } = require("./utils/jwtTokens");
+const {
+  getJwtRuntimeInfo,
+  getCookieDomain,
+  getRefreshCookieOptions,
+  getAccessCookieOptions,
+} = require("./utils/jwtTokens");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const {
   csrfMiddleware,
@@ -610,9 +615,26 @@ app.get("/api/health", (req, res) => {
 // CSRF token endpoint for frontend
 app.get("/api/csrf-token", (req, res) => {
   const existingToken = req.cookies?.[CSRF_COOKIE_NAME];
+  const cookieDomain = getCookieDomain(req);
+  const cookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+    maxAge: CSRF_COOKIE_MAX_AGE,
+    path: "/",
+  };
+
   if (existingToken) {
     const verification = verifySignedToken(existingToken);
     if (verification.valid) {
+      if (cookieDomain) {
+        // Migrate an older host-only cookie so apex and www remain consistent.
+        res.clearCookie(CSRF_COOKIE_NAME, { path: "/" });
+        res.cookie(CSRF_COOKIE_NAME, existingToken, {
+          ...cookieOptions,
+          domain: cookieDomain,
+        });
+      }
       return res.json({ csrfToken: existingToken });
     }
   }
@@ -620,12 +642,13 @@ app.get("/api/csrf-token", (req, res) => {
   const rawToken = req.csrfToken || generateToken();
   const signedToken = createSignedToken(rawToken);
 
+  res.clearCookie(CSRF_COOKIE_NAME, { path: "/" });
+  if (cookieDomain) {
+    res.clearCookie(CSRF_COOKIE_NAME, { ...cookieOptions, domain: cookieDomain, maxAge: 0 });
+  }
   res.cookie(CSRF_COOKIE_NAME, signedToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
-    maxAge: CSRF_COOKIE_MAX_AGE,
-    path: "/",
+    ...cookieOptions,
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
   });
 
   return res.json({ csrfToken: signedToken });
@@ -638,6 +661,34 @@ if (process.env.NODE_ENV === "production") {
   app.use((req, res, next) => {
     const host = req.headers.host || "";
     if (host.startsWith("www.")) {
+      const cookieDomain = getCookieDomain(req);
+      if (cookieDomain) {
+        const refreshToken = req.cookies?.[jwtRuntime.refreshCookieName];
+        if (refreshToken) {
+          res.cookie(
+            jwtRuntime.refreshCookieName,
+            refreshToken,
+            getRefreshCookieOptions(req),
+          );
+        }
+
+        const adminAccessToken = req.cookies?.adminAccessToken;
+        if (adminAccessToken) {
+          res.cookie("adminAccessToken", adminAccessToken, getAccessCookieOptions(req));
+        }
+
+        const csrfToken = req.cookies?.[CSRF_COOKIE_NAME];
+        if (csrfToken) {
+          res.cookie(CSRF_COOKIE_NAME, csrfToken, {
+            httpOnly: true,
+            secure: true,
+            sameSite: "strict",
+            maxAge: CSRF_COOKIE_MAX_AGE,
+            path: "/",
+            domain: cookieDomain,
+          });
+        }
+      }
       return res.redirect(301, `https://${host.slice(4)}${req.originalUrl}`);
     }
     next();

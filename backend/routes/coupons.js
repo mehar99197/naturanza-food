@@ -22,7 +22,7 @@ router.get('/', authenticateToken, isAdmin, requirePermission('manage_coupons'),
 // Get active coupons (Public - used during checkout).
 // Expose only the code+description so the discount logic stays server-side;
 // the coupon code alone is sufficient for the checkout flow.
-router.get('/active', authenticateToken, (req, res) => {
+router.get('/active', (req, res) => {
     const query = `
         SELECT code, description, discount_type, discount_value,
                min_order_amount, max_discount

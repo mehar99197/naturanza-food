@@ -173,34 +173,67 @@ const resolveSameSite = () => {
   return IS_PRODUCTION ? "strict" : "lax";
 };
 
-const getRefreshCookieOptions = () => ({
+const getCookieDomain = (req) => {
+  const configuredDomain = String(process.env.COOKIE_DOMAIN || "").trim();
+  if (configuredDomain) {
+    return configuredDomain;
+  }
+
+  if (!IS_PRODUCTION) {
+    return undefined;
+  }
+
+  const hostname = String(req?.hostname || req?.headers?.host || "")
+    .split(":")[0]
+    .trim()
+    .toLowerCase();
+
+  if (hostname === "naturanzafood.com" || hostname.endsWith(".naturanzafood.com")) {
+    return ".naturanzafood.com";
+  }
+
+  return undefined;
+};
+
+const getCookieDomainOption = (req) => {
+  const domain = getCookieDomain(req);
+  return domain ? { domain } : {};
+};
+
+const getRefreshCookieOptions = (req) => ({
   httpOnly: true,
   secure: shouldUseSecureCookies(),
   sameSite: resolveSameSite(),
   maxAge: REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
   path: "/",
+  ...getCookieDomainOption(req),
 });
 
-const getAccessCookieOptions = () => ({
+const getAccessCookieOptions = (req) => ({
   httpOnly: true,
   secure: shouldUseSecureCookies(),
   sameSite: resolveSameSite(),
   maxAge: ACCESS_TOKEN_MINUTES * 60 * 1000,
   path: "/",
+  ...getCookieDomainOption(req),
 });
 
-const clearRefreshCookie = (res) => {
-  res.clearCookie(REFRESH_COOKIE_NAME, {
-    ...getRefreshCookieOptions(),
-    maxAge: 0,
-  });
+const clearRefreshCookie = (res, req) => {
+  const options = getRefreshCookieOptions(req);
+  const { domain, ...hostOptions } = options;
+  res.clearCookie(REFRESH_COOKIE_NAME, { ...hostOptions, maxAge: 0 });
+  if (domain) {
+    res.clearCookie(REFRESH_COOKIE_NAME, { ...options, maxAge: 0 });
+  }
 };
 
-const clearAccessCookie = (res) => {
-  res.clearCookie("adminAccessToken", {
-    ...getAccessCookieOptions(),
-    maxAge: 0,
-  });
+const clearAccessCookie = (res, req) => {
+  const options = getAccessCookieOptions(req);
+  const { domain, ...hostOptions } = options;
+  res.clearCookie("adminAccessToken", { ...hostOptions, maxAge: 0 });
+  if (domain) {
+    res.clearCookie("adminAccessToken", { ...options, maxAge: 0 });
+  }
 };
 
 const getJwtRuntimeInfo = () => ({
@@ -219,6 +252,7 @@ module.exports = {
   verifyAccessToken,
   verifyRefreshToken,
   toExpiryDate,
+  getCookieDomain,
   getRefreshCookieOptions,
   getAccessCookieOptions,
   clearRefreshCookie,

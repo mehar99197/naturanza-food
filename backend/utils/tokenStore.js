@@ -28,7 +28,8 @@ const findActiveRefreshTokenRecord = async (
 ) => {
   const tokenHash = hashToken(refreshToken);
   const [rows] = await db.query(
-    `SELECT id, user_id, session_id, jti, token_hash, expires_at, revoked_at
+    `SELECT id, user_id, session_id, jti, token_hash, expires_at, revoked_at,
+            revoked_reason, replaced_by_jti
      FROM refresh_tokens
      WHERE jti = ? AND token_hash = ?
      LIMIT 1`,
