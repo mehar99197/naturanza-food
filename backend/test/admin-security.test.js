@@ -95,3 +95,18 @@ test('super admin allowlist allows all when empty and filters when configured', 
   assert.equal(await isSuperAdminIpAllowed({ ipAddress: '203.0.113.9', database: configuredDb }), true);
   assert.equal(await isSuperAdminIpAllowed({ ipAddress: '198.51.100.9', database: configuredDb }), false);
 });
+
+test('trusted client IP ignores spoofable X-Forwarded-For', () => {
+  const { getTrustedClientIp } = require('../utils/rateLimitKey');
+
+  const request = {
+    headers: {
+      'x-forwarded-for': '203.0.113.99',
+    },
+    socket: {
+      remoteAddress: '198.51.100.7',
+    },
+  };
+
+  assert.equal(getTrustedClientIp(request), '198.51.100.7');
+});

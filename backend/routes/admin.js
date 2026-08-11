@@ -17,6 +17,7 @@ const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/
 const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
 const { getAboutContent, updateAboutContent } = require("../utils/aboutContent");
 const { getClientIp } = require("../utils/clientIp");
+const { getTrustedClientIp } = require("../utils/rateLimitKey");
 const { logAdminAction } = require("../utils/adminHelpers");
 
 // Admin records are managed only through /api/admin-management. Anything on the
@@ -25,6 +26,7 @@ const isSuperAdminUser = (user) =>
   String(user?.admin_role || "").trim().toLowerCase() === "super_admin";
 const { buildInternalEan13 } = require("../utils/barcode");
 const asyncHandler = require("../middleware/asyncHandler");
+const { enforceSuperAdminIpAllowlist } = require("../middleware/adminIpAllowlist");
 const newsletterController = require("../controllers/newsletterController");
 const { syncDefaultAdminPassword } = require("../utils/envSync");
 const {
@@ -62,7 +64,9 @@ const adminLoginLocationCache = new Map();
 // Real client IP for admin login-history/session display — resolved from the
 // forwarded headers (Express's req.ip is a Hostinger internal hop). See
 // utils/clientIp.js.
-const getRequestIp = (req) => getClientIp(req);
+// Use the same proxy-trusted source for both the allowlist decision and the
+// stored login IP. X-Forwarded-For is display-only and must not control access.
+const getRequestIp = (req) => getTrustedClientIp(req) || getClientIp(req);
 
 const isPrivateOrLocalIp = (ipAddress) => {
   const ip = String(ipAddress || "").trim().toLowerCase();
@@ -916,6 +920,7 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
 // All other admin routes require authentication and admin role
 router.use(authenticateToken);
 router.use(isAdmin);
+router.use(enforceSuperAdminIpAllowlist);
 
 // The frontend hides sections by permission, but the API must enforce the same
 // boundary because staff can call these endpoints directly.

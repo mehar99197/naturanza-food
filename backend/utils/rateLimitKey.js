@@ -52,4 +52,30 @@ const getRateLimitKey = (req) => {
   return ipKeyGenerator(stripToIp(req.ip) || "unknown");
 };
 
-module.exports = { getRateLimitKey };
+// Security-sensitive allowlists must not trust the client-spoofable
+// X-Forwarded-For header. Use an explicitly configured edge header, common
+// proxy headers, or the direct socket address only.
+const getTrustedClientIp = (req) => {
+  if (!req) return null;
+
+  const configuredHeader = normalizeHeaderName(
+    process.env.RATE_LIMIT_TRUSTED_IP_HEADER,
+  );
+  if (configuredHeader) {
+    const value = stripToIp(req.headers?.[configuredHeader]);
+    if (value) return value;
+  }
+
+  for (const header of ["cf-connecting-ip", "x-real-ip"]) {
+    const value = stripToIp(req.headers?.[header]);
+    if (value) return value;
+  }
+
+  return (
+    stripToIp(req.socket?.remoteAddress) ||
+    stripToIp(req.connection?.remoteAddress) ||
+    null
+  );
+};
+
+module.exports = { getRateLimitKey, getTrustedClientIp };

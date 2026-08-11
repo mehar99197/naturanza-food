@@ -6,7 +6,9 @@ const { authenticateToken, isAdmin } = require("../middleware/auth");
 const requireSuperAdmin = require("../middleware/requireSuperAdmin");
 const { restrictBody } = require("../middleware/security");
 const asyncHandler = require("../middleware/asyncHandler");
+const { enforceSuperAdminIpAllowlist } = require("../middleware/adminIpAllowlist");
 const { getClientIp } = require("../utils/clientIp");
+const { getTrustedClientIp } = require("../utils/rateLimitKey");
 const { hashToken } = require("../utils/sessionManager");
 const { revokeRefreshTokensBySessionId } = require("../utils/tokenStore");
 const {
@@ -44,7 +46,7 @@ const requireAdminAccount = (req, res, next) => {
 
 // Defence in depth: isAdmin also recognizes legacy admin_role-only rows for
 // compatibility, but Security Center must only be reachable by role='admin'.
-router.use(authenticateToken, isAdmin, requireAdminAccount);
+router.use(authenticateToken, isAdmin, requireAdminAccount, enforceSuperAdminIpAllowlist);
 
 const getCurrentSessionId = async (req) => {
   const tokenHash = hashToken(req.token || "");
@@ -81,7 +83,7 @@ router.get(
     res.json({
       ...overview,
       sessions: overview.sessions.map((row) => mapSessionRow(row, currentSessionId)),
-      currentIp: getClientIp(req) || null,
+      currentIp: getTrustedClientIp(req) || getClientIp(req) || null,
     });
   }),
 );
@@ -428,7 +430,7 @@ router.get(
     const entries = await listAllowlistEntries();
     res.json({
       items: entries,
-      currentIp: getClientIp(req) || null,
+      currentIp: getTrustedClientIp(req) || getClientIp(req) || null,
       enforced: entries.length > 0,
     });
   }),
@@ -458,7 +460,7 @@ router.post(
     }
 
     const existing = await listAllowlistEntries();
-    const currentIp = getClientIp(req);
+    const currentIp = getTrustedClientIp(req) || getClientIp(req);
     if (existing.length === 0 && !ipMatchesCidr(currentIp, parsed.cidr)) {
       return res.status(400).json({
         error: `The first allowlist entry must include your current IP (${currentIp || "unknown"}). This prevents accidental lockout.`,
