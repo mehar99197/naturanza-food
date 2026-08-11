@@ -34,11 +34,14 @@ router.get("/methods/active", authenticateToken, async (req, res) => {
       return res.json(DEFAULT_CHECKOUT_METHODS);
     }
 
-    return res.json(
-      rows.filter((row) =>
-        CHECKOUT_PAYMENT_METHODS.has(String(row.code || "").trim().toLowerCase()),
-      ),
+    const checkoutMethods = rows.filter((row) =>
+      CHECKOUT_PAYMENT_METHODS.has(String(row.code || "").trim().toLowerCase()),
     );
+    if (!checkoutMethods.some((row) => String(row.code || "").trim().toLowerCase() === "cod")) {
+      checkoutMethods.unshift(DEFAULT_CHECKOUT_METHODS[0]);
+    }
+
+    return res.json(checkoutMethods);
   } catch (error) {
     return res.json(DEFAULT_CHECKOUT_METHODS);
   }

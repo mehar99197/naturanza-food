@@ -88,11 +88,16 @@ const getAllowedPaymentMethods = async (connection) => {
       return fallback;
     }
 
-    return new Set(
+    const allowedMethods = new Set(
       rows
         .map((row) => String(row.code || '').trim().toLowerCase())
         .filter(Boolean),
     );
+
+    // COD is a core storefront method. Keep legacy/incomplete payment-method
+    // rows from making the hard-coded checkout option unusable.
+    allowedMethods.add('cod');
+    return allowedMethods;
   } catch (error) {
     return fallback;
   }
