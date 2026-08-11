@@ -24,12 +24,12 @@ const authenticateToken = async (req, res, next) => {
     try {
         payload = verifyAccessToken(token);
     } catch (error) {
-        return res.status(403).json({ error: "Invalid or expired token" });
+        return res.status(401).json({ error: "Invalid or expired token" });
     }
 
     const userId = Number(payload?.sub || payload?.id || 0);
     if (!Number.isInteger(userId) || userId <= 0) {
-        return res.status(403).json({ error: "Invalid token subject" });
+        return res.status(401).json({ error: "Invalid token subject" });
     }
 
     try {

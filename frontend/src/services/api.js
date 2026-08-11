@@ -425,7 +425,7 @@ axiosInstance.interceptors.response.use(
       }
     }
 
-    if ((status === 401 || status === 403) && originalRequest._authScope === "admin") {
+    if (status === 401 && originalRequest._authScope === "admin") {
       clearAdminSessionStorage();
       emitAuthSessionSync("admin-token-invalid");
     }

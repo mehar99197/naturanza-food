@@ -458,9 +458,10 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
 
     const accessToken = issueAccessToken(user);
     const token = accessToken.token;
-    clearAccessCookie(res, req);
-    res.cookie("adminAccessToken", token, getAccessCookieOptions(req));
 
+    // Persist the session before handing the token to the client. A login
+    // without a stored session is useless: every subsequent request will
+    // 401 and the admin will be immediately logged out.
     try {
       await createUserSession(db.promise(), {
         userId: user.id,
@@ -470,11 +471,15 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         userAgent: req.headers["user-agent"] || null,
       });
     } catch (sessionError) {
-      console.error(
-        "Could not persist admin session:",
-        sessionError.message,
-      );
+      console.error("Could not persist admin session:", sessionError.message);
+      return res.status(500).json({
+        success: false,
+        error: "Could not create login session. Please try again.",
+      });
     }
+
+    clearAccessCookie(res, req);
+    res.cookie("adminAccessToken", token, getAccessCookieOptions(req));
 
     void recordAdminLoginHistorySafely({
       req,
