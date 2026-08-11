@@ -1,9 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import {
   AUTH_SESSION_SYNC_EVENT,
   adminAPI,
   clearAdminAccessToken,
-  emitAuthSessionSync,
 } from "@/services/api";
 import { FEATURE_PERMISSIONS } from "@/config/adminPermissions";
 
@@ -32,8 +31,11 @@ export const useAdminAuth = () => {
 export const AdminAuthProvider = ({ children }) => {
   const [admin, setAdmin] = useState(null);
   const [loading, setLoading] = useState(true);
+  const authGenerationRef = useRef(0);
+  const loginInProgressRef = useRef(false);
 
   const clearAdminAuthState = () => {
+    authGenerationRef.current += 1;
     clearAdminAccessToken();
     safeLocalStorage.removeItem("adminData");
     setAdmin(null);
@@ -43,22 +45,25 @@ export const AdminAuthProvider = ({ children }) => {
     import("@/hooks/useSWRCache").then(({ clearSWRCache }) => clearSWRCache()).catch(() => {});
   };
 
+  const applyAdminState = (nextAdmin) => {
+    setAdmin(nextAdmin);
+    safeLocalStorage.setItem("adminData", JSON.stringify(nextAdmin));
+  };
+
   const verifyAdminToken = async () => {
     try {
       const response = await adminAPI.verify();
       if (response?.success && response?.admin) {
-        setAdmin(response.admin);
-        safeLocalStorage.setItem("adminData", JSON.stringify(response.admin));
-        return "valid";
+        return { state: "valid", admin: response.admin };
       }
 
       if (response?.status === 401 || response?.status === 403) {
-        return "invalid";
+        return { state: "invalid" };
       }
 
-      return "unknown";
+      return { state: "unknown" };
     } catch (error) {
-      return "unknown";
+      return { state: "unknown" };
     }
   };
 
@@ -82,8 +87,15 @@ export const AdminAuthProvider = ({ children }) => {
       }
     }
 
-    verifyAdminToken().then((verificationState) => {
-      if (verificationState === "invalid") {
+    const verificationGeneration = authGenerationRef.current;
+    verifyAdminToken().then((verificationResult) => {
+      if (authGenerationRef.current !== verificationGeneration) {
+        return;
+      }
+
+      if (verificationResult.state === "valid") {
+        applyAdminState(verificationResult.admin);
+      } else if (verificationResult.state === "invalid") {
         clearAdminAuthState();
       }
       setLoading(false);
@@ -95,6 +107,7 @@ export const AdminAuthProvider = ({ children }) => {
       return undefined;
     } else {
       const syncAdminSessionState = async () => {
+        const verificationGeneration = authGenerationRef.current;
         const adminData = safeLocalStorage.getItem("adminData");
         if (adminData) {
           try {
@@ -104,8 +117,14 @@ export const AdminAuthProvider = ({ children }) => {
           }
         }
 
-        const verificationState = await verifyAdminToken();
-        if (verificationState === "invalid") {
+        const verificationResult = await verifyAdminToken();
+        if (authGenerationRef.current !== verificationGeneration) {
+          return;
+        }
+
+        if (verificationResult.state === "valid") {
+          applyAdminState(verificationResult.admin);
+        } else if (verificationResult.state === "invalid") {
           clearAdminAuthState();
         }
       };
@@ -117,6 +136,9 @@ export const AdminAuthProvider = ({ children }) => {
         }
 
         if (source === "admin-token-invalid") {
+          if (loginInProgressRef.current) {
+            return;
+          }
           clearAdminAuthState();
           setLoading(false);
           return;
@@ -131,6 +153,9 @@ export const AdminAuthProvider = ({ children }) => {
         }
 
         if (!safeLocalStorage.getItem("adminData")) {
+          if (loginInProgressRef.current) {
+            return;
+          }
           clearAdminAuthState();
           setLoading(false);
           return;
@@ -151,13 +176,13 @@ export const AdminAuthProvider = ({ children }) => {
 
   // Super-admin login: hits /admin/login, rejected if admin_role !== 'super_admin'.
   const adminLogin = async (email, password) => {
+    authGenerationRef.current += 1;
+    loginInProgressRef.current = true;
     try {
       const response = await adminAPI.login({ email, password });
 
       if (response?.success && response?.token && response?.admin) {
-        safeLocalStorage.setItem("adminData", JSON.stringify(response.admin));
-        setAdmin(response.admin);
-        emitAuthSessionSync("admin-login");
+        applyAdminState(response.admin);
         return { success: true };
       }
 
@@ -172,6 +197,8 @@ export const AdminAuthProvider = ({ children }) => {
           error?.response?.data?.error ||
           "Admin login failed. Please check your credentials.",
       };
+    } finally {
+      loginInProgressRef.current = false;
     }
   };
 
@@ -179,13 +206,13 @@ export const AdminAuthProvider = ({ children }) => {
   // or NULL. The success path produces the same session shape as adminLogin —
   // downstream permission checks discriminate via admin_role on the record.
   const staffLogin = async (email, password) => {
+    authGenerationRef.current += 1;
+    loginInProgressRef.current = true;
     try {
       const response = await adminAPI.staffLogin({ email, password });
 
       if (response?.success && response?.token && response?.admin) {
-        safeLocalStorage.setItem("adminData", JSON.stringify(response.admin));
-        setAdmin(response.admin);
-        emitAuthSessionSync("admin-login");
+        applyAdminState(response.admin);
         return { success: true };
       }
 
@@ -200,6 +227,8 @@ export const AdminAuthProvider = ({ children }) => {
           error?.response?.data?.error ||
           "Staff login failed. Please check your credentials.",
       };
+    } finally {
+      loginInProgressRef.current = false;
     }
   };
 
