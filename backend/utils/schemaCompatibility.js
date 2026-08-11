@@ -460,6 +460,13 @@ const defaultPaymentMethods = [
     sort_order: 5,
     supports_online: true,
   },
+  {
+    code: "bank",
+    label: "Bank Transfer",
+    description: "Manual bank transfer",
+    sort_order: 6,
+    supports_online: false,
+  },
 ];
 
 const defaultPaymentAccounts = [

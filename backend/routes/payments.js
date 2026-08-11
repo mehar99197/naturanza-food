@@ -8,7 +8,41 @@ const { uploadAndCompress } = require("../middleware/upload");
 
 const ALLOWED_PAYMENT_METHODS = new Set(["jazzcash", "easypaisa", "bank"]);
 const WALLET_METHODS = new Set(["jazzcash", "easypaisa"]);
+const CHECKOUT_PAYMENT_METHODS = new Set(["cod", "easypaisa", "jazzcash", "bank"]);
+const DEFAULT_CHECKOUT_METHODS = [
+  { code: "cod", label: "Cash on Delivery", description: "Cash collection at delivery", sort_order: 1 },
+  { code: "easypaisa", label: "EasyPaisa", description: "EasyPaisa wallet payments", sort_order: 4 },
+  { code: "jazzcash", label: "JazzCash", description: "JazzCash wallet payments", sort_order: 5 },
+  { code: "bank", label: "Bank Transfer", description: "Manual bank transfer", sort_order: 6 },
+];
 const TID_REGEX = /^\d{11}$/;
+
+// Keep the checkout's choices aligned with the methods enforced by orders.js.
+router.get("/methods/active", authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await db.promise().query(
+      `SELECT code, label, description, sort_order, supports_online
+         FROM payment_methods
+        WHERE is_active = TRUE
+        ORDER BY sort_order ASC, created_at ASC`,
+    );
+
+    // An older database may not have been seeded yet. Preserve the same
+    // fallback as order creation in that case, while ignoring unsupported
+    // gateway methods that cannot complete checkout.
+    if (rows.length === 0) {
+      return res.json(DEFAULT_CHECKOUT_METHODS);
+    }
+
+    return res.json(
+      rows.filter((row) =>
+        CHECKOUT_PAYMENT_METHODS.has(String(row.code || "").trim().toLowerCase()),
+      ),
+    );
+  } catch (error) {
+    return res.json(DEFAULT_CHECKOUT_METHODS);
+  }
+});
 
 // Checkout is authenticated, so keep receiving account details off the public
 // internet and out of unauthenticated catalog scraping.

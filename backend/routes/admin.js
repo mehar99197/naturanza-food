@@ -308,6 +308,7 @@ const ALLOWED_PAYMENT_METHOD_CODES = new Set([
   "online",
   "easypaisa",
   "jazzcash",
+  "bank",
 ]);
 
 // Shared login handler — parameterized so the super-admin route and the

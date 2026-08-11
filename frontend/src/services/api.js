@@ -1332,6 +1332,11 @@ export const adminAPI = {
 
 // Payment verification APIs
 export const paymentAPI = {
+  getActiveMethods: async () => {
+    const response = await axiosInstance.get("/payments/methods/active");
+    return response.data;
+  },
+
   getActiveAccounts: async () => {
     const response = await axiosInstance.get("/payments/accounts/active");
     return response.data;

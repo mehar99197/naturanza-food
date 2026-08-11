@@ -9,6 +9,7 @@ const PAYMENT_METHOD_OPTIONS = [
   { code: "online", label: "Online Transfer" },
   { code: "easypaisa", label: "EasyPaisa" },
   { code: "jazzcash", label: "JazzCash" },
+  { code: "bank", label: "Bank Transfer" },
 ];
 
 const initialTaxForm = {
@@ -82,7 +83,7 @@ export function AdminOperations() {
       ...prev,
       code,
       label: matched?.label || prev.label,
-      supports_online: code !== "cod",
+      supports_online: !["cod", "bank"].includes(code),
     }));
   };
 

@@ -372,6 +372,9 @@ export function Checkout() {
   const [verificationSuccess, setVerificationSuccess] = useState("");
   const [transactionId, setTransactionId] = useState("");
   const [tidError, setTidError] = useState("");
+  const [activePaymentMethods, setActivePaymentMethods] = useState([]);
+  const [paymentMethodsLoaded, setPaymentMethodsLoaded] = useState(false);
+  const [paymentMethodsError, setPaymentMethodsError] = useState("");
 
   const TID_REGEX = /^\d{11}$/;
   const isWalletMethod = (m) => m === "jazzcash" || m === "easypaisa";
@@ -418,6 +421,49 @@ export function Checkout() {
     };
 
     loadPaymentAccounts();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadPaymentMethods = async () => {
+      if (!user) {
+        if (isMounted) {
+          setActivePaymentMethods([]);
+          setPaymentMethodsError("");
+          setPaymentMethodsLoaded(true);
+        }
+        return;
+      }
+
+      setPaymentMethodsLoaded(false);
+      setPaymentMethodsError("");
+
+      try {
+        const response = await paymentAPI.getActiveMethods();
+        if (isMounted) {
+          setActivePaymentMethods(Array.isArray(response) ? response : []);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setActivePaymentMethods([]);
+          setPaymentMethodsError(
+            error?.response?.data?.error ||
+              "Unable to load payment methods. Please refresh and try again.",
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setPaymentMethodsLoaded(true);
+        }
+      }
+    };
+
+    loadPaymentMethods();
 
     return () => {
       isMounted = false;
@@ -485,6 +531,19 @@ export function Checkout() {
     return map;
   }, [activePaymentAccounts]);
 
+  const activePaymentMethodCodes = useMemo(
+    () =>
+      new Set(
+        activePaymentMethods
+          .map((method) => String(method.code || "").trim().toLowerCase())
+          .filter(Boolean),
+      ),
+    [activePaymentMethods],
+  );
+
+  const isCheckoutPaymentMethodAvailable = (method) =>
+    !paymentMethodsLoaded || activePaymentMethodCodes.has(method);
+
   const verificationMethodOptions = useMemo(() => {
     const allowed = new Set(["jazzcash", "easypaisa", "bank"]);
     const options = activePaymentAccounts
@@ -532,6 +591,19 @@ export function Checkout() {
     }
   }, [defaultVerificationMethod, verificationMethod]);
 
+  useEffect(() => {
+    if (!paymentMethodsLoaded) {
+      return;
+    }
+
+    setPaymentMethod((currentMethod) => {
+      if (activePaymentMethodCodes.has(currentMethod)) {
+        return currentMethod;
+      }
+
+      return String(activePaymentMethods[0]?.code || "").trim().toLowerCase();
+    });
+  }, [activePaymentMethodCodes, activePaymentMethods, paymentMethodsLoaded]);
 
   const handleShippingChange = (e) => {
     const { name, value } = e.target;
@@ -564,6 +636,10 @@ export function Checkout() {
   };
 
   const handlePaymentMethodSelect = (method) => {
+    if (paymentMethodsLoaded && !activePaymentMethodCodes.has(method)) {
+      return;
+    }
+
     setPaymentMethod(method);
     if (method === "easypaisa" || method === "jazzcash") {
       setPaymentPopupMethod(method);
@@ -775,7 +851,13 @@ export function Checkout() {
   const isShippingStep = step === "shipping";
   const isCartReady = cartHydrated && !cartLoading;
   const canContinueToPayment = isCartReady && items.length > 0;
-  const canPlaceOrder = isCartReady && items.length > 0 && !isProcessing;
+  const canPlaceOrder =
+    isCartReady &&
+    items.length > 0 &&
+    !isProcessing &&
+    paymentMethodsLoaded &&
+    Boolean(paymentMethod) &&
+    activePaymentMethodCodes.has(paymentMethod);
   const getCheckoutItemKey = (item) => item.product_id ?? item.id ?? item.name;
   const getCheckoutItemImage = (item) =>
     getAbsoluteImageUrl(
@@ -789,8 +871,16 @@ export function Checkout() {
     "Customer";
 
   const handlePlaceOrder = async () => {
-    // For all offline payments (cod, easypaisa, jazzcash), go to verification step first
-    if (["cod", "easypaisa", "jazzcash"].includes(paymentMethod)) {
+    if (!paymentMethodsLoaded || !activePaymentMethodCodes.has(paymentMethod)) {
+      setError(
+        paymentMethodsError ||
+          "Selected payment method is currently unavailable. Please choose another method.",
+      );
+      return;
+    }
+
+    // For all manual payments, go to verification step first.
+    if (["cod", "easypaisa", "jazzcash", "bank"].includes(paymentMethod)) {
       // Initialize verification payment method
       if (paymentMethod === "cod") {
         setVerificationPaymentMethod(codAdvanceMethod || "jazzcash");
@@ -828,48 +918,9 @@ export function Checkout() {
     }
 
     try {
-      const isOfflinePayment = ["cod", "easypaisa", "jazzcash"].includes(
-        paymentMethod,
-      );
-      let resolvedAddressId = selectedAddressId;
-      if (user?.id) {
-        try {
-          const defaultAddressPayload = {
-            label: "Checkout Default",
-            recipient_name: customerFullName,
-            phone: shippingData.phone,
-            line1: shippingData.address,
-            city: shippingData.city,
-            postal_code: shippingData.postalCode,
-          };
-
-          const addressResponse = await api.userAPI.upsertDefaultAddress(
-            defaultAddressPayload,
-          );
-          if (addressResponse?.address?.id) {
-            resolvedAddressId = addressResponse.address.id;
-            setSelectedAddressId(addressResponse.address.id);
-
-            setSavedAddresses((prev) => {
-              const withoutDefault = prev.map((address) => ({
-                ...address,
-                is_default: false,
-              }));
-              const nextAddress = {
-                ...addressResponse.address,
-                is_default: true,
-              };
-              const remaining = withoutDefault.filter(
-                (address) => address.id !== nextAddress.id,
-              );
-              return [nextAddress, ...remaining];
-            });
-          }
-        } catch (addressSaveErr) {
-          // Non-fatal: order still creates with shippingData.address inline.
-          console.warn("[checkout] address upsert failed:", addressSaveErr?.message);
-        }
-      }
+      // Saving the address is optional. Do not block order creation on a
+      // separate address transaction; the order stores the submitted address.
+      const resolvedAddressId = selectedAddressId;
 
       // Prepare order data - only include fields the backend expects
       const orderData = {
@@ -1020,7 +1071,7 @@ export function Checkout() {
     );
   }
 
-  // Verification step for offline payments (COD, EasyPaisa, JazzCash)
+  // Verification step for manual payments (COD, EasyPaisa, JazzCash, Bank)
   if (step === "verification") {
     // For COD, use advance fee (delivery fee); for others, use full total
     const verificationTotal = paymentMethod === "cod" ? (confirmedAdvanceFee || deliveryFee) : (confirmedTotal || finalTotal);
@@ -1029,7 +1080,12 @@ export function Checkout() {
     const orderTotal = confirmedTotal || finalTotal;
     const selectedVerificationAccount = activeAccountsByType.get(verificationPaymentMethod);
     const isCod = paymentMethod === "cod";
-    const verificationMethodLabel = verificationPaymentMethod === "easypaisa" ? "EasyPaisa" : "JazzCash";
+    const verificationMethodLabel =
+      verificationPaymentMethod === "easypaisa"
+        ? "EasyPaisa"
+        : verificationPaymentMethod === "bank"
+          ? "Bank Transfer"
+          : "JazzCash";
 
     const handleSubmitVerificationAndOrder = async () => {
       if (!verificationFile) {
@@ -1072,39 +1128,18 @@ export function Checkout() {
         // Create the order if we haven't yet. On retry after a failed
         // verification upload we re-use the same orderId so we don't create
         // duplicate orders.
-         let activeOrderId = orderId;
-         let resolvedAddressId = selectedAddressId;
+        let activeOrderId = orderId;
+        const resolvedAddressId = selectedAddressId;
 
         if (!activeOrderId) {
-          if (user?.id) {
-            try {
-              const defaultAddressPayload = {
-                label: "Checkout Default",
-                recipient_name: customerFullName,
-                phone: shippingData.phone,
-                line1: shippingData.address,
-                city: shippingData.city,
-                postal_code: shippingData.postalCode,
-              };
-              const addressResponse = await api.userAPI.upsertDefaultAddress(defaultAddressPayload);
-               if (addressResponse?.address?.id) {
-                 resolvedAddressId = addressResponse.address.id;
-                setSelectedAddressId(addressResponse.address.id);
-              }
-            } catch (addressSaveErr) {
-              // Non-fatal: order still creates with shippingData.address inline.
-              console.warn("[checkout] address upsert failed:", addressSaveErr?.message);
-            }
-          }
-
           const orderData = {
             customer_name: customerFullName,
             customer_email: shippingData.email,
             shipping_address: `${shippingData.address}, ${shippingData.city}`,
             phone: shippingData.phone,
-             city: shippingData.city,
-             address_id: resolvedAddressId || null,
-             payment_method: paymentMethod,
+            city: shippingData.city,
+            address_id: resolvedAddressId || null,
+            payment_method: paymentMethod,
             // Money fields are the server's to decide — see the note on the
             // other create call above. The COD advance step reads shipping_cost
             // back off the stored order, which the server sets from the city
@@ -1118,17 +1153,17 @@ export function Checkout() {
             throw new Error("Order creation failed - no order ID returned");
           }
 
-           activeOrderId = newOrder.id;
-           const orderNum = `ORD-${newOrder.id.toString().padStart(6, "0")}`;
-           const authoritativeTotal = Number(newOrder.total_amount ?? finalTotal) || 0;
-           const authoritativeShipping = Number(newOrder.shipping_cost ?? deliveryFee) || 0;
-           setOrderId(newOrder.id);
-           setOrderNumber(orderNum);
-           setConfirmedTotal(authoritativeTotal);
-           setConfirmedAdvanceFee(isCod ? authoritativeShipping : 0);
-           setConfirmedPayOnDeliveryAmount(
-             isCod ? Math.max(0, authoritativeTotal - authoritativeShipping) : 0,
-           );
+          activeOrderId = newOrder.id;
+          const orderNum = `ORD-${newOrder.id.toString().padStart(6, "0")}`;
+          const authoritativeTotal = Number(newOrder.total_amount ?? finalTotal) || 0;
+          const authoritativeShipping = Number(newOrder.shipping_cost ?? deliveryFee) || 0;
+          setOrderId(newOrder.id);
+          setOrderNumber(orderNum);
+          setConfirmedTotal(authoritativeTotal);
+          setConfirmedAdvanceFee(isCod ? authoritativeShipping : 0);
+          setConfirmedPayOnDeliveryAmount(
+            isCod ? Math.max(0, authoritativeTotal - authoritativeShipping) : 0,
+          );
         }
 
         // Now submit the payment verification
@@ -1529,6 +1564,7 @@ export function Checkout() {
                     {paymentMethod === "cod" && "💵 Cash on Delivery"}
                     {paymentMethod === "easypaisa" && "📱 EasyPaisa"}
                     {paymentMethod === "jazzcash" && "📱 JazzCash"}
+                    {paymentMethod === "bank" && "🏦 Bank Transfer"}
                   </p>
                 </div>
                 <div>
@@ -2045,16 +2081,37 @@ export function Checkout() {
                   <h2 className="font-display text-lg font-bold tracking-tight text-slate-800 sm:text-2xl">
                     Payment Method
                   </h2>
-                  <p className="mt-1 text-xs font-medium text-slate-500 sm:text-sm">
-                    Choose your preferred payment option for this order.
-                  </p>
+                 <p className="mt-1 text-xs font-medium text-slate-500 sm:text-sm">
+                   Choose your preferred payment option for this order.
+                 </p>
                 </div>
+
+                {paymentMethodsError && (
+                  <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
+                    <div className="flex items-center gap-2 text-rose-700">
+                      <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                      <p className="text-sm font-medium">{paymentMethodsError}</p>
+                    </div>
+                  </div>
+                )}
+
+                {paymentMethodsLoaded &&
+                  !paymentMethodsError &&
+                  activePaymentMethods.length === 0 && (
+                    <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                      <p className="text-sm font-medium text-amber-800">
+                        No payment methods are currently available. Please contact support.
+                      </p>
+                    </div>
+                  )}
 
                 {/* Payment Method Selection */}
                 <div className="space-y-2.5 sm:space-y-3 mb-6 sm:mb-8">
                   {/* Cash on Delivery */}
                   <label
-                    className={getPaymentOptionClass(paymentMethod === "cod")}
+                    className={`${getPaymentOptionClass(paymentMethod === "cod")} ${
+                      isCheckoutPaymentMethodAvailable("cod") ? "" : "hidden"
+                    }`}
                   >
                     <input
                       type="radio"
@@ -2084,9 +2141,11 @@ export function Checkout() {
 
                   {/* EasyPaisa */}
                   <label
-                    className={getPaymentOptionClass(
+                    className={`${getPaymentOptionClass(
                       paymentMethod === "easypaisa",
-                    )}
+                    )} ${
+                      isCheckoutPaymentMethodAvailable("easypaisa") ? "" : "hidden"
+                    }`}
                   >
                     <input
                       type="radio"
@@ -2116,7 +2175,9 @@ export function Checkout() {
 
                   {/* JazzCash */}
                   <label
-                    className={getPaymentOptionClass(paymentMethod === "jazzcash")}
+                    className={`${getPaymentOptionClass(paymentMethod === "jazzcash")} ${
+                      isCheckoutPaymentMethodAvailable("jazzcash") ? "" : "hidden"
+                    }`}
                   >
                     <input
                       type="radio"
@@ -2145,7 +2206,11 @@ export function Checkout() {
                   </label>
 
                   {/* Bank transfer */}
-                  <label className={getPaymentOptionClass(paymentMethod === "bank")}>
+                  <label
+                    className={`${getPaymentOptionClass(paymentMethod === "bank")} ${
+                      isCheckoutPaymentMethodAvailable("bank") ? "" : "hidden"
+                    }`}
+                  >
                     <input
                       type="radio"
                       name="payment"
