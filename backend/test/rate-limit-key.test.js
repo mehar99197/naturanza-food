@@ -64,6 +64,14 @@ test('strips IPv4-mapped IPv6 and ports', () => {
   assert.equal(getRateLimitKey(req), '192.0.2.1');
 });
 
+test('collapses IPv6 addresses into a /56 subnet key', () => {
+  const req = makeReq({
+    headers: { 'cf-connecting-ip': '2001:0db8:1234:5678:9abc:def0:1234:5678' },
+  });
+
+  assert.equal(getRateLimitKey(req), '2001:db8:1234:5600::/56');
+});
+
 test('returns unknown for missing data', () => {
   const req = makeReq();
 
