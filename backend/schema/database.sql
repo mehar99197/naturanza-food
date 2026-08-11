@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS users (
     admin_locked_until DATETIME,
     profile_image VARCHAR(255),
     last_login DATETIME,
+    two_fa_secret_encrypted TEXT,
+    two_fa_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    two_fa_enabled_at DATETIME,
+    two_fa_recovery_codes JSON,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -444,6 +448,8 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     login_provider VARCHAR(50) DEFAULT 'password',
     ip_address VARCHAR(64),
     user_agent VARCHAR(255),
+    device_name VARCHAR(120),
+    location_label VARCHAR(180),
     is_active BOOLEAN DEFAULT TRUE,
     last_seen_at DATETIME,
     revoked_at DATETIME,
@@ -452,6 +458,32 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_sessions_user_active (user_id, is_active),
     INDEX idx_user_sessions_last_seen (last_seen_at)
+);
+-- Admin audit trail and super-admin network restriction
+CREATE TABLE IF NOT EXISTS admin_audit_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    admin_id INT NOT NULL,
+    action VARCHAR(500) NOT NULL,
+    category VARCHAR(60) NOT NULL DEFAULT 'admin_action',
+    actor_email VARCHAR(254),
+    ip_address VARCHAR(64),
+    user_agent VARCHAR(255),
+    metadata JSON,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_admin_audit_logs_admin (admin_id, created_at),
+    INDEX idx_admin_audit_logs_created (created_at)
+);
+
+CREATE TABLE IF NOT EXISTS admin_security_ip_allowlist (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    label VARCHAR(120) NOT NULL,
+    cidr VARCHAR(64) NOT NULL,
+    created_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_admin_security_ip_allowlist_cidr (cidr),
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_admin_security_ip_allowlist_created (created_at)
 );
 -- Refresh token storage with rotation support
 CREATE TABLE IF NOT EXISTS refresh_tokens (

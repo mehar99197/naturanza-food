@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   RotateCcw,
   Settings,
+  ShieldCheck,
   Tag,
   ShieldUser,
   ShoppingCart,
@@ -68,6 +69,7 @@ const navItems = [
   { path: "/admin/returns", label: "Returns", icon: RotateCcw },
   { path: "/admin/reports", label: "Reports", icon: Grid3X3 },
   { path: "/admin/settings", label: "Settings", icon: Settings },
+  { path: "/admin/security", label: "Security", icon: ShieldCheck },
   { path: "/admin/admins", label: "Admin", icon: ShieldUser },
 ];
 

@@ -803,6 +803,81 @@ export const profileSecurityAPI = {
   },
 };
 
+// Admin Security Center APIs (2FA, sessions, login alerts feed, IP allowlist)
+export const adminSecurityAPI = {
+  getOverview: async () => {
+    const response = await axiosInstance.get("/admin/security/overview");
+    return response.data;
+  },
+
+  getSessions: async () => {
+    const response = await axiosInstance.get("/admin/security/sessions");
+    return response.data;
+  },
+
+  revokeSession: async (sessionId) => {
+    const response = await axiosInstance.post(
+      `/admin/security/sessions/${sessionId}/revoke`,
+    );
+    return response.data;
+  },
+
+  revokeOtherSessions: async () => {
+    const response = await axiosInstance.post(
+      "/admin/security/sessions/revoke-others",
+    );
+    return response.data;
+  },
+
+  setupTwoFactor: async () => {
+    const response = await axiosInstance.post("/admin/security/2fa/setup");
+    return response.data;
+  },
+
+  enableTwoFactor: async (code) => {
+    const response = await axiosInstance.post("/admin/security/2fa/enable", {
+      code,
+    });
+    return response.data;
+  },
+
+  disableTwoFactor: async ({ password, code }) => {
+    const response = await axiosInstance.post("/admin/security/2fa/disable", {
+      password,
+      code,
+    });
+    return response.data;
+  },
+
+  regenerateRecoveryCodes: async (code) => {
+    const response = await axiosInstance.post(
+      "/admin/security/2fa/recovery-codes",
+      { code },
+    );
+    return response.data;
+  },
+
+  getIpAllowlist: async () => {
+    const response = await axiosInstance.get("/admin/security/ip-allowlist");
+    return response.data;
+  },
+
+  addIpAllowlistEntry: async ({ label, cidr }) => {
+    const response = await axiosInstance.post("/admin/security/ip-allowlist", {
+      label,
+      cidr,
+    });
+    return response.data;
+  },
+
+  deleteIpAllowlistEntry: async (id) => {
+    const response = await axiosInstance.delete(
+      `/admin/security/ip-allowlist/${id}`,
+    );
+    return response.data;
+  },
+};
+
 export const settingsAPI = {
   getPublicSettings: async () => {
     const response = await axiosInstance.get("/settings");
@@ -1894,6 +1969,7 @@ export default {
   productAPI,
   userAPI,
   profileSecurityAPI,
+  adminSecurityAPI,
   adminAPI,
   orderAPI,
   categoryAPI,

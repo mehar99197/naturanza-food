@@ -72,6 +72,16 @@ const ensureTableStatements = [
     INDEX idx_admin_audit_logs_admin (admin_id, created_at),
     INDEX idx_admin_audit_logs_created (created_at)
   )`,
+  `CREATE TABLE IF NOT EXISTS admin_security_ip_allowlist (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    label VARCHAR(120) NOT NULL,
+    cidr VARCHAR(64) NOT NULL,
+    created_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_admin_security_ip_allowlist_cidr (cidr),
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_admin_security_ip_allowlist_created (created_at)
+  )`,
   `CREATE TABLE IF NOT EXISTS user_addresses (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
@@ -711,6 +721,11 @@ const ensureProductionSchema = async (db) => {
     user_locked_until: "DATETIME NULL",
     admin_failed_login_attempts: "INT DEFAULT 0",
     admin_locked_until: "DATETIME NULL",
+    // Admin TOTP two-factor authentication (secret encrypted at rest).
+    two_fa_secret_encrypted: "TEXT NULL",
+    two_fa_enabled: "BOOLEAN NOT NULL DEFAULT FALSE",
+    two_fa_enabled_at: "DATETIME NULL",
+    two_fa_recovery_codes: "JSON NULL",
   });
 
   // One-time migration: copy legacy lockout state into both new contexts so
@@ -731,6 +746,18 @@ const ensureProductionSchema = async (db) => {
   await db.query(
     "UPDATE user_login_history SET login_provider = 'password' WHERE LOWER(login_provider) = 'facebook'",
   );
+
+  await ensureColumns(db, "user_sessions", {
+    device_name: "VARCHAR(120) NULL",
+    location_label: "VARCHAR(180) NULL",
+  });
+
+  await ensureColumns(db, "admin_audit_logs", {
+    category: "VARCHAR(60) NOT NULL DEFAULT 'admin_action'",
+    actor_email: "VARCHAR(254) NULL",
+    user_agent: "VARCHAR(255) NULL",
+    metadata: "JSON NULL",
+  });
 
   await ensureColumns(db, "categories", {
     slug: "VARCHAR(160) NULL",

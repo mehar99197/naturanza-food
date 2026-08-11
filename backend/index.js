@@ -523,6 +523,7 @@ const contactRoutes = require("./routes/contact");
 const settingsRoutes = require("./routes/settings");
 const aboutRoutes = require("./routes/about");
 const adminRoutes = require("./routes/admin");
+const adminSecurityRoutes = require("./routes/adminSecurity");
 const adminManagementRoutes = require("./routes/adminManagement");
 const adminPaymentsRoutes = require("./routes/adminPayments");
 const paymentRoutes = require("./routes/payments");
@@ -551,6 +552,8 @@ if (ENABLE_RATE_LIMITS) {
   // The staff gate is a login endpoint too — it sat at the general 2000/15min
   // budget, which is a password-spraying window across every staff account.
   app.use("/api/admin/staff-login", authLimiter);
+  // 2FA verify/enable/disable endpoints are credential-adjacent — same strict bucket.
+  app.use("/api/admin/security/2fa", authLimiter);
 
   app.use("/api/auth/forgot-password", passwordResetLimiter);
   app.use("/api/auth/reset-password", passwordResetLimiter);
@@ -598,6 +601,8 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/about", aboutRoutes);
 app.use("/api/payments", paymentRoutes);
+// Mounted before /api/admin so the security router always wins its own prefix.
+app.use("/api/admin/security", adminSecurityRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/admin/payments", adminPaymentsRoutes);
 app.use("/api/admin-management", adminManagementRoutes);

@@ -7,6 +7,8 @@ export function AdminStaffLogin() {
   const location = useLocation();
   const [email, setEmail] = useState(location.state?.email || "");
   const [password, setPassword] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,9 +40,16 @@ export function AdminStaffLogin() {
     setLoading(true);
 
     const [result] = await Promise.all([
-      staffLogin(email, password),
+      staffLogin(email, password, otpCode),
       new Promise((resolve) => window.setTimeout(resolve, 800)),
     ]);
+
+    if (result.requiresTwoFactor) {
+      setRequiresTwoFactor(true);
+      setError(result.message || "Enter your two-factor authentication code.");
+      setLoading(false);
+      return;
+    }
 
     if (result.success) {
       setFailedAttempts(0);
@@ -126,6 +135,24 @@ export function AdminStaffLogin() {
                   />
                 </div>
               </label>
+
+              {requiresTwoFactor ? (
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Authenticator code</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                    className="w-full rounded-2xl border border-green-100 bg-white px-4 py-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-green-600 focus:ring-4 focus:ring-green-100"
+                    placeholder="6-digit code"
+                    disabled={loading}
+                  />
+                  <span className="mt-1 block text-xs text-slate-500">Enter your authenticator code or a recovery code.</span>
+                </label>
+              ) : null}
 
               <label className="block">
                 <span className="mb-1.5 block text-sm font-semibold text-slate-700">Password</span>

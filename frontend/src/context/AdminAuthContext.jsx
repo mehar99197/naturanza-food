@@ -175,11 +175,11 @@ export const AdminAuthProvider = ({ children }) => {
   }, []);
 
   // Super-admin login: hits /admin/login, rejected if admin_role !== 'super_admin'.
-  const adminLogin = async (email, password) => {
+  const adminLogin = async (email, password, otpCode = "") => {
     authGenerationRef.current += 1;
     loginInProgressRef.current = true;
     try {
-      const response = await adminAPI.login({ email, password });
+      const response = await adminAPI.login({ email, password, ...(otpCode ? { otpCode } : {}) });
 
       if (response?.success && response?.token && response?.admin) {
         applyAdminState(response.admin);
@@ -188,11 +188,13 @@ export const AdminAuthProvider = ({ children }) => {
 
       return {
         success: false,
+        requiresTwoFactor: response?.requiresTwoFactor === true,
         message: response?.error || "Invalid admin credentials.",
       };
     } catch (error) {
       return {
         success: false,
+        requiresTwoFactor: error?.response?.data?.requiresTwoFactor === true,
         message:
           error?.response?.data?.error ||
           "Admin login failed. Please check your credentials.",
@@ -205,11 +207,11 @@ export const AdminAuthProvider = ({ children }) => {
   // Staff login: hits /admin/staff-login. Rejected if admin_role is 'super_admin'
   // or NULL. The success path produces the same session shape as adminLogin —
   // downstream permission checks discriminate via admin_role on the record.
-  const staffLogin = async (email, password) => {
+  const staffLogin = async (email, password, otpCode = "") => {
     authGenerationRef.current += 1;
     loginInProgressRef.current = true;
     try {
-      const response = await adminAPI.staffLogin({ email, password });
+      const response = await adminAPI.staffLogin({ email, password, ...(otpCode ? { otpCode } : {}) });
 
       if (response?.success && response?.token && response?.admin) {
         applyAdminState(response.admin);
@@ -218,11 +220,13 @@ export const AdminAuthProvider = ({ children }) => {
 
       return {
         success: false,
+        requiresTwoFactor: response?.requiresTwoFactor === true,
         message: response?.error || "Invalid staff credentials.",
       };
     } catch (error) {
       return {
         success: false,
+        requiresTwoFactor: error?.response?.data?.requiresTwoFactor === true,
         message:
           error?.response?.data?.error ||
           "Staff login failed. Please check your credentials.",

@@ -46,6 +46,13 @@ const {
 
 const { toNullableString, toBoolean } = require("../utils/helpers");
 
+const {
+  isSuperAdminIpAllowed,
+  recordAdminAuditLog,
+  sendAdminLoginAlert,
+} = require("../utils/adminSecurity");
+const { verifyTwoFactorCode, consumeRecoveryCode } = require("../utils/totp");
+
 const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
   process.env.IP_LOOKUP_TIMEOUT_MS || "2000",
   10,
@@ -250,6 +257,25 @@ const recordAdminLoginHistorySafely = async ({
   }
 };
 
+const sendAdminLoginAlertSafely = ({ req, user, status, reason = null }) => {
+  void (async () => {
+    try {
+      const ipAddress = getRequestIp(req);
+      const locationLabel = await resolveRequestLocation(req, ipAddress);
+      await sendAdminLoginAlert({
+        admin: user,
+        ipAddress,
+        deviceName: resolveDeviceName(req.headers["user-agent"] || ""),
+        locationLabel,
+        status,
+        reason,
+      });
+    } catch {
+      // Alert delivery must never affect the login response.
+    }
+  })();
+};
+
 const getBearerToken = (req) => {
   const authHeader = req.headers["authorization"];
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -383,6 +409,42 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       });
     }
 
+    // Super-admin network restriction: when allowlist entries exist, the
+    // client IP must match one. Lookup errors fail closed — a control the owner
+    // explicitly enabled must never silently disable itself.
+    if (gateLabel === "super_admin") {
+      let ipAllowed = false;
+      try {
+        ipAllowed = await isSuperAdminIpAllowed({
+          ipAddress: getRequestIp(req),
+          database: connection,
+        });
+      } catch (allowlistError) {
+        ipAllowed = false;
+      }
+
+      if (!ipAllowed) {
+        void recordAdminLoginHistorySafely({
+          req,
+          userId: user.id,
+          attemptedEmail: user.email,
+          status: "failed",
+          failureReason: "IP not in super-admin allowlist",
+        });
+        sendAdminLoginAlertSafely({
+          req,
+          user,
+          status: "blocked",
+          reason: "IP address is not in the super-admin allowlist",
+        });
+        connection.release();
+        return res.status(403).json({
+          success: false,
+          error: "Access denied: this network is not permitted for super admin sign-in.",
+        });
+      }
+    }
+
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
       await recordFailedLoginAtomic(connection, user.id, user.email, true);
@@ -394,6 +456,12 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         status: "failed",
         failureReason: "Invalid password",
       });
+      sendAdminLoginAlertSafely({
+        req,
+        user,
+        status: "blocked",
+        reason: "Invalid password",
+      });
 
       connection.release();
 
@@ -402,6 +470,57 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         success: false,
         error: "Invalid email or password",
       });
+    }
+
+    // Second factor: verified after the password but before any session or
+    // token exists. Recovery codes are single-use and consumed atomically.
+    if (user.two_fa_enabled === true || Number(user.two_fa_enabled) === 1) {
+      const otpCode = String(req.body?.otpCode || "").trim();
+
+      if (!otpCode) {
+        connection.release();
+        // HTTP 200 + flag so the login page can switch to the code step
+        // without axios treating the response as a transport failure.
+        return res.json({
+          success: false,
+          requiresTwoFactor: true,
+          error: "Two-factor authentication code required.",
+        });
+      }
+
+      let twoFactorOk = verifyTwoFactorCode({
+        encryptedSecret: user.two_fa_secret_encrypted,
+        code: otpCode,
+      });
+      if (!twoFactorOk) {
+        twoFactorOk = await consumeRecoveryCode({
+          db: connection,
+          userId: user.id,
+          code: otpCode,
+        });
+      }
+
+      if (!twoFactorOk) {
+        void recordAdminLoginHistorySafely({
+          req,
+          userId: user.id,
+          attemptedEmail: user.email,
+          status: "failed",
+          failureReason: "Invalid two-factor code",
+        });
+        sendAdminLoginAlertSafely({
+          req,
+          user,
+          status: "blocked",
+          reason: "Invalid two-factor authentication code",
+        });
+        connection.release();
+        return res.status(401).json({
+          success: false,
+          requiresTwoFactor: true,
+          error: "Invalid two-factor authentication code.",
+        });
+      }
     }
 
     await resetLoginFailuresAtomic(connection, user.id);
@@ -438,6 +557,20 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       attemptedEmail: user.email,
       status: "success",
     });
+
+    // Successful sign-in: notify the account owner and write the audit trail.
+    sendAdminLoginAlertSafely({ req, user, status: "success" });
+    void recordAdminAuditLog({
+      adminId: user.id,
+      action: gateLabel === "super_admin" ? "Super admin login successful" : "Staff admin login successful",
+      category: "auth",
+      actorEmail: user.email,
+      ipAddress: getRequestIp(req),
+      userAgent: req.headers["user-agent"] || null,
+    });
+    db.promise()
+      .query("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id])
+      .catch(() => {});
 
     let adminPermissions = user.admin_permissions;
     if (typeof adminPermissions === 'string') {
@@ -484,12 +617,12 @@ const SUPER_ADMIN_ROLES = new Set(["super_admin"]);
 const STAFF_ADMIN_ROLES = new Set(["staff_admin", "admin", "moderator"]);
 
 // POST /api/admin/login — super admins only
-router.post("/login", restrictBody('email', 'password'), (req, res) =>
+router.post("/login", restrictBody('email', 'password', 'otpCode'), (req, res) =>
   processAdminLogin(req, res, { allowedAdminRoles: SUPER_ADMIN_ROLES, gateLabel: "super_admin" })
 );
 
 // POST /api/admin/staff-login — staff admins / moderators only (not super admins)
-router.post("/staff-login", restrictBody('email', 'password'), (req, res) =>
+router.post("/staff-login", restrictBody('email', 'password', 'otpCode'), (req, res) =>
   processAdminLogin(req, res, { allowedAdminRoles: STAFF_ADMIN_ROLES, gateLabel: "staff" })
 );
 

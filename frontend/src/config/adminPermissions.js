@@ -52,6 +52,9 @@ export const PERMISSION_GROUPS = PERMISSION_LIST.reduce((acc, perm) => {
 export const FEATURE_PERMISSIONS = {
   dashboard:         undefined,
   notifications:     undefined,
+  // Every admin (staff included) manages their own 2FA/sessions; the
+  // IP-allowlist section inside the page is additionally super-admin gated.
+  security:          undefined,
   products:          "manage_products",
   categories:        "manage_categories",
   coupons:           "manage_coupons",

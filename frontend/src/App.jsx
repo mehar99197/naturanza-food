@@ -85,6 +85,7 @@ const AdminAdmins = named(() => import("@/pages/AdminAdmins"), "AdminAdmins");
 const AdminReturns = named(() => import("@/pages/AdminReturns"), "AdminReturns");
 const AdminOperations = named(() => import("@/pages/AdminOperations"), "AdminOperations");
 const AdminSettings = named(() => import("@/pages/AdminSettings"), "AdminSettings");
+const AdminSecurity = named(() => import("@/pages/AdminSecurity"), "AdminSecurity");
 const AdminCoupons = lazy(() => import("@/pages/AdminCoupons"));
 const AdminCategories = lazy(() => import("@/pages/AdminCategories"));
 const AdminAnnouncements = lazy(() => import("@/pages/AdminAnnouncements"));
@@ -447,6 +448,7 @@ function AppContent() {
               <Route path="about" element={<RequireSuperAdmin><AdminAbout /></RequireSuperAdmin>} />
               <Route path="categories" element={<RequirePermission feature="categories"><AdminCategories /></RequirePermission>} />
               <Route path="settings" element={<RequireSuperAdmin><AdminSettings /></RequireSuperAdmin>} />
+              <Route path="security" element={<AdminSecurity />} />
             </Route>
 
             {/* 404 Catch-All Route */}
