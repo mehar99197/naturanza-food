@@ -1,10 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Shield, Mail, Lock, AlertCircle, Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
-import { safeLocalStorage } from "@/lib/storage";
-
-const REMEMBERED_EMAIL_KEY = "adminRememberedEmail";
 
 const getPasswordStrength = (value) => {
   if (!value) {
@@ -40,7 +37,6 @@ export function AdminLogin() {
   const location = useLocation();
   const [email, setEmail] = useState(location.state?.email || "");
   const [password, setPassword] = useState("");
-  const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -50,19 +46,6 @@ export function AdminLogin() {
 
   const passwordStrength = getPasswordStrength(password);
   const showRateLimitWarning = failedAttempts >= 3;
-
-  useEffect(() => {
-    if (location.state?.email) {
-      setRememberMe(true);
-      return;
-    }
-
-    const rememberedEmail = safeLocalStorage.getItem(REMEMBERED_EMAIL_KEY);
-    if (rememberedEmail) {
-      setEmail(rememberedEmail);
-      setRememberMe(true);
-    }
-  }, [location.state?.email]);
 
   // Only auto-redirect if a SUPER-ADMIN session is active. A staff session on
   // this URL shouldn't bounce away — the user may be deliberately switching
@@ -94,12 +77,6 @@ export function AdminLogin() {
     ]);
 
     if (result.success) {
-      if (rememberMe) {
-        safeLocalStorage.setItem(REMEMBERED_EMAIL_KEY, email.trim());
-      } else {
-        safeLocalStorage.removeItem(REMEMBERED_EMAIL_KEY);
-      }
-
       setFailedAttempts(0);
       setLoading(false);
       navigate("/admin/dashboard");
@@ -232,17 +209,7 @@ export function AdminLogin() {
                 ) : null}
               </label>
 
-              <div className="flex items-center justify-between gap-3 pt-0.5">
-                <label className="inline-flex items-center gap-2.5 text-sm text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="h-4 w-4 rounded border-green-200 text-green-700 focus:ring-green-400"
-                  />
-                  <span>Remember me</span>
-                </label>
-
+              <div className="flex items-center justify-end gap-3 pt-0.5">
                 <Link
                   to="/admin/forgot-password"
                   className="text-sm font-semibold text-green-700 underline decoration-green-300 underline-offset-4 transition hover:text-green-800 hover:decoration-green-500"
