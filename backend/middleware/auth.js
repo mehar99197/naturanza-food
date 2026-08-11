@@ -88,9 +88,14 @@ const authenticateToken = async (req, res, next) => {
 
 const optionalAuthenticateToken = async (req, res, next) => {
     const authHeader = req.headers["authorization"];
-    const token = authHeader && authHeader.startsWith("Bearer ")
+    const bearerToken = authHeader && authHeader.startsWith("Bearer ")
         ? authHeader.slice(7).trim()
         : null;
+    // Admin access tokens are also stored in an HttpOnly cookie. On a hard
+    // reload the in-memory Bearer token is empty, so optional product reads
+    // must use the cookie or they receive the public response with inventory
+    // intentionally removed (which rendered admin stock as zero).
+    const token = bearerToken || req.cookies?.adminAccessToken || null;
 
     if (!token) {
         return next();
