@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { productAPI } from "@/services/api";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 
 const ProductContext = createContext(null);
 
@@ -111,6 +112,7 @@ export const useProducts = () => {
 
 export const ProductProvider = ({ children }) => {
   const location = useLocation();
+  const { isAdminAuthenticated, loading: adminLoading } = useAdminAuth();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -118,9 +120,24 @@ export const ProductProvider = ({ children }) => {
   // Refetch when switching between public and admin catalog views so inactive
   // products are not lost after navigating from the storefront.
   useEffect(() => {
-    fetchProducts();
+    const isAdminPage = location.pathname.startsWith("/admin");
+
+    // Wait for admin session restoration on hard reload. Public product
+    // responses intentionally omit stock_quantity, so using one here would
+    // make admin inventory appear as zero until the next navigation.
+    if (isAdminPage && adminLoading) {
+      return;
+    }
+
+    if (isAdminPage && !isAdminAuthenticated) {
+      setProducts([]);
+      setLoading(false);
+      return;
+    }
+
+    void fetchProducts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname]);
+  }, [adminLoading, isAdminAuthenticated, location.pathname]);
 
   const fetchProducts = async () => {
     try {
