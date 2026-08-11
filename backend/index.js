@@ -4,11 +4,12 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const path = require("path");
 const helmet = require("helmet");
-const { rateLimit, ipKeyGenerator } = require("express-rate-limit");
+const { rateLimit } = require("express-rate-limit");
 const hpp = require("hpp");
 require("dotenv").config();
 const { dbPool, db, testDatabaseConnection } = require("./config/db");
 const { ensureProductionSchema } = require("./utils/schemaCompatibility");
+const { getRateLimitKey } = require("./utils/rateLimitKey");
 const {
   getJwtRuntimeInfo,
   getCookieDomain,
@@ -148,7 +149,7 @@ app.use(
       },
     },
     crossOriginEmbedderPolicy: false,
-    crossOriginOpenerPolicy: { policy: "unsafe-none" },
+    crossOriginOpenerPolicy: { policy: "same-origin" },
     crossOriginResourcePolicy: { policy: "same-origin" },
   }),
 );
@@ -182,6 +183,7 @@ const apiLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getRateLimitKey,
   // Don't spend the budget on CORS preflight requests.
   skip: (req) => req.method === "OPTIONS",
 });
@@ -196,6 +198,7 @@ const authLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getRateLimitKey,
   skipFailedRequests: false,
   skipSuccessfulRequests: false,
 });
@@ -213,6 +216,7 @@ const csrfTokenLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getRateLimitKey,
   skip: (req) => req.method === "OPTIONS",
 });
 
@@ -228,6 +232,7 @@ const passwordResetLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getRateLimitKey,
   skip: (req) => req.method === "OPTIONS",
 });
 
@@ -241,6 +246,7 @@ const publicFormLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getRateLimitKey,
   skip: (req) => req.method === "OPTIONS",
 });
 
@@ -253,6 +259,7 @@ const refreshLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getRateLimitKey,
   skipSuccessfulRequests: true,
 });
 

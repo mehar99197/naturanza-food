@@ -8,12 +8,18 @@ const { db } = require('../config/db');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Submit contact form
-router.post('/', restrictBody('name', 'email', 'phone', 'subject', 'message'), (req, res) => {
+router.post('/', restrictBody('name', 'email', 'phone', 'subject', 'message', 'website'), (req, res) => {
     const name    = String(req.body?.name    || '').trim().slice(0, 100);
     const email   = String(req.body?.email   || '').trim().toLowerCase().slice(0, 200);
     const phone   = String(req.body?.phone   || '').trim().slice(0, 30)  || null;
     const subject = String(req.body?.subject || '').trim().slice(0, 200) || null;
     const message = String(req.body?.message || '').trim().slice(0, 5000);
+
+    // Honeypot: legitimate users never see this field; bots usually fill it.
+    const honeypot = String(req.body?.website || '').trim();
+    if (honeypot) {
+      return res.status(400).json({ error: 'Invalid submission' });
+    }
 
     if (!name || !email || !message) {
         return res.status(400).json({ error: 'Name, email, and message are required' });

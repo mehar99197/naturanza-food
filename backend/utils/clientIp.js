@@ -82,4 +82,4 @@ const getClientIp = (req) => {
   return null;
 };
 
-module.exports = { getClientIp, isPrivateOrLocal };
+module.exports = { getClientIp, isPrivateOrLocal, stripToIp };

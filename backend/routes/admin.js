@@ -52,49 +52,6 @@ const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
 );
 const LOCATION_CACHE_TTL_MS = 1000 * 60 * 60 * 6;
 const adminLoginLocationCache = new Map();
-const LOGIN_MAX_ATTEMPTS =
-  Number.parseInt(process.env.LOGIN_MAX_ATTEMPTS || "5", 10) || 5;
-const LOGIN_LOCK_MINUTES =
-  Number.parseInt(process.env.LOGIN_LOCK_MINUTES || "15", 10) || 15;
-
-const isAccountLocked = (userRecord) => {
-  const lockUntil = userRecord?.locked_until
-    ? new Date(userRecord.locked_until)
-    : null;
-
-  if (!lockUntil || Number.isNaN(lockUntil.getTime())) {
-    return false;
-  }
-
-  return lockUntil > new Date();
-};
-
-const markFailedLoginAttempt = async (userRecord) => {
-  const currentAttempts = Number(userRecord?.failed_login_attempts || 0);
-  const nextAttempt = currentAttempts + 1;
-  const shouldLock = nextAttempt >= LOGIN_MAX_ATTEMPTS;
-
-  await db
-    .promise()
-    .query(
-      "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
-      [
-        shouldLock ? 0 : nextAttempt,
-        shouldLock ? new Date(Date.now() + LOGIN_LOCK_MINUTES * 60 * 1000) : null,
-        userRecord.id,
-      ],
-    );
-};
-
-const resetLoginFailures = async (userId) => {
-  await db
-    .promise()
-    .query(
-      "UPDATE users SET failed_login_attempts = 0, locked_until = NULL, last_login = NOW() WHERE id = ?",
-      [userId],
-    );
-};
-
 // Real client IP for admin login-history/session display — resolved from the
 // forwarded headers (Express's req.ip is a Hostinger internal hop). See
 // utils/clientIp.js.
@@ -378,12 +335,14 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       });
     }
 
-    const lockStatus = await checkAccountLockout(connection, user.id);
+    const lockStatus = await checkAccountLockout(connection, user.id, true);
     if (lockStatus.locked) {
+      // Return the same generic error as a non-existent email / wrong password
+      // so an attacker cannot use the lockout response to enumerate accounts.
       connection.release();
-      return res.status(423).json({
+      return res.status(401).json({
         success: false,
-        error: "Account temporarily locked due to multiple failed attempts.",
+        error: "Invalid email or password",
       });
     }
 
@@ -427,7 +386,6 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
       await recordFailedLoginAtomic(connection, user.id, user.email, true);
-      const newLockStatus = await checkAccountLockout(connection, user.id);
 
       void recordAdminLoginHistorySafely({
         req,
@@ -439,17 +397,10 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
 
       connection.release();
 
-      if (newLockStatus.locked) {
-        return res.status(423).json({
-          success: false,
-          error: "Account temporarily locked due to multiple failed attempts.",
-        });
-      }
-
+      // Uniform generic response prevents account enumeration via lockout.
       return res.status(401).json({
         success: false,
         error: "Invalid email or password",
-        attemptsLeft: newLockStatus.attemptsLeft,
       });
     }
 

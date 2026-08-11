@@ -5,6 +5,8 @@ const { restrictBody } = require("../middleware/security");
 const asyncHandler = require("../middleware/asyncHandler");
 const newsletterController = require("../controllers/newsletterController");
 
+const { getRateLimitKey } = require("../utils/rateLimitKey");
+
 // Stop spammers from hammering the public subscribe endpoint with random
 // emails; 5 per 15 minutes per IP is generous for a real user.
 const subscribeLimiter = rateLimit({
@@ -13,6 +15,7 @@ const subscribeLimiter = rateLimit({
   message: { error: "Too many subscribe attempts. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getRateLimitKey,
 });
 
 router.post(

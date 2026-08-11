@@ -10,7 +10,9 @@ const errorHandler = (error, req, res, next) => {
 
   let message;
   if (isProduction) {
-    if (statusCode >= 500 || !error.expose) {
+    if (statusCode === 404) {
+      message = error.message || "Not found";
+    } else if (statusCode >= 500 || !error.expose) {
       message = "Internal server error";
     } else {
       message = error.message || "Bad request";

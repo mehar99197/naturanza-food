@@ -71,7 +71,6 @@ const {
   recordFailedLoginAtomic,
   resetLoginFailuresAtomic,
   checkAccountLockout,
-  progressiveDelayMs,
 } = require("../utils/loginSecurity");
 
 const googleClient = new OAuth2Client();
@@ -365,40 +364,11 @@ const parsePayload = (schema, payload) => {
   };
 };
 
-const isAccountLocked = (userRecord) => {
-  const lockUntil = userRecord?.locked_until
-    ? new Date(userRecord.locked_until)
-    : null;
-
-  if (!lockUntil || Number.isNaN(lockUntil.getTime())) {
-    return false;
-  }
-
-  return lockUntil > new Date();
-};
-
-const markFailedLoginAttempt = async (userRecord) => {
-  const currentAttempts = Number(userRecord?.failed_login_attempts || 0);
-  const nextAttempt = currentAttempts + 1;
-  const shouldLock = nextAttempt >= LOGIN_MAX_ATTEMPTS;
-
-  await db
-    .promise()
-    .query(
-      "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
-      [
-        shouldLock ? 0 : nextAttempt,
-        shouldLock ? new Date(Date.now() + LOGIN_LOCK_MINUTES * 60 * 1000) : null,
-        userRecord.id,
-      ],
-    );
-};
-
 const resetLoginFailures = async (userId) => {
   await db
     .promise()
     .query(
-      "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?",
+      "UPDATE users SET user_failed_login_attempts = 0, user_locked_until = NULL, admin_failed_login_attempts = 0, admin_locked_until = NULL WHERE id = ?",
       [userId],
     );
 };
@@ -715,18 +685,18 @@ router.post("/login", async (req, res) => {
         .json({ error: "Account is disabled. Please contact support." });
     }
 
-    const lockStatus = await checkAccountLockout(connection, user.id);
+    const lockStatus = await checkAccountLockout(connection, user.id, false);
     if (lockStatus.locked) {
+      // Uniform generic response prevents account enumeration via lockout.
       connection.release();
-      return res.status(423).json({
-        error: "Account temporarily locked due to multiple failed attempts.",
+      return res.status(401).json({
+        error: "Invalid email or password",
       });
     }
 
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
       await recordFailedLoginAtomic(connection, user.id, user.email, false);
-      const newLockStatus = await checkAccountLockout(connection, user.id);
 
       void recordLoginHistorySafely({
         req,
@@ -739,17 +709,7 @@ router.post("/login", async (req, res) => {
 
       connection.release();
 
-      if (newLockStatus.locked) {
-        return res.status(423).json({
-          error: "Account temporarily locked due to multiple failed attempts.",
-        });
-      }
-
-      const delayMs = progressiveDelayMs(LOGIN_MAX_ATTEMPTS - newLockStatus.attemptsLeft);
-      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
-
-      // Uniform response (no attemptsLeft) so an attacker cannot distinguish a
-      // real account from an unknown email via the response body.
+      // Uniform generic response prevents account enumeration via lockout.
       return res.status(401).json({
         error: "Invalid email or password",
       });
@@ -890,9 +850,11 @@ router.post("/google", async (req, res) => {
         });
       }
 
-      if (isAccountLocked(existingUser)) {
-        return res.status(423).json({
-          error: "Account temporarily locked due to multiple failed attempts.",
+      const googleLockStatus = await checkAccountLockout(db.promise(), existingUser.id, false);
+      if (googleLockStatus.locked) {
+        // Uniform generic response prevents account enumeration via lockout.
+        return res.status(401).json({
+          error: "Invalid email or password",
         });
       }
 

@@ -28,6 +28,7 @@ export function Contact() {
     email: "",
     subject: "",
     message: "",
+    website: "",
   });
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -79,12 +80,13 @@ export function Contact() {
         phone: "",
         subject: formData.subject,
         message: formData.message,
+        website: formData.website,
       });
 
       setIsSubmitted(true);
       setTimeout(() => {
         setIsSubmitted(false);
-        setFormData({ name: "", email: "", subject: "", message: "" });
+        setFormData({ name: "", email: "", subject: "", message: "", website: "" });
       }, 3000);
     } catch (error) {
       setSubmitError(
@@ -315,6 +317,20 @@ export function Contact() {
                       className="w-full px-3 py-2.5 border rounded-xl focus:outline-none focus:border-[#3d7a3d] focus:ring-2 focus:ring-[#3d7a3d]/20 resize-none text-sm"
                       placeholder="Tell us more about your inquiry..."
                       required
+                    />
+                  </div>
+
+                  {/* Honeypot: hidden from humans, traps bots */}
+                  <div className="hidden" aria-hidden="true">
+                    <input
+                      type="text"
+                      name="website"
+                      value={formData.website}
+                      onChange={(e) =>
+                        setFormData({ ...formData, website: e.target.value })
+                      }
+                      tabIndex={-1}
+                      autoComplete="off"
                     />
                   </div>
 

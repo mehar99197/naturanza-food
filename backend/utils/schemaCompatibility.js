@@ -702,9 +702,22 @@ const ensureProductionSchema = async (db) => {
     // Existing accounts are grandfathered in; password registration explicitly
     // writes FALSE and sends the verification email.
     email_verified: "BOOLEAN NOT NULL DEFAULT TRUE",
+    // Legacy single-context lockout columns (kept for rollback safety).
     failed_login_attempts: "INT DEFAULT 0",
     locked_until: "DATETIME NULL",
+    // Per-portal lockout counters so a user-portal brute force cannot lock
+    // the admin portal (and vice versa).
+    user_failed_login_attempts: "INT DEFAULT 0",
+    user_locked_until: "DATETIME NULL",
+    admin_failed_login_attempts: "INT DEFAULT 0",
+    admin_locked_until: "DATETIME NULL",
   });
+
+  // One-time migration: copy legacy lockout state into both new contexts so
+  // existing locked accounts stay locked after deploy.
+  await db.query(
+    "UPDATE users\n     SET user_failed_login_attempts = GREATEST(user_failed_login_attempts, failed_login_attempts),\n         user_locked_until = COALESCE(user_locked_until, locked_until),\n         admin_failed_login_attempts = GREATEST(admin_failed_login_attempts, failed_login_attempts),\n         admin_locked_until = COALESCE(admin_locked_until, locked_until)\n     WHERE failed_login_attempts > 0 OR locked_until IS NOT NULL",
+  );
 
   await db.query(
     "UPDATE users SET signup_provider = 'password' WHERE signup_provider = 'facebook'",
