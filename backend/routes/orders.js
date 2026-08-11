@@ -63,6 +63,12 @@ const normalizePaymentMethod = (rawMethod) => {
     return 'card';
   }
 
+  // COD is the default storefront method. It must pass through here — returning
+  // null made every COD order fail the availability check below with a 400.
+  if (nextMethod === 'cod' || nextMethod === 'cash_on_delivery') {
+    return 'cod';
+  }
+
   if (nextMethod === 'easypaisa' || nextMethod === 'jazzcash' || nextMethod === 'bank') {
     return nextMethod;
   }
