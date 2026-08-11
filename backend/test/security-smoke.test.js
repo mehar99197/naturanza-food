@@ -53,22 +53,39 @@ test('variant JSON parsing safely falls back for malformed values', () => {
   assert.deepEqual(variants.parseJsonSafely(null, []), []);
 });
 
-test('public settings omit operational controls', () => {
-  const { toPublicSettings } = require('../utils/adminSettings');
+test('public settings omit operational controls and contact details', () => {
+  const { toPublicSettings, toPublicContactSettings } = require('../utils/adminSettings');
 
-  const publicSettings = toPublicSettings({
+  const payload = {
     storeName: 'Naturanza Food',
     storeEmail: 'support@naturanzafood.com',
+    storePhone: '+923409502646',
+    address: 'Lahore, Pakistan',
+    supportHours: '24/7',
+    mapLatitude: 31.5204,
+    mapLongitude: 74.3587,
+    mapLocationLabel: 'Pakistan, Lahore',
     emailNotifications: true,
     orderNotifications: true,
     lowStockAlerts: true,
     lowStockThreshold: 10,
-  });
+  };
 
+  const publicSettings = toPublicSettings(payload);
   assert.equal(publicSettings.emailNotifications, undefined);
   assert.equal(publicSettings.orderNotifications, undefined);
   assert.equal(publicSettings.lowStockAlerts, undefined);
   assert.equal(publicSettings.lowStockThreshold, undefined);
+  assert.equal(publicSettings.storePhone, undefined);
+  assert.equal(publicSettings.address, undefined);
+  assert.equal(publicSettings.supportHours, undefined);
+  assert.equal(publicSettings.mapLatitude, undefined);
+
+  const contactSettings = toPublicContactSettings(payload);
+  assert.equal(contactSettings.storePhone, payload.storePhone);
+  assert.equal(contactSettings.address, payload.address);
+  assert.equal(contactSettings.supportHours, payload.supportHours);
+  assert.equal(contactSettings.mapLatitude, payload.mapLatitude);
 });
 
 test('public products expose availability without inventory details', () => {

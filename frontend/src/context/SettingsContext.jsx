@@ -141,7 +141,19 @@ export function SettingsProvider({ children }) {
   ? await adminAPI.getSettings()
   : await settingsAPI.getPublicSettings();
 
-  applySettings(response);
+  // Merge dedicated public contact fields so the rest of the app still has
+  // access to phone, address, hours, and map data without exposing them on
+  // the generic /settings endpoint.
+  let contactResponse = {};
+  if (!isAdminAuthenticated) {
+    try {
+      contactResponse = await settingsAPI.getContactSettings();
+    } catch {
+      // Non-fatal; contact defaults already exist in DEFAULT_SETTINGS.
+    }
+  }
+
+  applySettings({ ...response, ...contactResponse });
   setError('');
  } catch (requestError) {
  if (!silent) {

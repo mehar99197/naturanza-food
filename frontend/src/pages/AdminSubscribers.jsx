@@ -29,17 +29,23 @@ const formatDateTime = (value) => {
 };
 
 const statusBadge = (status) => {
-  if (status === "active") {
-    return "bg-emerald-100 text-emerald-700";
+  switch (status) {
+    case "active":
+      return "bg-emerald-100 text-emerald-700";
+    case "pending":
+      return "bg-amber-100 text-amber-700";
+    case "unsubscribed":
+      return "bg-slate-100 text-slate-600";
+    default:
+      return "bg-slate-100 text-slate-600";
   }
-  return "bg-slate-100 text-slate-600";
 };
 
 export function AdminSubscribers() {
   const { updateSettings } = useSettings();
 
   const [subscribers, setSubscribers] = useState([]);
-  const [counts, setCounts] = useState({ active: 0, unsubscribed: 0, total: 0 });
+  const [counts, setCounts] = useState({ active: 0, pending: 0, unsubscribed: 0, total: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -70,7 +76,7 @@ export function AdminSubscribers() {
       const response = await newsletterAPI.listSubscribers(params);
       setSubscribers(Array.isArray(response?.subscribers) ? response.subscribers : []);
       setCounts(
-        response?.counts || { active: 0, unsubscribed: 0, total: 0 },
+        response?.counts || { active: 0, pending: 0, unsubscribed: 0, total: 0 },
       );
     } catch (requestError) {
       setError(
@@ -231,7 +237,7 @@ export function AdminSubscribers() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
           <div className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
@@ -240,6 +246,17 @@ export function AdminSubscribers() {
               <div>
                 <p className="text-xs text-slate-500">Active</p>
                 <p className="text-2xl font-bold text-slate-900">{counts.active}</p>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-amber-100 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
+                <Mail className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Pending</p>
+                <p className="text-2xl font-bold text-slate-900">{counts.pending}</p>
               </div>
             </div>
           </div>
@@ -347,6 +364,7 @@ export function AdminSubscribers() {
             {[
               { key: "all", label: "All" },
               { key: "active", label: "Active" },
+              { key: "pending", label: "Pending" },
               { key: "unsubscribed", label: "Unsubscribed" },
             ].map((item) => (
               <button

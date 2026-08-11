@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { getAdminSettings, toPublicSettings } = require("../utils/adminSettings");
+const { getAdminSettings, toPublicSettings, toPublicContactSettings } = require("../utils/adminSettings");
 const {
   DEFAULT_SUPPORTED_CURRENCIES,
   getPkrExchangeRates,
@@ -13,6 +13,15 @@ router.get("/", async (req, res) => {
     res.json(toPublicSettings(settings));
   } catch (error) {
     res.status(500).json({ error: "Could not load settings" });
+  }
+});
+
+router.get("/contact", async (req, res) => {
+  try {
+    const settings = await getAdminSettings();
+    res.json(toPublicContactSettings(settings));
+  } catch (error) {
+    res.status(500).json({ error: "Could not load contact settings" });
   }
 });
 

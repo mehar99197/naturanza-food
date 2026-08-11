@@ -62,12 +62,12 @@ export function Footer({ variant = 'full' }) {
  try {
  const response = await newsletterAPI.subscribe(trimmedEmail, 'footer');
  setIsSubscribed(true);
- setSubscribeMessage(response?.message || 'Thank you for subscribing!');
+ setSubscribeMessage(response?.message || 'Please check your email to confirm your subscription.');
  setEmail('');
  setTimeout(() => {
  setIsSubscribed(false);
  setSubscribeMessage('');
- }, 5000);
+ }, 6000);
  } catch (error) {
  const apiError = error?.response?.data?.error;
  setSubscribeError(apiError || 'Could not subscribe. Please try again.');

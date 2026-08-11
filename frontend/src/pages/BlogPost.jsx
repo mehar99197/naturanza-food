@@ -132,7 +132,7 @@ function NewsletterCTA({ sourceTitle }) {
       </p>
       {state === 'success' ? (
         <p className="flex items-center gap-2 font-semibold text-green-100">
-          <Check className="h-5 w-5" /> You're subscribed — thank you!
+          <Check className="h-5 w-5" /> Check your email to confirm!
         </p>
       ) : (
         <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-2.5">

@@ -30,6 +30,11 @@ router.get(
   asyncHandler(newsletterController.unsubscribe),
 );
 
+router.get(
+  "/verify/:token",
+  asyncHandler(newsletterController.verify),
+);
+
 // Some email clients (Gmail/Yahoo) do a one-click POST via the
 // List-Unsubscribe-Post header before falling back to the GET link.
 router.post(

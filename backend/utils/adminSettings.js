@@ -339,25 +339,36 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
 const toPublicSettings = (settings) => ({
   storeName: settings.storeName,
   storeEmail: settings.storeEmail,
-  storePhone: settings.storePhone,
   currency: settings.currency || "PKR",
   taxRate: settings.taxRate,
   shippingFlat: settings.shippingFlat,
   shippingFree: settings.shippingFree,
-  address: settings.address,
-  supportHours: settings.supportHours,
   facebookUrl: settings.facebookUrl,
   instagramUrl: settings.instagramUrl,
   twitterUrl: settings.twitterUrl,
   youtubeUrl: settings.youtubeUrl,
   whatsappNumber: settings.whatsappNumber,
   whatsappEnabled: settings.whatsappEnabled,
-  mapLatitude: settings.mapLatitude,
-  mapLongitude: settings.mapLongitude,
-  mapLocationLabel: settings.mapLocationLabel,
   storeDiscountActive: settings.storeDiscountActive,
   storeDiscountPercentage: settings.storeDiscountPercentage,
   storeDiscountLabel: settings.storeDiscountLabel,
+});
+
+const toPublicContactSettings = (settings) => ({
+  storeName: settings.storeName,
+  storeEmail: settings.storeEmail,
+  storePhone: settings.storePhone,
+  address: settings.address,
+  supportHours: settings.supportHours,
+  mapLatitude: settings.mapLatitude,
+  mapLongitude: settings.mapLongitude,
+  mapLocationLabel: settings.mapLocationLabel,
+  whatsappNumber: settings.whatsappNumber,
+  whatsappEnabled: settings.whatsappEnabled,
+  facebookUrl: settings.facebookUrl,
+  instagramUrl: settings.instagramUrl,
+  twitterUrl: settings.twitterUrl,
+  youtubeUrl: settings.youtubeUrl,
 });
 
 module.exports = {
@@ -365,4 +376,5 @@ module.exports = {
   getAdminSettings,
   updateAdminSettings,
   toPublicSettings,
+  toPublicContactSettings,
 };

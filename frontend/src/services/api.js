@@ -808,6 +808,10 @@ export const settingsAPI = {
     const response = await axiosInstance.get("/settings");
     return response.data;
   },
+  getContactSettings: async () => {
+    const response = await axiosInstance.get("/settings/contact");
+    return response.data;
+  },
   getWhatsAppNumber: async () => {
     const response = await axiosInstance.get("/settings/whatsapp");
     return response.data;

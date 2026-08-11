@@ -568,14 +568,18 @@ CREATE TABLE IF NOT EXISTS about_content (
 CREATE TABLE IF NOT EXISTS newsletter_subscribers (
     id INT AUTO_INCREMENT PRIMARY KEY,
     email VARCHAR(254) NOT NULL UNIQUE,
-    status ENUM('active', 'unsubscribed') NOT NULL DEFAULT 'active',
+    status ENUM('pending', 'active', 'unsubscribed') NOT NULL DEFAULT 'pending',
     unsubscribe_token VARCHAR(64) NOT NULL,
+    verification_token VARCHAR(64) NULL,
+    verification_token_expires_at TIMESTAMP NULL DEFAULT NULL,
+    verified_at TIMESTAMP NULL DEFAULT NULL,
     source VARCHAR(40) NOT NULL DEFAULT 'footer',
     subscribed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     unsubscribed_at TIMESTAMP NULL DEFAULT NULL,
     reactivated_at TIMESTAMP NULL DEFAULT NULL,
     INDEX idx_newsletter_status (status),
-    INDEX idx_newsletter_email (email)
+    INDEX idx_newsletter_email (email),
+    INDEX idx_newsletter_verification_token (verification_token)
 );
 CREATE TABLE IF NOT EXISTS announcements (
     id INT PRIMARY KEY AUTO_INCREMENT,

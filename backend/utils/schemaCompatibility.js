@@ -803,6 +803,23 @@ const ensureProductionSchema = async (db) => {
   await widenEmailColumnIfPresent(db, "contacts");
   await widenEmailColumnIfPresent(db, "password_reset_tokens");
   await widenEmailColumnIfPresent(db, "newsletter_subscribers");
+  await ensureColumns(db, "newsletter_subscribers", {
+    verification_token: "VARCHAR(64) NULL",
+    verification_token_expires_at: "TIMESTAMP NULL DEFAULT NULL",
+    verified_at: "TIMESTAMP NULL DEFAULT NULL",
+  });
+
+  // Double-opt-in: existing rows stay active; new rows default to pending.
+  await db.query(
+    "ALTER TABLE newsletter_subscribers MODIFY COLUMN status ENUM('pending', 'active', 'unsubscribed') NOT NULL DEFAULT 'pending'",
+  );
+  await db.query(
+    "UPDATE newsletter_subscribers SET status = 'active', verified_at = COALESCE(verified_at, subscribed_at) WHERE status IN ('active', 'unsubscribed')",
+  );
+  await db.query(
+    "CREATE INDEX IF NOT EXISTS idx_newsletter_verification_token ON newsletter_subscribers(verification_token)",
+  );
+
 
   await ensureColumns(db, "admin_settings", {
     address: "VARCHAR(255) NOT NULL DEFAULT 'Pakistan'",

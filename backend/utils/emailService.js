@@ -749,10 +749,115 @@ If you didn't try to create an account, you can ignore this email.
   });
 };
 
+
+const generateNewsletterVerificationEmail = ({
+  storeName,
+  verificationUrl,
+  unsubscribeUrl,
+  siteUrl,
+}) => {
+  const currentYear = new Date().getFullYear();
+  const safeStoreName = escapeHtml(storeName || "Naturanza Food");
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirm your subscription</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0fdf4;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f0fdf4;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08); overflow: hidden;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #16a34a 0%, #059669 100%); padding: 36px 40px; text-align: center;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">
+                Confirm Your Subscription
+              </h1>
+              <p style="margin: 12px 0 0; color: rgba(255, 255, 255, 0.9); font-size: 15px;">
+                Pure. Natural. Healthy.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px;">
+              <p style="margin: 0 0 20px; color: #1e293b; font-size: 16px; line-height: 1.6;">
+                Thanks for subscribing to <strong>${safeStoreName}</strong>. Please confirm your email address to join our newsletter.
+              </p>
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center" style="padding: 8px 0 24px;">
+                    <a href="${escapeHtml(verificationUrl)}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #16a34a 0%, #059669 100%); color: #ffffff; text-decoration: none; padding: 14px 36px; border-radius: 12px; font-size: 16px; font-weight: 600;">
+                      Confirm Subscription
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0 0 16px; color: #64748b; font-size: 13px; line-height: 1.6; text-align: center;">
+                This link expires in 24 hours. If you didn't subscribe, you can <a href="${escapeHtml(unsubscribeUrl)}" style="color: #16a34a;">ignore this email</a> or <a href="${escapeHtml(unsubscribeUrl)}" style="color: #16a34a;">unsubscribe here</a>.
+              </p>
+              <p style="margin: 0; color: #94a3b8; font-size: 12px; text-align: center; word-break: break-all;">
+                If the button doesn't work, paste this link into your browser:<br>
+                <a href="${escapeHtml(verificationUrl)}" style="color: #16a34a;">${escapeHtml(verificationUrl)}</a>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8fafc; padding: 20px 40px; border-top: 1px solid #e2e8f0;">
+              <p style="margin: 0; color: #94a3b8; font-size: 12px; text-align: center;">
+                © ${currentYear} ${safeStoreName}. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`;
+};
+
+const sendNewsletterVerificationEmail = async ({
+  email,
+  storeName,
+  verificationUrl,
+  unsubscribeUrl,
+}) => {
+  const html = generateNewsletterVerificationEmail({
+    storeName: storeName || "Naturanza Food",
+    verificationUrl,
+    unsubscribeUrl,
+    siteUrl: FRONTEND_URL,
+  });
+
+  const text = `
+Confirm your subscription to ${storeName || "Naturanza Food"}!
+
+Please click the link below to complete your newsletter signup:
+${verificationUrl}
+
+This link expires in 24 hours.
+
+Didn't subscribe? Unsubscribe: ${unsubscribeUrl}
+`;
+
+  return sendEmail({
+    to: email,
+    subject: "Confirm your Naturanza Food subscription",
+    html,
+    text,
+    unsubscribeUrl,
+  });
+};
+
 module.exports = {
   sendEmail,
   sendPasswordResetEmail,
   sendVerificationCodeEmail,
+  sendNewsletterVerificationEmail,
   sendNewsletterWelcomeEmail,
   sendNewsletterBroadcastEmail,
   sendPaymentStatusEmail,

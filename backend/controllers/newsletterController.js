@@ -1,8 +1,9 @@
 const newsletterModel = require("../models/newsletterModel");
 const couponModel = require("../models/couponModel");
 const { dbPool } = require("../config/db");
-const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
+const { getAdminSettings } = require("../utils/adminSettings");
 const {
+  sendNewsletterVerificationEmail,
   sendNewsletterWelcomeEmail,
   sendNewsletterBroadcastEmail,
   FRONTEND_URL,
@@ -20,6 +21,9 @@ const NORMALIZED_BACKEND_URL = String(BACKEND_URL).replace(/\/+$/, "");
 const buildUnsubscribeUrl = (token) =>
   `${NORMALIZED_BACKEND_URL}/api/newsletter/unsubscribe/${encodeURIComponent(token)}`;
 
+const buildVerificationUrl = (token) =>
+  `${NORMALIZED_BACKEND_URL}/api/newsletter/verify/${encodeURIComponent(token)}`;
+
 const notifyAdminsOfSubscriber = async (subscriber) => {
   try {
     const [admins] = await dbPool.query(
@@ -30,7 +34,7 @@ const notifyAdminsOfSubscriber = async (subscriber) => {
       row.id,
       "admin_newsletter_subscribed",
       "New Newsletter Subscriber",
-      `${subscriber.email} joined the Naturanza family.`,
+      `${subscriber.email} confirmed their subscription.`,
       JSON.stringify({
         subscriber_id: subscriber.id,
         email: subscriber.email,
@@ -55,7 +59,7 @@ const subscribe = async (req, res) => {
     return res.status(400).json({ error: "Email is required" });
   }
 
-  const { subscriber, alreadySubscribed, reactivated } = await newsletterModel.subscribe({
+  const { subscriber, alreadySubscribed, pendingVerification } = await newsletterModel.subscribe({
     email,
     source,
   });
@@ -67,35 +71,34 @@ const subscribe = async (req, res) => {
     });
   }
 
-  // Fire-and-forget side effects (do not block the response)
+  // Fire-and-forget verification email (do not block the response)
   (async () => {
     try {
       const settings = await getAdminSettings();
-      const code = settings.newsletterWelcomePromoCode || "";
-      const coupon = code ? await couponModel.findByCode(code) : null;
-      await sendNewsletterWelcomeEmail({
+      await sendNewsletterVerificationEmail({
         email: subscriber.email,
         storeName: settings.storeName,
-        promoCode: code,
-        promoCoupon: coupon,
+        verificationUrl: buildVerificationUrl(subscriber.verification_token),
         unsubscribeUrl: buildUnsubscribeUrl(subscriber.unsubscribe_token),
       });
     } catch (error) {
-      console.warn("Welcome email failed for", subscriber.email, "-", error.message);
+      console.warn("Verification email failed for", subscriber.email, "-", error.message);
     }
   })();
 
-  notifyAdminsOfSubscriber(subscriber);
-
   return res.status(201).json({
-    message: reactivated
-      ? "Welcome back! You've been re-subscribed."
-      : "Thanks for subscribing! Check your inbox for a welcome email.",
-    reactivated,
+    message: "Please check your email and click the confirmation link to complete your subscription.",
+    pendingVerification,
   });
 };
 
-const renderUnsubscribePage = ({ title, heading, message, accent = "#16a34a" }) => `
+const renderMessagePage = ({
+  title,
+  heading,
+  message,
+  accent = "#16a34a",
+  showHomeLink = true,
+}) => `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -116,9 +119,7 @@ const renderUnsubscribePage = ({ title, heading, message, accent = "#16a34a" }) 
           <tr>
             <td style="padding:32px 40px;color:#1f2937;font-size:15px;line-height:1.7;text-align:center;">
               <p style="margin:0 0 20px;">${message}</p>
-              <a href="${FRONTEND_URL}" style="display:inline-block;background:${accent};color:#fff;text-decoration:none;padding:12px 28px;border-radius:10px;font-weight:600;">
-                Back to Naturanza Food
-              </a>
+              ${showHomeLink ? `<a href="${FRONTEND_URL}" style="display:inline-block;background:${accent};color:#fff;text-decoration:none;padding:12px 28px;border-radius:10px;font-weight:600;">Back to Naturanza Food</a>` : ""}
             </td>
           </tr>
         </table>
@@ -135,7 +136,7 @@ const unsubscribe = async (req, res) => {
       .status(400)
       .type("html")
       .send(
-        renderUnsubscribePage({
+        renderMessagePage({
           title: "Invalid link",
           heading: "Invalid Unsubscribe Link",
           message: "This link is missing required information.",
@@ -147,7 +148,7 @@ const unsubscribe = async (req, res) => {
   try {
     const subscriber = await newsletterModel.unsubscribeByToken(token);
     return res.type("html").send(
-      renderUnsubscribePage({
+      renderMessagePage({
         title: "Unsubscribed",
         heading: "You're unsubscribed",
         message: `<strong>${subscriber.email}</strong> has been removed from our list. We're sorry to see you go!`,
@@ -158,9 +159,69 @@ const unsubscribe = async (req, res) => {
       .status(error.statusCode || 500)
       .type("html")
       .send(
-        renderUnsubscribePage({
+        renderMessagePage({
           title: "Unsubscribe failed",
           heading: "Could not unsubscribe",
+          message: error.message || "Something went wrong. Please try again later.",
+          accent: "#dc2626",
+        }),
+      );
+  }
+};
+
+const verify = async (req, res) => {
+  const token = String(req.params?.token || "").trim();
+  if (!token) {
+    return res
+      .status(400)
+      .type("html")
+      .send(
+        renderMessagePage({
+          title: "Invalid link",
+          heading: "Invalid Verification Link",
+          message: "This link is missing required information.",
+          accent: "#dc2626",
+        }),
+      );
+  }
+
+  try {
+    const subscriber = await newsletterModel.verifyByToken(token);
+
+    // Fire-and-forget welcome email and admin notification
+    (async () => {
+      try {
+        const settings = await getAdminSettings();
+        const code = settings.newsletterWelcomePromoCode || "";
+        const coupon = code ? await couponModel.findByCode(code) : null;
+        await sendNewsletterWelcomeEmail({
+          email: subscriber.email,
+          storeName: settings.storeName,
+          promoCode: code,
+          promoCoupon: coupon,
+          unsubscribeUrl: buildUnsubscribeUrl(subscriber.unsubscribe_token),
+        });
+        notifyAdminsOfSubscriber(subscriber);
+      } catch (error) {
+        console.warn("Welcome email failed for", subscriber.email, "-", error.message);
+      }
+    })();
+
+    return res.type("html").send(
+      renderMessagePage({
+        title: "Subscription confirmed",
+        heading: "You're all set! 🌿",
+        message: `<strong>${subscriber.email}</strong> has been successfully subscribed to our newsletter.`,
+      }),
+    );
+  } catch (error) {
+    return res
+      .status(error.statusCode || 500)
+      .type("html")
+      .send(
+        renderMessagePage({
+          title: "Verification failed",
+          heading: "Could not confirm subscription",
           message: error.message || "Something went wrong. Please try again later.",
           accent: "#dc2626",
         }),
@@ -275,6 +336,7 @@ const setWelcomePromo = async (req, res) => {
 module.exports = {
   subscribe,
   unsubscribe,
+  verify,
   listSubscribers,
   deleteSubscriber,
   broadcast,
