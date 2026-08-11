@@ -1,5 +1,7 @@
+const { isAdminUser } = require("./auth");
+
 const requirePermission = (permission) => (req, res, next) => {
-  if (String(req.user?.role || "").toLowerCase() !== "admin") {
+  if (!isAdminUser(req.user)) {
     return res.status(403).json({ error: "Admin access required" });
   }
 

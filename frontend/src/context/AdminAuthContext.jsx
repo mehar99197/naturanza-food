@@ -3,6 +3,7 @@ import {
   AUTH_SESSION_SYNC_EVENT,
   adminAPI,
   clearAdminAccessToken,
+  emitAuthSessionSync,
 } from "@/services/api";
 import { FEATURE_PERMISSIONS } from "@/config/adminPermissions";
 
@@ -156,6 +157,7 @@ export const AdminAuthProvider = ({ children }) => {
       if (response?.success && response?.token && response?.admin) {
         safeLocalStorage.setItem("adminData", JSON.stringify(response.admin));
         setAdmin(response.admin);
+        emitAuthSessionSync("admin-login");
         return { success: true };
       }
 
@@ -183,6 +185,7 @@ export const AdminAuthProvider = ({ children }) => {
       if (response?.success && response?.token && response?.admin) {
         safeLocalStorage.setItem("adminData", JSON.stringify(response.admin));
         setAdmin(response.admin);
+        emitAuthSessionSync("admin-login");
         return { success: true };
       }
 

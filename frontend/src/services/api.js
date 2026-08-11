@@ -914,7 +914,6 @@ export const adminAPI = {
     const response = await axiosInstance.post("/admin/login", credentials);
     if (response.data.token) {
       setAdminAccessToken(response.data.token);
-      emitAuthSessionSync("admin-login");
     }
     return response.data;
   },
@@ -926,7 +925,6 @@ export const adminAPI = {
     const response = await axiosInstance.post("/admin/staff-login", credentials);
     if (response.data.token) {
       setAdminAccessToken(response.data.token);
-      emitAuthSessionSync("admin-login");
     }
     return response.data;
   },

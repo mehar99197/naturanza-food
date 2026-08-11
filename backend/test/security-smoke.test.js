@@ -36,6 +36,15 @@ test('admin status validation rejects arbitrary values', () => {
   assert.equal(adminManagement.isValidAdminStatus(undefined), false);
 });
 
+test('admin authorization recognizes explicit admin roles and rejects customers', () => {
+  const { isAdminUser } = require('../middleware/auth');
+
+  assert.equal(isAdminUser({ role: 'customer', admin_role: null }), false);
+  assert.equal(isAdminUser({ role: 'admin', admin_role: 'staff_admin' }), true);
+  assert.equal(isAdminUser({ role: 'customer', admin_role: 'super_admin' }), true);
+  assert.equal(isAdminUser({ role: 'customer', admin_role: 'unknown' }), false);
+});
+
 test('variant JSON parsing safely falls back for malformed values', () => {
   const variants = require('../routes/variants');
 

@@ -3,6 +3,11 @@ const { touchSessionByToken } = require("../utils/sessionManager");
 const { verifyAccessToken } = require("../utils/jwtTokens");
 const { isAccessTokenBlacklisted } = require("../utils/tokenStore");
 
+const ADMIN_ROLES = new Set(["admin", "super_admin", "staff_admin", "moderator"]);
+const isAdminUser = (user) =>
+    ADMIN_ROLES.has(String(user?.role || "").trim().toLowerCase()) ||
+    ADMIN_ROLES.has(String(user?.admin_role || "").trim().toLowerCase());
+
 // Middleware to verify JWT token
 const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers["authorization"];
@@ -148,10 +153,10 @@ const optionalAuthenticateToken = async (req, res, next) => {
 
 // Middleware to check if user is admin
 const isAdmin = (req, res, next) => {
-    if (String(req.user?.role || "").trim().toLowerCase() !== "admin") {
+    if (!isAdminUser(req.user)) {
         return res.status(403).json({ error: "Admin access required" });
     }
     next();
 };
 
-module.exports = { authenticateToken, optionalAuthenticateToken, isAdmin };
+module.exports = { authenticateToken, optionalAuthenticateToken, isAdmin, isAdminUser };

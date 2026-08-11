@@ -102,10 +102,12 @@ setInterval(() => {
   }
 }, LOCATION_CACHE_TTL_MS);
 
-// Super admins and staff admins are both stored as role = 'admin' (admin_role
-// only distinguishes the two), so this single check covers every admin account.
+// Admin records normally use role = 'admin', but legacy rows may carry only an
+// admin_role value. Customer auth must treat either representation as admin.
+const ADMIN_ROLE_VALUES = new Set(["admin", "super_admin", "staff_admin", "moderator"]);
 const isAdminAccount = (user) =>
-  String(user?.role || "").trim().toLowerCase() === "admin";
+  ADMIN_ROLE_VALUES.has(String(user?.role || "").trim().toLowerCase()) ||
+  ADMIN_ROLE_VALUES.has(String(user?.admin_role || "").trim().toLowerCase());
 
 // Admin credentials are managed entirely through the admin portal. The customer
 // pages must never create, or hand out a reset link for, an admin account —
@@ -486,7 +488,7 @@ router.post("/register", async (req, res) => {
 
     const [existingUsers] = await db
       .promise()
-      .query("SELECT id, role, email_verified FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
+      .query("SELECT id, role, admin_role, email_verified FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
 
     if (existingUsers.length > 0) {
       if (isAdminAccount(existingUsers[0])) {
@@ -562,7 +564,7 @@ router.post("/verify-email", async (req, res) => {
       .query("UPDATE users SET email_verified = TRUE WHERE id = ?", [result.userId]);
 
     const [users] = await db.promise().query(
-      "SELECT id, name, email, phone, address, profile_image, role, is_active, signup_provider, password_set_by_user FROM users WHERE id = ? LIMIT 1",
+      "SELECT id, name, email, phone, address, profile_image, role, admin_role, is_active, signup_provider, password_set_by_user FROM users WHERE id = ? LIMIT 1",
       [result.userId],
     );
     const user = users[0];
@@ -611,7 +613,7 @@ router.post("/resend-verification", async (req, res) => {
 
     const normalizedEmail = String(parsedBody.data.email).trim().toLowerCase();
     const [users] = await db.promise().query(
-      "SELECT id, name, role, email_verified FROM users WHERE email = ? LIMIT 1",
+      "SELECT id, name, role, admin_role, email_verified FROM users WHERE email = ? LIMIT 1",
       [normalizedEmail],
     );
 
@@ -867,7 +869,7 @@ router.post("/google", async (req, res) => {
     const displayName = payload.name || email.split("@")[0] || "Google User";
 
     const [results] = await db.promise().query(
-      "SELECT id, name, email, phone, address, profile_image, role, is_active, signup_provider, password_set_by_user, email_verified FROM users WHERE email = ? LIMIT 1",
+      "SELECT id, name, email, phone, address, profile_image, role, admin_role, is_active, signup_provider, password_set_by_user, email_verified FROM users WHERE email = ? LIMIT 1",
       [email],
     );
 
@@ -1695,7 +1697,7 @@ router.post("/forgot-password", async (req, res) => {
     // Find user by email
     const [users] = await db
       .promise()
-      .query("SELECT id, name, email, role, is_active FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
+      .query("SELECT id, name, email, role, admin_role, is_active FROM users WHERE email = ? LIMIT 1", [normalizedEmail]);
 
     // If no user found, return success (security: don't reveal email existence)
     if (!users.length) {
@@ -1772,7 +1774,7 @@ router.post("/reset-password", async (req, res) => {
     await ensurePasswordHistoryTable(connection);
 
     const [userRows] = await connection.query(
-      "SELECT password, role FROM users WHERE id = ?",
+      "SELECT password, role, admin_role FROM users WHERE id = ?",
       [tokenValidation.userId]
     );
 

@@ -310,6 +310,10 @@ const ALLOWED_PAYMENT_METHOD_CODES = new Set([
   "jazzcash",
   "bank",
 ]);
+const ADMIN_ACCOUNT_ROLES = new Set(["admin", "super_admin", "staff_admin", "moderator"]);
+const isAdminRecord = (user) =>
+  ADMIN_ACCOUNT_ROLES.has(String(user?.role || "").trim().toLowerCase()) ||
+  ADMIN_ACCOUNT_ROLES.has(String(user?.admin_role || "").trim().toLowerCase());
 
 // Shared login handler — parameterized so the super-admin route and the
 // staff-admin route can enforce their own admin_role allowlist without
@@ -383,7 +387,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       });
     }
 
-    if (user.role !== "admin") {
+    if (!isAdminRecord(user)) {
       void recordAdminLoginHistorySafely({
         req,
         userId: user.id,
@@ -630,7 +634,7 @@ router.post("/forgot-password", restrictBody('email'), async (req, res) => {
     const admin = users[0];
     const isEligibleAdmin =
       admin &&
-      String(admin.role || "").toLowerCase() === "admin" &&
+      isAdminRecord(admin) &&
       admin.is_active;
 
     if (!isEligibleAdmin) {

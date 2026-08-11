@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { authenticateToken, isAdmin, isAdminUser } = require('../middleware/auth');
 const requirePermission = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
@@ -115,7 +115,7 @@ const parseNullableDate = (value) => {
 const createTrackingNumber = (orderId) => `TRK-${String(orderId).padStart(10, '0')}`;
 
 const requireOrdersPermissionForAdmins = (req, res, next) => {
-  if (String(req.user?.role || '').toLowerCase() !== 'admin') {
+  if (!isAdminUser(req.user)) {
     return next();
   }
   return requirePermission('manage_orders')(req, res, next);
