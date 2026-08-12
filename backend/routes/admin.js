@@ -171,46 +171,73 @@ const lookupLocationByIp = async (ipAddress) => {
     return cachedLocation;
   }
 
-  try {
+  const fetchWithTimeout = async (url) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), IP_LOOKUP_TIMEOUT_MS);
-
-    let response;
     try {
-      response = await fetch(
-        `https://ipapi.co/${encodeURIComponent(ipAddress)}/json/`,
-        {
-          signal: controller.signal,
-        },
-      );
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
     } finally {
       clearTimeout(timeout);
     }
+  };
 
-    if (!response.ok) {
-      return "Unknown";
-    }
-
-    const data = await response.json();
-    const city = String(data?.city || "").trim();
-    const region = String(data?.region || "").trim();
-    const country = String(data?.country_name || data?.country || "").trim();
-    const location = [city, region, country].filter(Boolean).join(", ") || "Unknown";
-
-    if (location !== "Unknown") {
+  // ipapi.co is useful but can return rate-limit/timeout responses. Keep a
+  // second provider so one external outage does not make every login say
+  // Unknown. Neither provider receives credentials or account data.
+  const ipApiData = await fetchWithTimeout(
+    `https://ip-api.com/json/${encodeURIComponent(ipAddress)}?fields=status,city,regionName,country`,
+  );
+  if (ipApiData?.status === "success") {
+    const location = [ipApiData.city, ipApiData.regionName, ipApiData.country]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(", ");
+    if (location) {
       setCachedLocationForIp(ipAddress, location);
+      return location;
     }
-
-    return location;
-  } catch (error) {
-    return "Unknown";
   }
+
+  const ipApiCoData = await fetchWithTimeout(
+    `https://ipapi.co/${encodeURIComponent(ipAddress)}/json/`,
+  );
+  const location = [
+    ipApiCoData?.city,
+    ipApiCoData?.region,
+    ipApiCoData?.regionName,
+    ipApiCoData?.country_name || ipApiCoData?.country,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join(", ");
+
+  if (location) {
+    setCachedLocationForIp(ipAddress, location);
+    return location;
+  }
+
+  // Do not cache Unknown: a temporary provider failure should be recoverable
+  // for the next login/overview request.
+  return "Unknown";
 };
 
 const resolveRequestLocation = async (req, ipAddress = null) => {
-  const city = String(req.headers["x-city"] || req.headers["cf-ipcity"] || "").trim();
+  const city = String(
+    req.headers["x-city"] ||
+      req.headers["cf-ipcity"] ||
+      req.headers["x-vercel-ip-city"] ||
+      "",
+  ).trim();
   const region = String(
-    req.headers["x-region"] || req.headers["cf-region"] || "",
+    req.headers["x-region"] ||
+      req.headers["cf-region"] ||
+      req.headers["x-vercel-ip-country-region"] ||
+      "",
   ).trim();
   const country = String(
     req.headers["x-country"] ||
