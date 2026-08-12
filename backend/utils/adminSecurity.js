@@ -196,6 +196,29 @@ const getSecurityOverview = async ({ userId }) => {
     [userId, user.email],
   );
 
+  // Older records were written as Unknown when the geo provider was down or
+  // rate-limited. Resolve those lazily from their stored IP so the Security
+  // Center repairs existing history without changing the login flow.
+  const unresolved = loginAttempts.filter(
+    (entry) =>
+      entry.ip_address &&
+      (!entry.location_label || String(entry.location_label).trim().toLowerCase() === "unknown"),
+  );
+  if (unresolved.length) {
+    const { resolveAdminIpLocation } = require("./adminLocation");
+    await Promise.all(
+      unresolved.map(async (entry) => {
+        const location = await resolveAdminIpLocation(entry.ip_address);
+        if (!location || location === "Unknown") return;
+        entry.location_label = location;
+        await database.query(
+          "UPDATE user_login_history SET location_label = ? WHERE id = ? AND (location_label IS NULL OR location_label = '' OR location_label = 'Unknown')",
+          [location, entry.id],
+        );
+      }),
+    );
+  }
+
   const [permissionChanges] = await database.query(
     `SELECT id, admin_id, action, ip_address, created_at
      FROM admin_audit_logs

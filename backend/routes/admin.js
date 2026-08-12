@@ -202,6 +202,20 @@ const lookupLocationByIp = async (ipAddress) => {
     }
   }
 
+  const ipWhoData = await fetchWithTimeout(
+    `https://ipwho.is/${encodeURIComponent(ipAddress)}`,
+  );
+  if (ipWhoData?.success === true) {
+    const location = [ipWhoData.city, ipWhoData.region, ipWhoData.country]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(", ");
+    if (location) {
+      setCachedLocationForIp(ipAddress, location);
+      return location;
+    }
+  }
+
   const ipApiCoData = await fetchWithTimeout(
     `https://ipapi.co/${encodeURIComponent(ipAddress)}/json/`,
   );
