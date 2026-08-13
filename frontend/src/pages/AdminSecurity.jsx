@@ -699,10 +699,10 @@ export function AdminSecurity() {
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
             <div className="flex items-center gap-2">
               <Globe className="h-5 w-5 text-emerald-600" />
-              <h2 className="text-base font-bold text-slate-900 sm:text-lg">Admin Panel IP Allowlist</h2>
+              <h2 className="text-base font-bold text-slate-900 sm:text-lg">Super Admin IP Allowlist</h2>
             </div>
             <p className="mt-1 text-xs text-slate-500 sm:text-sm">
-              When at least one entry exists, the entire admin panel — for every admin and staff member — is only accessible from these IPs/CIDR ranges. Anyone signing in from an unlisted network is shown a warning and cannot view any admin page. Only super admins manage this list.
+              When at least one entry exists, super admin sign-in is only possible from these IPs/CIDR ranges. Staff logins are unaffected.
               {allowlist?.currentIp ? (
                 <>
                   {" "}Your current IP: <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold">{allowlist.currentIp}</code>
@@ -752,7 +752,7 @@ export function AdminSecurity() {
             <div className="mt-4 space-y-2">
               {(allowlist?.items || []).length === 0 ? (
                 <p className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-xs text-slate-500 sm:text-sm">
-                  Allowlist is empty — the admin panel is currently accessible from any network. Add your own IP first; the server rejects a first entry that does not cover your current IP.
+                  Allowlist is empty — super admin sign-in is currently allowed from any network. Add your own IP first; the server rejects a first entry that does not cover your current IP.
                 </p>
               ) : (
                 allowlist.items.map((entry) => (

@@ -876,15 +876,6 @@ export const adminSecurityAPI = {
     );
     return response.data;
   },
-
-  // Reports whether the requester's current IP is permitted by the admin-panel
-  // allowlist. AdminProtectedRoute uses this to gate the whole admin shell and
-  // show a "blocked IP" warning instead of the admin dashboard for unlisted
-  // networks. Available to every admin (super + staff).
-  getIpAccess: async () => {
-    const response = await axiosInstance.get("/admin/security/ip-access");
-    return response.data;
-  },
 };
 
 export const settingsAPI = {

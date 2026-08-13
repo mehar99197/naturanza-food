@@ -524,7 +524,6 @@ const settingsRoutes = require("./routes/settings");
 const aboutRoutes = require("./routes/about");
 const adminRoutes = require("./routes/admin");
 const adminSecurityRoutes = require("./routes/adminSecurity");
-const { enforceAdminIpAllowlist } = require("./middleware/adminIpAllowlist");
 const adminManagementRoutes = require("./routes/adminManagement");
 const adminPaymentsRoutes = require("./routes/adminPayments");
 const paymentRoutes = require("./routes/payments");
@@ -602,14 +601,6 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/about", aboutRoutes);
 app.use("/api/payments", paymentRoutes);
-// Admin-panel IP allowlist gate. Runs before every /api/admin* router so that,
-// once a super admin populates the allowlist, only allowlisted networks can
-// reach any admin API. Auth-only endpoints (login/verify/logout/password
-// resets) and the gate-check endpoint (/security/ip-access) are exempt so a
-// blocked admin can still log in and then see the "IP not allowed" warning page.
-app.use("/api/admin", enforceAdminIpAllowlist);
-app.use("/api/admin-management", enforceAdminIpAllowlist);
-
 // Mounted before /api/admin so the security router always wins its own prefix.
 app.use("/api/admin/security", adminSecurityRoutes);
 app.use("/api/admin", adminRoutes);
