@@ -44,6 +44,28 @@ const requireAdminAccount = (req, res, next) => {
   return next();
 };
 
+// GET /api/admin/security/ip-access — reports whether the requester's current IP
+// is permitted by the admin-panel allowlist. Available to every admin (not just
+// super admins) so the frontend can decide between rendering the admin shell or
+// a "blocked IP" warning. Registered BEFORE the router.use() below so it stays
+// reachable even by blocked super admins — the upstream global allowlist gate is
+// told to exempt this path, and this route deliberately does NOT chain the
+// super-admin-only enforceSuperAdminIpAllowlist.
+router.get(
+  "/ip-access",
+  authenticateToken,
+  isAdmin,
+  requireAdminAccount,
+  asyncHandler(async (req, res) => {
+    const entries = await listAllowlistEntries();
+    const currentIp = getTrustedClientIp(req) || getClientIp(req) || null;
+    const enforced = entries.length > 0;
+    const allowed = !enforced ||
+      (currentIp ? entries.some((entry) => ipMatchesCidr(currentIp, entry.cidr)) : false);
+    res.json({ allowed, enforced, currentIp });
+  }),
+);
+
 // Defence in depth: isAdmin also recognizes legacy admin_role-only rows for
 // compatibility, but Security Center must only be reachable by role='admin'.
 router.use(authenticateToken, isAdmin, requireAdminAccount, enforceSuperAdminIpAllowlist);
