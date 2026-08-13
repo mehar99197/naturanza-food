@@ -44,18 +44,15 @@ const requireAdminAccount = (req, res, next) => {
   return next();
 };
 
-// GET /api/admin/security/ip-access — reports whether the requester's current IP
-// is permitted by the admin-panel allowlist. Available to every admin (not just
-// super admins) so the frontend can decide between rendering the admin shell or
-// a "blocked IP" warning. Registered BEFORE the router.use() below so it stays
-// reachable even by blocked super admins — the upstream global allowlist gate is
-// told to exempt this path, and this route deliberately does NOT chain the
-// super-admin-only enforceSuperAdminIpAllowlist.
+// GET /api/admin/security/ip-access — PUBLIC (no auth). Reports whether the
+// requester's current IP is permitted by the admin-panel allowlist so the
+// frontend can gate the ENTIRE /admin/* URL tree (including the login pages)
+// and show an "Unauthorized" warning at URL entry before any admin page renders.
+// Registered BEFORE the router.use() below so it is reachable by anyone; the
+// global enforceAdminIpAllowlist gate is told to exempt this relative path
+// (/security/ip-access) so a blocked IP can still learn it is blocked.
 router.get(
   "/ip-access",
-  authenticateToken,
-  isAdmin,
-  requireAdminAccount,
   asyncHandler(async (req, res) => {
     const entries = await listAllowlistEntries();
     const currentIp = getTrustedClientIp(req) || getClientIp(req) || null;

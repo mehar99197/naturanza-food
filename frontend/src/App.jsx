@@ -33,6 +33,7 @@ import { DiscountPopup } from "@/components/DiscountPopup";
 import ProfileLayout from "@/components/ProfileLayout";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminProtectedRoute from "@/components/AdminProtectedRoute";
+import AdminIpGate from "@/components/AdminIpGate";
 import { AnalyticsTracker } from "./components/Analytics";
 // Home stays eager — it's the landing page, so we want its LCP as fast as
 // possible with no extra chunk round-trip. Every other public page is lazy
@@ -399,56 +400,47 @@ function AppContent() {
               }
             />
 
-            {/* Admin Routes */}
-            <Route
-              path="/admin/login"
-              element={<AdminLogin />}
-            />
-            <Route
-              path="/admin/staff-login"
-              element={<AdminStaffLogin />}
-            />
-            <Route
-              path="/admin/forgot-password"
-              element={<AdminForgotPassword />}
-            />
-            <Route
-              path="/admin/reset-password"
-              element={<AdminResetPassword />}
-            />
-            <Route
-              path="/admin"
-              element={
-                <AdminProtectedRoute>
-                  <AdminRouteShell />
-                </AdminProtectedRoute>
-              }
-            >
-              <Route index element={<Navigate to="/admin/dashboard" replace />} />
-              <Route path="dashboard" element={<AdminDashboard />} />
-              <Route path="notifications" element={<AdminNotifications />} />
-              <Route path="analytics" element={<RequirePermission feature="analytics"><AdminAnalytics /></RequirePermission>} />
-              <Route path="products" element={<RequirePermission feature="products"><AdminProducts /></RequirePermission>} />
-              <Route path="orders" element={<RequirePermission feature="orders"><AdminOrders /></RequirePermission>} />
-              <Route path="customers" element={<RequirePermission feature="customers"><AdminCustomers /></RequirePermission>} />
-              <Route path="payments" element={<RequirePermission feature="payments"><AdminPayments /></RequirePermission>} />
-              <Route path="shipping" element={<RequirePermission feature="shipping"><AdminShipping /></RequirePermission>} />
-              <Route path="shipping-cities" element={<RequirePermission feature="shipping-cities"><AdminShippingCities /></RequirePermission>} />
-              <Route path="reviews" element={<RequirePermission feature="reviews"><AdminReviews /></RequirePermission>} />
-              <Route path="messages" element={<RequirePermission feature="messages"><AdminMessages /></RequirePermission>} />
-              <Route path="subscribers" element={<RequirePermission feature="subscribers"><AdminSubscribers /></RequirePermission>} />
-              <Route path="reports" element={<RequirePermission feature="reports"><AdminReports /></RequirePermission>} />
-              <Route path="admins" element={<RequireSuperAdmin><AdminAdmins /></RequireSuperAdmin>} />
-              <Route path="returns" element={<RequirePermission feature="returns"><AdminReturns /></RequirePermission>} />
-              <Route path="operations" element={<RequireSuperAdmin><AdminOperations /></RequireSuperAdmin>} />
-              <Route path="coupons" element={<RequirePermission feature="coupons"><AdminCoupons /></RequirePermission>} />
-              <Route path="announcements" element={<RequirePermission feature="announcements"><AdminAnnouncements /></RequirePermission>} />
-              <Route path="blog" element={<RequirePermission feature="blog"><AdminBlog /></RequirePermission>} />
-              <Route path="team" element={<RequirePermission feature="team"><AdminTeam /></RequirePermission>} />
-              <Route path="about" element={<RequireSuperAdmin><AdminAbout /></RequireSuperAdmin>} />
-              <Route path="categories" element={<RequirePermission feature="categories"><AdminCategories /></RequirePermission>} />
-              <Route path="settings" element={<RequireSuperAdmin><AdminSettings /></RequireSuperAdmin>} />
-              <Route path="security" element={<AdminSecurity />} />
+            {/* Admin Routes — everything under /admin (login pages included) is
+                wrapped in AdminIpGate so an unlisted IP sees an "Unauthorized"
+                warning immediately at URL entry, before any admin page renders. */}
+            <Route path="/admin" element={<AdminIpGate />}>
+              <Route path="login" element={<AdminLogin />} />
+              <Route path="staff-login" element={<AdminStaffLogin />} />
+              <Route path="forgot-password" element={<AdminForgotPassword />} />
+              <Route path="reset-password" element={<AdminResetPassword />} />
+              <Route
+                element={
+                  <AdminProtectedRoute>
+                    <AdminRouteShell />
+                  </AdminProtectedRoute>
+                }
+              >
+                <Route index element={<Navigate to="/admin/dashboard" replace />} />
+                <Route path="dashboard" element={<AdminDashboard />} />
+                <Route path="notifications" element={<AdminNotifications />} />
+                <Route path="analytics" element={<RequirePermission feature="analytics"><AdminAnalytics /></RequirePermission>} />
+                <Route path="products" element={<RequirePermission feature="products"><AdminProducts /></RequirePermission>} />
+                <Route path="orders" element={<RequirePermission feature="orders"><AdminOrders /></RequirePermission>} />
+                <Route path="customers" element={<RequirePermission feature="customers"><AdminCustomers /></RequirePermission>} />
+                <Route path="payments" element={<RequirePermission feature="payments"><AdminPayments /></RequirePermission>} />
+                <Route path="shipping" element={<RequirePermission feature="shipping"><AdminShipping /></RequirePermission>} />
+                <Route path="shipping-cities" element={<RequirePermission feature="shipping-cities"><AdminShippingCities /></RequirePermission>} />
+                <Route path="reviews" element={<RequirePermission feature="reviews"><AdminReviews /></RequirePermission>} />
+                <Route path="messages" element={<RequirePermission feature="messages"><AdminMessages /></RequirePermission>} />
+                <Route path="subscribers" element={<RequirePermission feature="subscribers"><AdminSubscribers /></RequirePermission>} />
+                <Route path="reports" element={<RequirePermission feature="reports"><AdminReports /></RequirePermission>} />
+                <Route path="admins" element={<RequireSuperAdmin><AdminAdmins /></RequireSuperAdmin>} />
+                <Route path="returns" element={<RequirePermission feature="returns"><AdminReturns /></RequirePermission>} />
+                <Route path="operations" element={<RequireSuperAdmin><AdminOperations /></RequireSuperAdmin>} />
+                <Route path="coupons" element={<RequirePermission feature="coupons"><AdminCoupons /></RequirePermission>} />
+                <Route path="announcements" element={<RequirePermission feature="announcements"><AdminAnnouncements /></RequirePermission>} />
+                <Route path="blog" element={<RequirePermission feature="blog"><AdminBlog /></RequirePermission>} />
+                <Route path="team" element={<RequirePermission feature="team"><AdminTeam /></RequirePermission>} />
+                <Route path="about" element={<RequireSuperAdmin><AdminAbout /></RequireSuperAdmin>} />
+                <Route path="categories" element={<RequirePermission feature="categories"><AdminCategories /></RequirePermission>} />
+                <Route path="settings" element={<RequireSuperAdmin><AdminSettings /></RequireSuperAdmin>} />
+                <Route path="security" element={<AdminSecurity />} />
+              </Route>
             </Route>
 
             {/* 404 Catch-All Route */}
