@@ -31,6 +31,9 @@
     "start": "node index.js",
     "predev": "lsof -ti:5000 | xargs kill -9 2>/dev/null || echo Port 5000 is already free",
     "dev": "nodemon index.js",
+    "migrate": "node run-migration.js",
+    "migrate:status": "node run-migration.js --status",
+    "seed:blog": "node seed-blog-posts.js",
     "test": "node --test test/**/*.test.js"
   },
   "keywords": [

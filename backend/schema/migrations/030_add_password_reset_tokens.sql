@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
     
     -- Foreign key to users table
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Add comment to table
 ALTER TABLE password_reset_tokens COMMENT = 'Stores hashed password reset tokens with expiry tracking';

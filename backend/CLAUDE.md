@@ -18,8 +18,14 @@ npm run dev      # nodemon; predev kills anything on port 5000
 npm start        # production (node index.js)
 ```
 
-Migrations are SQL files in `schema/migrations/` applied manually (the runner scripts are
-per-migration, not auto-discovering) — see the `/creating-db-migrations` skill.
+```bash
+npm run migrate         # apply every pending schema/migrations/*.sql
+npm run migrate:status  # what is applied vs. pending
+```
+
+Migrations are SQL files in `schema/migrations/`, applied by `run-migration.js`, which discovers them
+all and records each in the `schema_migrations` table so none runs twice — see the
+`/creating-db-migrations` skill.
 
 - Port **5000** (env `PORT`). Health check: `GET /api/health`. API base: `/api/*`.
 - Config comes from `.env` (template in `.env.example`): DB_*, JWT_SECRET, CORS_ALLOWED_ORIGINS,

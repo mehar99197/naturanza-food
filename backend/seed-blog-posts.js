@@ -1,29 +1,12 @@
 /**
- * Creates the blog_posts table and seeds the initial posts (idempotent).
- * Run once:  node run-blog-migration.js
+ * Seeds the initial blog posts (idempotent — does nothing if blog_posts has rows).
+ *
+ * This is a seeder, not a migration. The blog_posts table is created by
+ * schema/migrations/017_add_blog_posts.sql, so run `npm run migrate` first.
+ *
+ * Run once:  node seed-blog-posts.js
  */
 const { db } = require("./config/db");
-
-const CREATE_TABLE = `
-CREATE TABLE IF NOT EXISTS blog_posts (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  slug VARCHAR(200) NOT NULL UNIQUE,
-  title VARCHAR(200) NOT NULL,
-  excerpt VARCHAR(500),
-  content LONGTEXT NOT NULL,
-  author VARCHAR(120) DEFAULT 'Naturanza Food Team',
-  category VARCHAR(80),
-  image_url VARCHAR(255),
-  read_time VARCHAR(40),
-  keywords VARCHAR(500),
-  featured BOOLEAN NOT NULL DEFAULT FALSE,
-  is_published BOOLEAN NOT NULL DEFAULT TRUE,
-  published_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_blog_published (is_published, published_at),
-  INDEX idx_blog_category (category)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`;
 
 const SEED_POSTS = [
   {
@@ -192,8 +175,11 @@ Honey is still natural sugar, so it's about *better*, not *unlimited*. Used in p
 (async () => {
   const pool = db.promise();
   try {
-    console.log("Creating blog_posts table...");
-    await pool.query(CREATE_TABLE);
+    const [tables] = await pool.query("SHOW TABLES LIKE 'blog_posts'");
+    if (!tables.length) {
+      console.error("blog_posts does not exist — run `npm run migrate` first.");
+      process.exit(1);
+    }
 
     const [[{ count }]] = await pool.query("SELECT COUNT(*) AS count FROM blog_posts");
     if (count > 0) {
@@ -224,7 +210,7 @@ Honey is still natural sugar, so it's about *better*, not *unlimited*. Used in p
     console.log(`Done. blog_posts now has ${total} posts.`);
     process.exit(0);
   } catch (error) {
-    console.error("BLOG MIGRATION ERROR:", error.message);
+    console.error("BLOG SEED ERROR:", error.message);
     process.exit(1);
   }
 })();

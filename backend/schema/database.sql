@@ -2,7 +2,7 @@
 -- Create database
 CREATE DATABASE IF NOT EXISTS naturanza_food
     CHARACTER SET utf8mb4
-    COLLATE utf8mb4_0900_ai_ci;
+    COLLATE utf8mb4_unicode_ci;
 USE naturanza_food;
 -- Users table
 CREATE TABLE IF NOT EXISTS users (

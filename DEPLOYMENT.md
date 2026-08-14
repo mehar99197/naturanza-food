@@ -37,8 +37,19 @@ In **hPanel → Databases → MySQL Databases**:
 Open **phpMyAdmin** for the new database and import `backend/schema/database.sql`.
 
 - The server also runs `ensureProductionSchema()` on boot, which fills in compatibility columns.
-- If you need later schema changes, apply the files in `backend/schema/migrations/*.sql` in order
-  (lowest number first) via phpMyAdmin.
+- For later schema changes, run `npm run migrate` from `backend/` wherever you have shell access to
+  the database — it applies every pending `schema/migrations/*.sql` and records them in
+  `schema_migrations` so nothing runs twice. Check `npm run migrate:status` first.
+- **First run against a database that was already migrated by hand:** `schema_migrations` does not
+  exist yet, so every file shows as pending even though most are applied. Baseline them, then run the
+  one migration that genuinely has not executed:
+  ```bash
+  node run-migration.js --status             # confirm 000…030 really are in the schema
+  node run-migration.js --baseline           # record them without re-running
+  node run-migration.js --only 031 --force   # 031 normalizes collation — this one must run
+  ```
+- Hostinger's SSH is often disabled on this plan. Without a shell, import the pending
+  `backend/schema/migrations/*.sql` files through phpMyAdmin in numeric order instead.
 
 ---
 
