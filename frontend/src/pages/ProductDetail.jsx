@@ -105,8 +105,7 @@ const toArray = (value) => {
             .map((item) => String(item || '').trim())
             .filter(Boolean);
         }
-      } catch (error) {
-      }
+      } catch { /* ignored: not fatal to this flow */ }
     }
 
     return normalized
@@ -515,8 +514,7 @@ export function ProductDetail() {
           url: shareUrl,
         });
         return;
-      } catch (error) {
-      }
+      } catch { /* ignored: not fatal to this flow */ }
     }
 
     try {
@@ -524,7 +522,7 @@ export function ProductDetail() {
         await navigator.clipboard.writeText(shareUrl);
         showFeedback('Link copied to clipboard!');
       }
-    } catch (error) {
+    } catch {
       showFeedback('Unable to share link right now.');
     }
   };

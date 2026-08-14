@@ -2,6 +2,7 @@ const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { optimizeProductImage } = require('../utils/imageOptimizer');
 const { sanitizeObject } = require('./security');
 
@@ -25,16 +26,37 @@ const UPLOADS_IMAGES_DIR =
         ? hostingerPersistentDir
         : path.join(__dirname, '..', '..', '..', 'persistent-uploads', 'images'));
 
+// Upload folders that may be served as public static assets, and those that must
+// never be. Payment screenshots carry customer bank details, phone numbers and
+// transaction IDs; they are reachable only through the authenticated admin
+// endpoint in routes/adminPayments.js. index.js mounts the public folders one by
+// one from these lists so a private folder never sits inside a static root.
+const PUBLIC_UPLOAD_FOLDERS = ['products', 'categories', 'avatars', 'blog'];
+const PRIVATE_UPLOAD_FOLDERS = new Set(['payment-verifications']);
+
 // Configure multer for memory storage (we'll process before saving)
 const storage = multer.memoryStorage();
 
-// File filter - validate extension. Content verified later by sharp in compressImage().
-const fileFilter = (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|webp/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
+// File filter - validate extension + declared type. Content is verified later by
+// sharp in compressImage(), which re-encodes everything to WebP.
+//
+// Exact matches, not a bare /jpeg|jpg|png|gif|webp/ test: that pattern was
+// unanchored, so it accepted any type merely CONTAINING one of those words
+// (e.g. "application/x-jpeg-thing") and any filename containing "png".
+const ALLOWED_IMAGE_EXTENSIONS = new Set(['.jpeg', '.jpg', '.png', '.gif', '.webp']);
+const ALLOWED_IMAGE_MIMETYPES = new Set([
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+]);
 
-    if (extname && mimetype) {
+const fileFilter = (req, file, cb) => {
+    const extension = path.extname(String(file.originalname || '')).toLowerCase();
+    const mimetype = String(file.mimetype || '').trim().toLowerCase().split(';')[0];
+
+    if (ALLOWED_IMAGE_EXTENSIONS.has(extension) && ALLOWED_IMAGE_MIMETYPES.has(mimetype)) {
         cb(null, true);
     } else {
         cb(new Error('Only image files (jpeg, jpg, png, gif, webp) are allowed!'), false);
@@ -122,10 +144,11 @@ const uploadAndCompress = (fieldName, folder = 'products', options = {}) => {
                 const uploadDir = path.join(UPLOADS_IMAGES_DIR, folder);
                 ensureDir(uploadDir);
 
-                // Generate unique filename (use WebP extension)
-                const timestamp = Date.now();
-                const randomString = Math.random().toString(36).substring(2, 8);
-                const filename = `${timestamp}-${randomString}.webp`;
+                // crypto.randomUUID, not Date.now + 6 chars of Math.random:
+                // two uploads landing in the same millisecond had a real chance
+                // of colliding, and the loser silently overwrote another
+                // customer's file — including payment screenshots.
+                const filename = `${crypto.randomUUID()}.webp`;
                 const filepath = path.join(uploadDir, filename);
 
                 // Compress the image (default to WebP)
@@ -134,8 +157,9 @@ const uploadAndCompress = (fieldName, folder = 'products', options = {}) => {
                     format: 'webp'
                 });
 
-                // Save compressed image
-                fs.writeFileSync(filepath, compressedBuffer);
+                // Async write: writeFileSync blocked the event loop for the whole
+                // write, stalling every other in-flight request behind an upload.
+                await fs.promises.writeFile(filepath, compressedBuffer);
 
                 // Add file info to request
                 req.file.compressedPath = filepath;
@@ -194,4 +218,6 @@ module.exports = {
     uploadCategoryImage,
     uploadBlogImage,
     UPLOADS_IMAGES_DIR,
+    PUBLIC_UPLOAD_FOLDERS,
+    PRIVATE_UPLOAD_FOLDERS,
 };

@@ -90,7 +90,7 @@ export function sanitizeFormData(formData) {
   const sanitized = {};
   
   for (const key in formData) {
-    if (formData.hasOwnProperty(key)) {
+    if (Object.prototype.hasOwnProperty.call(formData, key)) {
       const value = formData[key];
       
       if (typeof value === 'string') {

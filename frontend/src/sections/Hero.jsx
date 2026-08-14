@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ShoppingBag, Sparkles, Star, Leaf, Package, Tag } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { fadeIn, slideUp, staggerContainer, buttonTap } from '@/lib/animations';
+import { fadeIn, slideUp, staggerContainer } from '@/lib/animations';
 import { productAPI } from '@/services/api';
 import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 import { formatPrice, getProductPricing } from '@/lib/utils';

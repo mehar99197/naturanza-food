@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
     two_fa_recovery_codes JSON,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Categories table
 CREATE TABLE IF NOT EXISTS categories (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS categories (
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Products table
 CREATE TABLE IF NOT EXISTS products (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS products (
     INDEX idx_products_featured_active (is_featured, is_active),
     FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE
     SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Cart table
 CREATE TABLE IF NOT EXISTS cart (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS cart (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     UNIQUE KEY unique_user_product (user_id, product_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Wishlist table
 CREATE TABLE IF NOT EXISTS wishlist (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS wishlist (
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     UNIQUE KEY unique_user_product (user_id, product_id),
     INDEX idx_wishlist_user_time (user_id, created_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Orders table
 CREATE TABLE IF NOT EXISTS orders (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS orders (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_orders_user_status_created (user_id, status, created_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Order Items table
 CREATE TABLE IF NOT EXISTS order_items (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS order_items (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Stock reservations (for offline payment verification)
 CREATE TABLE IF NOT EXISTS stock_reservations (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS stock_reservations (
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     INDEX idx_resv_state_expires (state, expires_at),
     INDEX idx_resv_order (order_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Contact/Inquiries table
 CREATE TABLE IF NOT EXISTS contacts (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS contacts (
     message TEXT NOT NULL,
     status ENUM('new', 'read', 'responded') DEFAULT 'new',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Reviews table (optional feature)
 CREATE TABLE IF NOT EXISTS reviews (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE KEY uq_reviews_user_product (user_id, product_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Coupons table
 CREATE TABLE IF NOT EXISTS coupons (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -196,12 +196,35 @@ CREATE TABLE IF NOT EXISTS coupons (
     min_order_amount DECIMAL(10, 2) DEFAULT 0,
     max_discount DECIMAL(10, 2),
     usage_limit INT,
+    -- NULL means unlimited per customer. The one-per-customer default for new
+    -- coupons is applied in routes/coupons.js, not here — a column default would
+    -- also rewrite every existing coupon when the migration adds this column.
+    per_user_limit INT NULL DEFAULT NULL,
     used_count INT DEFAULT 0,
     expiry_date DATETIME,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- One row per (coupon, order). The UNIQUE key makes double-counting an order
+-- impossible and turns "how many times has THIS customer used this code"
+-- into an indexed lookup — coupons.used_count alone never recorded who.
+CREATE TABLE IF NOT EXISTS coupon_redemptions (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    coupon_id INT NOT NULL,
+    user_id INT NOT NULL,
+    order_id INT NOT NULL,
+    code VARCHAR(50) NOT NULL,
+    discount_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_coupon_redemption (coupon_id, user_id, order_id),
+    INDEX idx_coupon_redemptions_user (coupon_id, user_id),
+    INDEX idx_coupon_redemptions_order (order_id),
+    FOREIGN KEY (coupon_id) REFERENCES coupons(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Note: Seed data (default admin, categories, products) is maintained in
 -- backend/seed-test-data.sql and loaded by setup-database.js.
 -- Product Variants Tables
@@ -222,7 +245,7 @@ CREATE TABLE IF NOT EXISTS product_variants (
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     INDEX idx_product_id (product_id),
     INDEX idx_sku (sku)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Variant Attributes table (defines available attributes for products)
 CREATE TABLE IF NOT EXISTS variant_attributes (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -234,7 +257,7 @@ CREATE TABLE IF NOT EXISTS variant_attributes (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     INDEX idx_product_id (product_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Shipping Cities table
 CREATE TABLE IF NOT EXISTS city_delivery_fees (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -243,7 +266,7 @@ CREATE TABLE IF NOT EXISTS city_delivery_fees (
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Insert default cities
 INSERT IGNORE INTO city_delivery_fees (city_name, fee, is_active) VALUES
@@ -279,7 +302,7 @@ CREATE TABLE IF NOT EXISTS user_addresses (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_addresses_user_default (user_id, is_default)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Order lifecycle timeline
 CREATE TABLE IF NOT EXISTS order_status_history (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -293,7 +316,7 @@ CREATE TABLE IF NOT EXISTS order_status_history (
     FOREIGN KEY (changed_by_user_id) REFERENCES users(id) ON DELETE
     SET NULL,
         INDEX idx_order_status_history_order (order_id, created_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Shipment tracking
 CREATE TABLE IF NOT EXISTS shipments (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -320,7 +343,7 @@ CREATE TABLE IF NOT EXISTS shipments (
     UNIQUE KEY unique_tracking_number (tracking_number),
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     INDEX idx_shipments_status (shipment_status)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Payment ledger
 CREATE TABLE IF NOT EXISTS payment_transactions (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -350,7 +373,7 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
         INDEX idx_payment_transactions_order (order_id, created_at),
         INDEX idx_payment_transactions_user (user_id, created_at),
         INDEX idx_payment_transactions_status (status)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Inventory movement audit
 CREATE TABLE IF NOT EXISTS inventory_movements (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -378,7 +401,7 @@ CREATE TABLE IF NOT EXISTS inventory_movements (
     SET NULL,
         INDEX idx_inventory_movements_product (product_id, created_at),
         INDEX idx_inventory_movements_order (order_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Product gallery images
 CREATE TABLE IF NOT EXISTS product_images (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -391,7 +414,7 @@ CREATE TABLE IF NOT EXISTS product_images (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     INDEX idx_product_images_product (product_id, sort_order)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Returns workflow
 CREATE TABLE IF NOT EXISTS returns_requests (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -417,7 +440,7 @@ CREATE TABLE IF NOT EXISTS returns_requests (
     SET NULL,
         INDEX idx_returns_requests_order (order_id),
         INDEX idx_returns_requests_user_status (user_id, status)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Refund transactions
 CREATE TABLE IF NOT EXISTS refund_transactions (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -439,7 +462,7 @@ CREATE TABLE IF NOT EXISTS refund_transactions (
     SET NULL,
         INDEX idx_refunds_order (order_id, created_at),
         INDEX idx_refunds_return (return_request_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Login session tracking
 CREATE TABLE IF NOT EXISTS user_sessions (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -458,7 +481,7 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_sessions_user_active (user_id, is_active),
     INDEX idx_user_sessions_last_seen (last_seen_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Admin audit trail and super-admin network restriction
 CREATE TABLE IF NOT EXISTS admin_audit_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -473,7 +496,7 @@ CREATE TABLE IF NOT EXISTS admin_audit_logs (
     FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_admin_audit_logs_admin (admin_id, created_at),
     INDEX idx_admin_audit_logs_created (created_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS admin_security_ip_allowlist (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -484,7 +507,7 @@ CREATE TABLE IF NOT EXISTS admin_security_ip_allowlist (
     UNIQUE KEY uq_admin_security_ip_allowlist_cidr (cidr),
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_admin_security_ip_allowlist_created (created_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Refresh token storage with rotation support
 CREATE TABLE IF NOT EXISTS refresh_tokens (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -506,7 +529,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     INDEX idx_refresh_tokens_session (session_id, revoked_at),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (session_id) REFERENCES user_sessions(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Access token blacklist for explicit revocation
 CREATE TABLE IF NOT EXISTS token_blacklist (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -519,7 +542,7 @@ CREATE TABLE IF NOT EXISTS token_blacklist (
     UNIQUE KEY unique_blacklisted_jti (jti),
     INDEX idx_token_blacklist_expires (expires_at),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Login history tracking
 CREATE TABLE IF NOT EXISTS user_login_history (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -537,7 +560,7 @@ CREATE TABLE IF NOT EXISTS user_login_history (
     SET NULL,
         INDEX idx_user_login_history_user_created (user_id, created_at),
         INDEX idx_user_login_history_email_created (attempted_email, created_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- User/Admin notifications
 CREATE TABLE IF NOT EXISTS notifications (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -551,7 +574,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_notifications_user_read (user_id, is_read, created_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS user_notification_settings (
     user_id INT PRIMARY KEY,
     is_muted BOOLEAN DEFAULT FALSE,
@@ -559,7 +582,7 @@ CREATE TABLE IF NOT EXISTS user_notification_settings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_notification_settings_muted (is_muted, muted_until)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS admin_settings (
     id INT PRIMARY KEY DEFAULT 1,
     store_name VARCHAR(120) NOT NULL,
@@ -589,13 +612,13 @@ CREATE TABLE IF NOT EXISTS admin_settings (
     store_discount_percentage DECIMAL(5, 2) NOT NULL DEFAULT 0,
     store_discount_label VARCHAR(60) NOT NULL DEFAULT 'Store Sale',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS about_content (
     id INT PRIMARY KEY DEFAULT 1,
     content LONGTEXT NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS newsletter_subscribers (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -612,7 +635,7 @@ CREATE TABLE IF NOT EXISTS newsletter_subscribers (
     INDEX idx_newsletter_status (status),
     INDEX idx_newsletter_email (email),
     INDEX idx_newsletter_verification_token (verification_token)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS announcements (
     id INT PRIMARY KEY AUTO_INCREMENT,
     title VARCHAR(255) NOT NULL,
@@ -623,7 +646,7 @@ CREATE TABLE IF NOT EXISTS announcements (
     end_date DATETIME DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Team members for About page
 CREATE TABLE IF NOT EXISTS team_members (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -635,7 +658,7 @@ CREATE TABLE IF NOT EXISTS team_members (
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Platform audit log
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -651,7 +674,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     SET NULL,
         INDEX idx_audit_logs_action_time (action, created_at),
         INDEX idx_audit_logs_actor (actor_user_id, created_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Tax configuration
 CREATE TABLE IF NOT EXISTS tax_rates (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -664,7 +687,7 @@ CREATE TABLE IF NOT EXISTS tax_rates (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_tax_rates_active_default (is_active, is_default)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Payment methods configuration
 CREATE TABLE IF NOT EXISTS payment_methods (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -678,7 +701,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY unique_payment_method_code (code),
     INDEX idx_payment_methods_active_sort (is_active, sort_order)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Payment account numbers
 CREATE TABLE IF NOT EXISTS payment_accounts (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -687,7 +710,7 @@ CREATE TABLE IF NOT EXISTS payment_accounts (
     account_name VARCHAR(100) NOT NULL,
     is_active BOOLEAN DEFAULT true,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 INSERT INTO payment_accounts (type, account_number, account_name, is_active)
 SELECT 'jazzcash', '03XX-XXXXXXX', 'Naturanza Food'
   , FALSE
@@ -719,4 +742,4 @@ CREATE TABLE IF NOT EXISTS advance_payment_verifications (
     UNIQUE KEY uq_apv_order_stage (order_id, verification_stage),
     INDEX idx_apv_stage_status (verification_stage, status),
     CONSTRAINT fk_apv_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

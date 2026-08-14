@@ -57,6 +57,9 @@ const resetPasswordSchema = z.object({
 const verifyEmailSchema = z.object({
   email: z.string().trim().email().max(254),
   code: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code"),
+  // Only sent on the second attempt, after the server answers PASSWORD_REQUIRED
+  // because the code being redeemed is not bound to a password this browser set.
+  password: strongPassword.optional(),
 }).strict();
 
 const resendVerificationSchema = z.object({

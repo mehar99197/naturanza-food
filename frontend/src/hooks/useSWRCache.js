@@ -96,7 +96,7 @@ export function useSWRCache(key, fetcher, opts = {}) {
     setRevalidating(true);
     try {
       return await runFetch();
-    } catch (_) {
+    } catch {
       return null;
     } finally {
       setRevalidating(false);

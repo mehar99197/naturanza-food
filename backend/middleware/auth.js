@@ -128,9 +128,13 @@ const optionalAuthenticateToken = async (req, res, next) => {
             return next();
         }
 
+        // Same columns as authenticateToken. Selecting a narrower set here built
+        // a req.user with no admin_role and no admin_permissions, so any
+        // permission check on a route using this middleware would silently
+        // evaluate against undefined instead of the account's real grants.
         const [userRows] = await db
             .promise()
-            .query("SELECT id, email, role, is_active FROM users WHERE id = ? LIMIT 1", [userId]);
+            .query("SELECT id, email, name, role, admin_role, admin_permissions, profile_image, is_active FROM users WHERE id = ? LIMIT 1", [userId]);
 
         if (!userRows.length) {
             req.authError = "User account not found";
@@ -142,10 +146,23 @@ const optionalAuthenticateToken = async (req, res, next) => {
             return next();
         }
 
+        let adminPermissions = userRows[0].admin_permissions;
+        if (typeof adminPermissions === 'string') {
+            try {
+                adminPermissions = JSON.parse(adminPermissions);
+            } catch (e) {
+                adminPermissions = null;
+            }
+        }
+
         req.user = {
             id: userRows[0].id,
             email: userRows[0].email,
+            name: userRows[0].name,
             role: userRows[0].role,
+            admin_role: userRows[0].admin_role,
+            admin_permissions: adminPermissions,
+            profile_image: userRows[0].profile_image,
             jti: payload.jti,
         };
         req.token = token;

@@ -28,15 +28,26 @@ const DEFAULT_TITLE = "Naturanza Food - Premium Organic & Natural Products | Buy
 const DEFAULT_DESCRIPTION =
   "Shop premium organic honey, herbal teas, natural supplements, and wellness products. 100% natural, sustainably sourced. Free shipping on orders over Rs. 5,000 across Pakistan.";
 
+// Keyed on the built file's mtime: a deploy that replaces index.html without
+// restarting Node would otherwise keep serving the previous shell forever, and
+// its asset hashes no longer exist — a blank page for every visitor.
 let cachedTemplate = null;
+let cachedTemplateMtimeMs = 0;
 
 const loadTemplate = (distDir) => {
-  if (cachedTemplate) return cachedTemplate;
   const resolved = path.resolve(distDir);
   if (!resolved.startsWith(path.resolve(__dirname, "..", "..", "frontend"))) {
     throw new Error("distDir must be within the frontend directory");
   }
-  cachedTemplate = fs.readFileSync(path.join(resolved, "index.html"), "utf8");
+
+  const templatePath = path.join(resolved, "index.html");
+  const { mtimeMs } = fs.statSync(templatePath);
+  if (cachedTemplate && mtimeMs === cachedTemplateMtimeMs) {
+    return cachedTemplate;
+  }
+
+  cachedTemplate = fs.readFileSync(templatePath, "utf8");
+  cachedTemplateMtimeMs = mtimeMs;
   return cachedTemplate;
 };
 
@@ -74,16 +85,25 @@ const absoluteImage = (value) => {
   return `${SITE_URL}${raw.startsWith("/") ? "" : "/"}${raw}`;
 };
 
+// Every replacement below goes through a callback rather than a replacement
+// string. In a replacement STRING, "$" is a capture reference: a product named
+// "Honey $2 Off" injected group 2 (a bare quote) and broke out of the content
+// attribute, and "$'" spliced the whole rest of the document in unescaped.
+// escapeAttr cannot help — the substitution happens after it runs. Callbacks
+// never interpret "$", so the escaped text is inserted verbatim.
 const setTitle = (html, title) =>
-  html.replace(/<title>[\s\S]*?<\/title>/, `<title>${escapeAttr(title)}</title>`);
+  html.replace(/<title>[\s\S]*?<\/title>/, () => `<title>${escapeAttr(title)}</title>`);
 
 const setMeta = (html, attr, key, content) => {
   const re = new RegExp(`(<meta\\s+${attr}="${key}"\\s+content=")[^"]*(")`);
-  return html.replace(re, `$1${escapeAttr(content)}$2`);
+  return html.replace(re, (match, open, close) => `${open}${escapeAttr(content)}${close}`);
 };
 
 const setCanonical = (html, url) =>
-  html.replace(/(<link\s+rel="canonical"\s+href=")[^"]*(")/, `$1${escapeAttr(url)}$2`);
+  html.replace(
+    /(<link\s+rel="canonical"\s+href=")[^"]*(")/,
+    (match, open, close) => `${open}${escapeAttr(url)}${close}`,
+  );
 
 const applyMeta = (template, meta) => {
   let html = template;
@@ -110,8 +130,10 @@ const applyMeta = (template, meta) => {
   }
 
   if (meta.jsonLd) {
+    // Callback form again: serializeJsonLd escapes markup characters but leaves
+    // "$" alone, and a "$&" in a product name would otherwise be substituted.
     const block = `<script type="application/ld+json">${serializeJsonLd(meta.jsonLd)}</script>`;
-    html = html.replace("</head>", `    ${block}\n  </head>`);
+    html = html.replace("</head>", () => `    ${block}\n  </head>`);
   }
 
   return html;

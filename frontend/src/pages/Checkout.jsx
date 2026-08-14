@@ -204,7 +204,7 @@ export function Checkout() {
       try {
         safeLocalStorage.removeItem(STORAGE_KEY);
         safeLocalStorage.setItem(storageKey, JSON.stringify(shippingData));
-      } catch {}
+      } catch { /* ignored: not fatal to this flow */ }
     }
   }, [shippingData, step, user?.id]);
 
@@ -280,7 +280,7 @@ export function Checkout() {
     return fieldErrors[name] ? "invalid" : "valid";
   };
 
-  const [savedAddresses, setSavedAddresses] = useState([]);
+  const [, setSavedAddresses] = useState([]);
   const [selectedAddressId, setSelectedAddressId] = useState(null);
 
   useEffect(() => {
@@ -355,7 +355,7 @@ export function Checkout() {
               .join(", "),
           city: prev.city || defaultAddress.city || "",
         }));
-      } catch (addressErr) {
+      } catch {
         setSavedAddresses([]);
         setSelectedAddressId(null);
       }
@@ -368,14 +368,10 @@ export function Checkout() {
   const [paymentMethod, setPaymentMethod] = useState("cod");
   const [copiedType, setCopiedType] = useState(null); // null | 'jazzcash' | 'easypaisa'
   const [activePaymentAccounts, setActivePaymentAccounts] = useState([]);
-  const [paymentAccountsLoaded, setPaymentAccountsLoaded] = useState(false);
+  const [, setPaymentAccountsLoaded] = useState(false);
 
-  const [showVerificationModal, setShowVerificationModal] = useState(false);
-  const [verificationMethod, setVerificationMethod] = useState("jazzcash");
   const [verificationFile, setVerificationFile] = useState(null);
-  const [verificationSubmitting, setVerificationSubmitting] = useState(false);
   const [verificationError, setVerificationError] = useState("");
-  const [verificationSuccess, setVerificationSuccess] = useState("");
   const [transactionId, setTransactionId] = useState("");
   const [tidError, setTidError] = useState("");
   const [activePaymentMethods, setActivePaymentMethods] = useState([]);
@@ -393,7 +389,7 @@ export function Checkout() {
   };
 
   // COD Advance Payment state
-  const [codAdvanceMethod, setCodAdvanceMethod] = useState("jazzcash");
+  const [codAdvanceMethod] = useState("jazzcash");
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [shippingCities, setShippingCities] = useState([]);
   const [shippingCitiesLoading, setShippingCitiesLoading] = useState(true);
@@ -419,7 +415,7 @@ export function Checkout() {
         if (isMounted) {
           setActivePaymentAccounts(Array.isArray(response) ? response : []);
         }
-      } catch (error) {
+      } catch {
         if (isMounted) {
           setActivePaymentAccounts([]);
         }
@@ -493,7 +489,7 @@ export function Checkout() {
         if (isMounted && response?.whatsappNumber) {
           setWhatsappNumber(response.whatsappNumber.replace(/\D/g, ""));
         }
-      } catch (error) {
+      } catch {
         // Fall back to the value already available via SettingsContext.
         // Admin owns the number end-to-end — no hardcoded fallback.
         if (isMounted) {
@@ -518,7 +514,7 @@ export function Checkout() {
         if (isMounted) {
           setShippingCities(Array.isArray(response.data) ? response.data : []);
         }
-      } catch (error) {
+      } catch {
         if (isMounted) {
           setShippingCities([]);
         }
@@ -557,53 +553,6 @@ export function Checkout() {
 
   const isCheckoutPaymentMethodAvailable = (method) =>
     !paymentMethodsLoaded || activePaymentMethodCodes.has(method);
-
-  const verificationMethodOptions = useMemo(() => {
-    const allowed = new Set(["jazzcash", "easypaisa", "bank"]);
-    const options = activePaymentAccounts
-      .map((account) => {
-        const type = String(account.type || "").trim().toLowerCase();
-        if (!allowed.has(type)) return null;
-        return {
-          value: type,
-          label:
-            type === "jazzcash"
-              ? "JazzCash"
-              : type === "easypaisa"
-                ? "EasyPaisa"
-                : "Bank Transfer",
-        };
-      })
-      .filter(Boolean);
-
-    if (options.length > 0) {
-      return options;
-    }
-
-    return [
-      { value: "jazzcash", label: "JazzCash" },
-      { value: "easypaisa", label: "EasyPaisa" },
-      { value: "bank", label: "Bank Transfer" },
-    ];
-  }, [activePaymentAccounts]);
-
-  const defaultVerificationMethod = useMemo(() => {
-    if (paymentMethod === "easypaisa" || paymentMethod === "jazzcash") {
-      return paymentMethod;
-    }
-
-    if (paymentMethod === "cod" && codAdvanceMethod) {
-      return codAdvanceMethod;
-    }
-
-    return verificationMethodOptions[0]?.value || "jazzcash";
-  }, [paymentMethod, codAdvanceMethod, verificationMethodOptions]);
-
-  useEffect(() => {
-    if (defaultVerificationMethod && defaultVerificationMethod !== verificationMethod) {
-      setVerificationMethod(defaultVerificationMethod);
-    }
-  }, [defaultVerificationMethod, verificationMethod]);
 
   useEffect(() => {
     if (!paymentMethodsLoaded) {
@@ -646,7 +595,7 @@ export function Checkout() {
     try {
       await navigator.clipboard.writeText(accountNumber);
       setCopiedType(type);
-    } catch (copyError) {}
+    } catch { /* ignored: not fatal to this flow */ }
   };
 
   const handlePaymentMethodSelect = (method) => {
@@ -661,87 +610,11 @@ export function Checkout() {
     }
   };
 
-  const openVerificationModal = () => {
-    setVerificationError("");
-    setVerificationSuccess("");
-    setVerificationFile(null);
-    setVerificationMethod(defaultVerificationMethod);
-    setTransactionId("");
-    setTidError("");
-    setShowVerificationModal(true);
-  };
-
-  const closeVerificationModal = () => {
-    setShowVerificationModal(false);
-  };
-
   const handleVerificationFileChange = (event) => {
     const file = event.target.files?.[0] || null;
     setVerificationFile(file);
     if (file) {
       setVerificationError("");
-    }
-  };
-
-  const handleSubmitVerification = async (event) => {
-    event?.preventDefault();
-
-    if (!orderId) {
-      setVerificationError("Order id is missing. Please refresh and try again.");
-      return;
-    }
-
-    if (!verificationMethod) {
-      setVerificationError("Please select a payment method.");
-      return;
-    }
-
-    if (!verificationAmount || verificationAmount <= 0) {
-      setVerificationError("Invalid payment amount.");
-      return;
-    }
-
-    if (!verificationFile) {
-      setVerificationError("Please upload a payment screenshot.");
-      return;
-    }
-
-    const tidValidation = validateTid(transactionId, verificationMethod);
-    if (tidValidation) {
-      setTidError(tidValidation);
-      setVerificationError(tidValidation);
-      return;
-    }
-
-    setVerificationSubmitting(true);
-    setVerificationError("");
-
-    try {
-      const formData = new FormData();
-      formData.append("order_id", String(orderId));
-      formData.append("customer_name", customerFullName);
-      formData.append("customer_phone", shippingData.phone || "");
-      formData.append("amount", String(Math.round(Number(verificationAmount))));
-      formData.append("payment_method", verificationMethod);
-      formData.append("verification_screenshot", verificationFile);
-      if (transactionId.trim()) {
-        formData.append("transaction_id", transactionId.trim());
-      }
-
-      await paymentAPI.submitVerification(formData);
-
-      setVerificationSuccess(
-        "Payment verification submitted. We will confirm shortly.",
-      );
-      setShowVerificationModal(false);
-    } catch (submitError) {
-      setVerificationError(
-        submitError?.response?.data?.message ||
-          submitError?.response?.data?.error ||
-          "Failed to submit verification. Please try again.",
-      );
-    } finally {
-      setVerificationSubmitting(false);
     }
   };
 
@@ -837,10 +710,25 @@ export function Checkout() {
   const hasDeliveryFee = selectedCityData !== undefined;
   const finalTotal = subtotal - discount + deliveryFee;
   const payOnDeliveryAmount = Math.max(0, subtotal - discount);
-  const verificationAmount =
-    paymentMethod === "cod"
-      ? confirmedAdvanceFee || deliveryFee
-      : confirmedTotal || finalTotal;
+
+  // Single source of truth for the order payload. It was built twice — once in
+  // the direct-checkout path and again in the COD advance path — with the two
+  // copies kept in sync by hand, so any change to checkout had to be made in
+  // both places and one of them would eventually be missed.
+  //
+  // Money fields are deliberately absent: the server derives payment status from
+  // the method and recomputes every total from the cart, the coupon table and
+  // the city fee table. Sending them would imply the client has a say.
+  const buildOrderPayload = () => ({
+    customer_name: customerFullName,
+    customer_email: shippingData.email,
+    shipping_address: `${shippingData.address}, ${shippingData.city}`,
+    phone: shippingData.phone,
+    city: shippingData.city,
+    address_id: selectedAddressId || null,
+    payment_method: paymentMethod,
+    coupon_code: appliedCoupon?.code || null,
+  });
   const selectedPaymentAccount = activeAccountsByType.get(paymentMethod);
   const paymentMethodLabel =
     paymentMethod === "easypaisa"
@@ -917,7 +805,7 @@ export function Checkout() {
         setIsProcessing(false);
         return;
       }
-    } catch (cartErr) {
+    } catch {
       // If we can't fetch cart, assume it's empty or has an issue
       setError("Unable to verify cart. Please refresh the page and try again.");
       setIsProcessing(false);
@@ -934,23 +822,7 @@ export function Checkout() {
     try {
       // Saving the address is optional. Do not block order creation on a
       // separate address transaction; the order stores the submitted address.
-      const resolvedAddressId = selectedAddressId;
-
-      // Prepare order data - only include fields the backend expects
-      const orderData = {
-        customer_name: customerFullName,
-        customer_email: shippingData.email,
-        shipping_address: `${shippingData.address}, ${shippingData.city}`,
-        phone: shippingData.phone,
-        city: shippingData.city,
-        address_id: resolvedAddressId || null,
-        payment_method: paymentMethod,
-        // No payment_status / shipping_cost / discount_amount here on purpose:
-        // the server derives the payment status from the method and recomputes
-        // every money field from the cart, the coupon table and the city fee
-        // table. Sending them suggested the client had a say in the total.
-        coupon_code: appliedCoupon?.code || null,
-      };
+      const orderData = buildOrderPayload();
 
       // Create order through backend API
       const newOrder = await addOrder(orderData);
@@ -978,7 +850,7 @@ export function Checkout() {
         const storageKey = getShippingStorageKey(user?.id);
         if (storageKey) safeLocalStorage.removeItem(storageKey);
         safeLocalStorage.removeItem(STORAGE_KEY);
-      } catch {}
+      } catch { /* ignored: not fatal to this flow */ }
     } catch (error) {
       // DO NOT re-fetch cart on order failure - this would clear the local cart if backend cart was already empty
       // The backend returns "Cart is empty" if items were removed between page load and order attempt
@@ -1094,12 +966,6 @@ export function Checkout() {
     const orderTotal = confirmedTotal || finalTotal;
     const selectedVerificationAccount = activeAccountsByType.get(verificationPaymentMethod);
     const isCod = paymentMethod === "cod";
-    const verificationMethodLabel =
-      verificationPaymentMethod === "easypaisa"
-        ? "EasyPaisa"
-        : verificationPaymentMethod === "bank"
-          ? "Bank Transfer"
-          : "JazzCash";
 
     const handleSubmitVerificationAndOrder = async () => {
       if (!verificationFile) {
@@ -1126,7 +992,7 @@ export function Checkout() {
           setIsProcessing(false);
           return;
         }
-      } catch (cartErr) {
+      } catch {
         setError("Unable to verify cart. Please refresh the page and try again.");
         setIsProcessing(false);
         return;
@@ -1143,23 +1009,8 @@ export function Checkout() {
         // verification upload we re-use the same orderId so we don't create
         // duplicate orders.
         let activeOrderId = orderId;
-        const resolvedAddressId = selectedAddressId;
-
         if (!activeOrderId) {
-          const orderData = {
-            customer_name: customerFullName,
-            customer_email: shippingData.email,
-            shipping_address: `${shippingData.address}, ${shippingData.city}`,
-            phone: shippingData.phone,
-            city: shippingData.city,
-            address_id: resolvedAddressId || null,
-            payment_method: paymentMethod,
-            // Money fields are the server's to decide — see the note on the
-            // other create call above. The COD advance step reads shipping_cost
-            // back off the stored order, which the server sets from the city
-            // fee table for the city sent above.
-            coupon_code: appliedCoupon?.code || null,
-          };
+          const orderData = buildOrderPayload();
 
           const newOrder = await addOrder(orderData);
 
@@ -1201,7 +1052,7 @@ export function Checkout() {
           const storageKey = getShippingStorageKey(user?.id);
           if (storageKey) safeLocalStorage.removeItem(storageKey);
           safeLocalStorage.removeItem(STORAGE_KEY);
-        } catch {}
+        } catch { /* ignored: not fatal to this flow */ }
       } catch (submitError) {
         const statusCode = Number(submitError?.response?.status || 0);
         // Backend payload shape varies: order routes return { error }, payment

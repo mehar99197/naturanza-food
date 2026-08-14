@@ -160,34 +160,22 @@ export const ProductProvider = ({ children }) => {
 
   // Add new product via API
   const addProduct = async (productData) => {
-    try {
-      const response = await productAPI.create(productData);
-      await fetchProducts();
-      return response;
-    } catch (err) {
-      throw err;
-    }
+    const response = await productAPI.create(productData);
+    await fetchProducts();
+    return response;
   };
 
   // Update existing product via API
   const updateProduct = async (productId, updates) => {
-    try {
-      const response = await productAPI.update(productId, updates);
-      await fetchProducts();
-      return response;
-    } catch (err) {
-      throw err;
-    }
+    const response = await productAPI.update(productId, updates);
+    await fetchProducts();
+    return response;
   };
 
   // Delete product via API
   const deleteProduct = async (productId) => {
-    try {
-      await productAPI.delete(productId);
-      await fetchProducts();
-    } catch (err) {
-      throw err;
-    }
+    await productAPI.delete(productId);
+    await fetchProducts();
   };
 
   // Get product by ID

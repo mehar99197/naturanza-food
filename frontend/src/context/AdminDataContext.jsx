@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
-import { productAPI, orderAPI, adminAPI, categoryAPI } from "@/services/api";
+import { productAPI, adminAPI, categoryAPI } from "@/services/api";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 
 const AdminDataContext = createContext(null);
@@ -18,7 +18,6 @@ export const AdminDataProvider = ({ children }) => {
   const location = useLocation();
   const isAdminRoute = location.pathname.startsWith("/admin");
   const [products, setProducts] = useState([]);
-  const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [coupons, setCoupons] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -68,7 +67,6 @@ export const AdminDataProvider = ({ children }) => {
   const fetchAllData = useCallback(async () => {
     if (!isAdminAuthenticated || !isAdminRoute) {
       setProducts([]);
-      setOrders([]);
       setCustomers([]);
       setCoupons([]);
       setCategories([]);
@@ -86,7 +84,6 @@ export const AdminDataProvider = ({ children }) => {
       const canLoad = (permission) => isSuperAdmin || permissions.includes(permission);
       const results = await Promise.allSettled([
         canLoad("manage_products") ? productAPI.getAll() : Promise.resolve([]),
-        canLoad("manage_orders") ? orderAPI.getAll() : Promise.resolve([]),
         canLoad("manage_customers") ? adminAPI.getCustomers() : Promise.resolve([]),
         canLoad("manage_coupons") ? adminAPI.getCoupons() : Promise.resolve([]),
         canLoad("manage_categories") ? categoryAPI.getAll() : Promise.resolve([]),
@@ -95,16 +92,12 @@ export const AdminDataProvider = ({ children }) => {
         results[index]?.status === "fulfilled" ? results[index].value : [];
       const failedRequests = results.filter((result) => result.status === "rejected");
       const productsData = valueAt(0);
-      const ordersData = valueAt(1);
-      const customersData = valueAt(2);
-      const couponsData = valueAt(3);
-      const categoriesData = valueAt(4);
+      const customersData = valueAt(1);
+      const couponsData = valueAt(2);
+      const categoriesData = valueAt(3);
 
       setProducts(
         extractList(productsData),
-      );
-      setOrders(
-        extractList(ordersData),
       );
       setCustomers(
         Array.isArray(customersData)
@@ -131,7 +124,6 @@ export const AdminDataProvider = ({ children }) => {
 
     if (!isAdminAuthenticated || !isAdminRoute) {
       setProducts([]);
-      setOrders([]);
       setCustomers([]);
       setCoupons([]);
       setCategories([]);
@@ -145,210 +137,144 @@ export const AdminDataProvider = ({ children }) => {
 
   // ===== PRODUCTS CRUD =====
   const addProduct = async (productData) => {
-    try {
-      const response = await productAPI.create(productData);
-      const newProduct = response.product || response.data || response;
-      setProducts([...products, newProduct]);
-      return newProduct;
-    } catch (err) {
-      throw err;
-    }
+    const response = await productAPI.create(productData);
+    const newProduct = response.product || response.data || response;
+    setProducts([...products, newProduct]);
+    return newProduct;
   };
 
   const updateProduct = async (productId, updates) => {
-    try {
-      await productAPI.update(productId, updates);
-      setProducts(
-        products.map((p) => (p.id === productId ? { ...p, ...updates } : p)),
-      );
-    } catch (err) {
-      throw err;
-    }
+    await productAPI.update(productId, updates);
+    setProducts(
+      products.map((p) => (p.id === productId ? { ...p, ...updates } : p)),
+    );
   };
 
   const deleteProduct = async (productId) => {
-    try {
-      await productAPI.delete(productId);
-      setProducts(products.filter((p) => p.id !== productId));
-    } catch (err) {
-      throw err;
-    }
+    await productAPI.delete(productId);
+    setProducts(products.filter((p) => p.id !== productId));
   };
 
   // ===== CUSTOMERS CRUD =====
   const addCustomer = async (customerData) => {
-    try {
-      const payload = {
-        name: customerData?.name,
-        email: customerData?.email,
-        phone: customerData?.phone || null,
-        address: customerData?.address || customerData?.location || null,
-        role: 'customer',
-      };
+    const payload = {
+      name: customerData?.name,
+      email: customerData?.email,
+      phone: customerData?.phone || null,
+      address: customerData?.address || customerData?.location || null,
+      role: 'customer',
+    };
 
-      const response = await adminAPI.createCustomer(payload);
-      const nextCustomer = normalizeCustomer(
-        response?.user || {
-          ...payload,
-          id: response?.id,
-          created_at: new Date().toISOString(),
-          orders_count: 0,
-          total_spent: 0,
-        },
-      );
+    const response = await adminAPI.createCustomer(payload);
+    const nextCustomer = normalizeCustomer(
+      response?.user || {
+        ...payload,
+        id: response?.id,
+        created_at: new Date().toISOString(),
+        orders_count: 0,
+        total_spent: 0,
+      },
+    );
 
-      setCustomers((prev) => [nextCustomer, ...prev]);
-      return nextCustomer;
-    } catch (err) {
-      throw err;
-    }
+    setCustomers((prev) => [nextCustomer, ...prev]);
+    return nextCustomer;
   };
 
   const updateCustomer = async (customerId, customerData) => {
-    try {
-      const payload = {
-        name: customerData?.name,
-        email: customerData?.email,
-        phone: customerData?.phone || null,
-        address: customerData?.address || customerData?.location || null,
-      };
+    const payload = {
+      name: customerData?.name,
+      email: customerData?.email,
+      phone: customerData?.phone || null,
+      address: customerData?.address || customerData?.location || null,
+    };
 
-      const response = await adminAPI.updateCustomer(customerId, payload);
-      const updatedCustomer = response?.user || payload;
+    const response = await adminAPI.updateCustomer(customerId, payload);
+    const updatedCustomer = response?.user || payload;
 
-      setCustomers((prev) =>
-        prev.map((customer) =>
-          customer.id === customerId
-            ? normalizeCustomer({
-                ...customer,
-                ...updatedCustomer,
-              })
-            : customer,
-        ),
-      );
-    } catch (err) {
-      throw err;
-    }
+    setCustomers((prev) =>
+      prev.map((customer) =>
+        customer.id === customerId
+          ? normalizeCustomer({
+              ...customer,
+              ...updatedCustomer,
+            })
+          : customer,
+      ),
+    );
   };
 
   const deleteCustomer = async (customerId) => {
-    try {
-      await adminAPI.deleteCustomer(customerId);
-      setCustomers((prev) => prev.filter((customer) => customer.id !== customerId));
-    } catch (err) {
-      throw err;
-    }
+    await adminAPI.deleteCustomer(customerId);
+    setCustomers((prev) => prev.filter((customer) => customer.id !== customerId));
   };
 
   const toggleCustomerStatus = async (customerId) => {
-    try {
-      const target = customers.find((customer) => customer.id === customerId);
-      if (!target) {
-        throw new Error('Customer not found');
-      }
-
-      const nextStatus = !target.is_active;
-      await adminAPI.updateCustomerStatus(customerId, nextStatus);
-
-      setCustomers((prev) =>
-        prev.map((customer) =>
-          customer.id === customerId
-            ? normalizeCustomer({
-                ...customer,
-                is_active: nextStatus,
-              })
-            : customer,
-        ),
-      );
-    } catch (err) {
-      throw err;
+    const target = customers.find((customer) => customer.id === customerId);
+    if (!target) {
+      throw new Error('Customer not found');
     }
+
+    const nextStatus = !target.is_active;
+    await adminAPI.updateCustomerStatus(customerId, nextStatus);
+
+    setCustomers((prev) =>
+      prev.map((customer) =>
+        customer.id === customerId
+          ? normalizeCustomer({
+              ...customer,
+              is_active: nextStatus,
+            })
+          : customer,
+      ),
+    );
   };
 
   const getProductById = (productId) => {
     return products.find((p) => p.id === productId);
   };
 
-  // ===== ORDERS CRUD =====
-  const updateOrderStatus = async (orderId, status) => {
-    try {
-      await orderAPI.updateStatus(orderId, status);
-      setOrders(orders.map((o) => (o.id === orderId ? { ...o, status } : o)));
-    } catch (err) {
-      throw err;
-    }
-  };
-
   // ===== COUPONS CRUD =====
   const addCoupon = async (couponData) => {
-    try {
-      const response = await adminAPI.createCoupon(couponData);
-      const newCoupon = response.coupon || response.data || response;
-      setCoupons([...coupons, newCoupon]);
-      return newCoupon;
-    } catch (err) {
-      throw err;
-    }
+    const response = await adminAPI.createCoupon(couponData);
+    const newCoupon = response.coupon || response.data || response;
+    setCoupons([...coupons, newCoupon]);
+    return newCoupon;
   };
 
   const updateCoupon = async (couponId, couponData) => {
-    try {
-      await adminAPI.updateCoupon(couponId, couponData);
-      setCoupons(
-        coupons.map((c) => (c.id === couponId ? { ...c, ...couponData } : c)),
-      );
-    } catch (err) {
-      throw err;
-    }
+    await adminAPI.updateCoupon(couponId, couponData);
+    setCoupons(
+      coupons.map((c) => (c.id === couponId ? { ...c, ...couponData } : c)),
+    );
   };
 
   const deleteCoupon = async (couponId) => {
-    try {
-      await adminAPI.deleteCoupon(couponId);
-      setCoupons(coupons.filter((c) => c.id !== couponId));
-    } catch (err) {
-      throw err;
-    }
+    await adminAPI.deleteCoupon(couponId);
+    setCoupons(coupons.filter((c) => c.id !== couponId));
   };
 
   const toggleCouponStatus = async (couponId) => {
-    try {
-      await adminAPI.toggleCouponStatus(couponId);
-      setCoupons(
-        coupons.map((coupon) =>
-          coupon.id === couponId
-            ? { ...coupon, is_active: !coupon.is_active }
-            : coupon,
-        ),
-      );
-    } catch (err) {
-      throw err;
-    }
+    await adminAPI.toggleCouponStatus(couponId);
+    setCoupons(
+      coupons.map((coupon) =>
+        coupon.id === couponId
+          ? { ...coupon, is_active: !coupon.is_active }
+          : coupon,
+      ),
+    );
   };
 
   const getCouponById = (couponId) => {
     return coupons.find((c) => c.id === couponId);
   };
 
-  // ===== STATISTICS =====
-  const getStats = () => {
-    return {
-      totalProducts: products.length,
-      totalOrders: orders.length,
-      totalCustomers: customers.length,
-      totalCoupons: coupons.length,
-      totalRevenue: orders
-        .filter((o) => o.payment_status === "paid")
-        .reduce((sum, o) => sum + (o.total_amount || 0), 0),
-      pendingOrders: orders.filter((o) => o.status === "pending").length,
-      completedOrders: orders.filter((o) => o.status === "delivered").length,
-    };
-  };
+  // NOTE: no client-side stats here. Counting orders and summing revenue in the
+  // browser required loading every order ever placed; GET /api/admin/dashboard/stats
+  // computes the same figures with SQL aggregates and is what the dashboard uses.
 
   const value = {
     // Data
     products,
-    orders,
     customers,
     coupons,
     categories,
@@ -364,13 +290,11 @@ export const AdminDataProvider = ({ children }) => {
     deleteCustomer,
     toggleCustomerStatus,
     getProductById,
-    updateOrderStatus,
     addCoupon,
     updateCoupon,
     deleteCoupon,
     toggleCouponStatus,
     getCouponById,
-    getStats,
     fetchAllData,
   };
 

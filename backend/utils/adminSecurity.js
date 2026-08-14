@@ -2,13 +2,7 @@ const { db } = require("../config/db");
 const { sendEmail } = require("./emailService");
 const { ipMatchesCidr } = require("./ipAllowlist");
 
-const escapeHtml = (value) =>
-  String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#x27;");
+const { escapeHtml } = require("./htmlEscape");
 
 const toBoolean = (value) => value === true || Number(value) === 1;
 

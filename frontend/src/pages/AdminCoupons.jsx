@@ -37,6 +37,7 @@ export default function AdminCoupons() {
  min_order_amount: '',
  max_discount: '',
  usage_limit: '',
+ per_user_limit: '1',
  expiry_date: ''
  });
 
@@ -60,6 +61,7 @@ export default function AdminCoupons() {
  min_order_amount: formData.min_order_amount ? parseFloat(formData.min_order_amount) : 0,
  max_discount: formData.max_discount ? parseFloat(formData.max_discount) : null,
   usage_limit: formData.usage_limit ? parseInt(formData.usage_limit) : null,
+  per_user_limit: formData.per_user_limit ? parseInt(formData.per_user_limit) : null,
   expiry_date: formData.expiry_date || null,
   ...(editingCoupon ? { is_active: Boolean(formData.is_active) } : {}),
  };
@@ -91,6 +93,7 @@ export default function AdminCoupons() {
  min_order_amount: coupon.min_order_amount || '',
  max_discount: coupon.max_discount || '',
   usage_limit: coupon.usage_limit || '',
+  per_user_limit: coupon.per_user_limit ?? '',
   expiry_date: coupon.expiry_date ? new Date(coupon.expiry_date).toISOString().split('T')[0] : '',
   is_active: Boolean(coupon.is_active),
  });
@@ -127,6 +130,7 @@ export default function AdminCoupons() {
  min_order_amount: '',
  max_discount: '',
  usage_limit: '',
+ per_user_limit: '1',
  expiry_date: ''
  });
  setEditingCoupon(null);
@@ -337,6 +341,12 @@ export default function AdminCoupons() {
  {coupon.used_count || 0}
  {coupon.usage_limit && ` / ${coupon.usage_limit}`}
  </p>
+ <p className="mt-1 text-[11px] text-slate-500">
+ Per customer:{" "}
+ <span className={coupon.per_user_limit ? "font-semibold text-slate-700" : "font-semibold text-amber-700"}>
+ {coupon.per_user_limit || "Unlimited"}
+ </span>
+ </p>
  </div>
  <div className="rounded-md border border-emerald-100 bg-[#f0f8f2] p-2.5">
  <p className="text-slate-500">Expiry</p>
@@ -423,6 +433,12 @@ export default function AdminCoupons() {
  <div className="text-sm font-semibold text-slate-800">
  {coupon.used_count || 0}
  {coupon.usage_limit && ` / ${coupon.usage_limit}`}
+ </div>
+ <div className="text-xs text-slate-500">
+ Per customer:{" "}
+ <span className={coupon.per_user_limit ? "font-semibold text-slate-700" : "font-semibold text-amber-700"}>
+ {coupon.per_user_limit || "Unlimited"}
+ </span>
  </div>
  </td>
  <td className="px-4 py-4">
@@ -607,6 +623,24 @@ export default function AdminCoupons() {
  className="h-11 w-full rounded-xl border border-emerald-100 bg-white px-4 text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:h-12 sm:rounded-2xl"
  placeholder="Unlimited"
  />
+ </label>
+
+ <label className="space-y-1.5">
+ <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+ Per-Customer Limit
+ </span>
+ <input
+ type="number"
+ min="1"
+ name="per_user_limit"
+ value={formData.per_user_limit}
+ onChange={handleInputChange}
+ className="h-11 w-full rounded-xl border border-emerald-100 bg-white px-4 text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:h-12 sm:rounded-2xl"
+ placeholder="Unlimited"
+ />
+ <span className="text-[11px] text-slate-400">
+ How many times one customer may use this code. Leave empty for unlimited.
+ </span>
  </label>
 
  <label className="space-y-1.5">

@@ -25,46 +25,16 @@ const PASSWORD_FIELDS = new Set([
     'confirm_password',
 ]);
 
-const CONFIRMATION_FIELDS = new Set([
-    'confirmationtext',
-    'confirmation_text',
-    'confirmtext',
-]);
-
 const isOpaqueTokenField = (key) =>
     typeof key === 'string' &&
     (OPAQUE_TOKEN_FIELDS.has(key.toLowerCase()) ||
         PASSWORD_FIELDS.has(key.toLowerCase()));
 
-const isExcludedFromSQLCheck = (key) =>
-    typeof key === 'string' &&
-    (OPAQUE_TOKEN_FIELDS.has(key.toLowerCase()) ||
-        PASSWORD_FIELDS.has(key.toLowerCase()) ||
-        CONFIRMATION_FIELDS.has(key.toLowerCase()));
-
-const HTML_ENTITY_MAP = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#x27;',
-    '/': '&#x2F;',
-};
-
-const ESCAPE_REGEX = /[&<>"'/]/g;
-
-const escapeHTML = (str) => {
-    if (typeof str !== 'string') return str;
-    return str.replace(ESCAPE_REGEX, (char) => HTML_ENTITY_MAP[char]);
-};
-
 const JS_PROTOCOL_REGEX = /^\s*javascript\s*:/i;
 const DATA_PROTOCOL_REGEX = /^\s*data\s*:/i;
 const VBSCRIPT_PROTOCOL_REGEX = /^\s*vbscript\s*:/i;
 const EVENT_HANDLER_REGEX = /\bon\w+\s*=/gi;
-const SVG_SCRIPT_REGEX = /<svg[^>]*>(.*?)<\/svg>/gi;
 const EXPRESSION_REGEX = /expression\s*\(/gi;
-const URL_ENCODED_INJECTION_REGEX = /%[0-9a-f]{2}/gi;
 
 function sanitizeInput(input) {
     if (typeof input !== 'string') return input;
@@ -91,16 +61,23 @@ function sanitizeInput(input) {
     sanitized = sanitized.replace(EVENT_HANDLER_REGEX, '')
         .replace(EXPRESSION_REGEX, '');
 
-    sanitized = sanitized.replace(URL_ENCODED_INJECTION_REGEX, (match) => {
-        try {
-            return decodeURIComponent(match);
-        } catch {
-            return '';
-        }
-    });
+    // NOTE: percent-decoding must never happen here. A decode pass used to run
+    // at this point and rebuilt exactly what the passes above had just removed:
+    // "%3Cimg src%3Dx onerror%3Dalert(1)%3E" came back out as working markup,
+    // because the event-handler pattern above needs a literal "=" to match and
+    // "%3D" does not provide one. Encoded input is left as inert literal text;
+    // anything that genuinely needs a decoded value must decode it itself, at
+    // the point of use, where the destination is known.
 
     return sanitized.trim();
 }
+
+// Keys that are not data. Assigning to "__proto__" invokes the prototype setter
+// instead of creating a property, so a body of {"__proto__":{"role":"admin"}}
+// produced an object where Object.keys() was clean but obj.role was "admin" —
+// restrictBody's mass-assignment guard reads Object.keys(), so it saw nothing to
+// reject while handlers could still read the injected value off the prototype.
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function sanitizeObject(obj) {
     if (typeof obj !== 'object' || obj === null) {
@@ -111,6 +88,10 @@ function sanitizeObject(obj) {
 
     for (const key in obj) {
         if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            if (FORBIDDEN_KEYS.has(key)) {
+                continue;
+            }
+
             const value = obj[key];
 
             if (typeof value === 'string') {
@@ -169,55 +150,14 @@ function validatePassword(password) {
     };
 }
 
-function isSafeSQLInput(input) {
-    if (typeof input !== 'string') return true;
-
-    const sqlInjectionPatterns = [
-        /(\b(?:DROP\s+(?:TABLE|DATABASE|INDEX|VIEW|PROCEDURE|FUNCTION)|TRUNCATE\s+TABLE|ALTER\s+(?:TABLE|DATABASE|COLUMN))\b)/gi,
-        /(?:;\s*(?:DROP|TRUNCATE|ALTER|DELETE|EXEC)\b)/gi,
-        /(\bEXEC(?:UTE)?\s*\()/gi,
-        /(?:\bUNION\b\s+\bSELECT\b)/gi,
-        /(?:\bSELECT\b.*\bINTO\s+(?:OUT|DUMP)FILE\b)/gi,
-        /(?:\bLOAD\s+(?:DATA|FILE)\b)/gi,
-        /(?:--\s|\/\*!|\/\*)/gi,
-        /(\bINSERT\s+INTO\b.*\bVALUES\b.*\bSELECT\b)/gi,
-        /(\bWAITFOR\s+DELAY\b)/gi,
-        /(\bBENCHMARK\b\s*\()/gi,
-        /(sleep\s*\(\s*\d+\s*\))/gi,
-    ];
-
-    return !sqlInjectionPatterns.some(pattern => pattern.test(input));
-}
-
-function preventSQLInjection(req, res, next) {
-    const checkObject = (obj) => {
-        for (const key in obj) {
-            if (Object.prototype.hasOwnProperty.call(obj, key)) {
-                if (isExcludedFromSQLCheck(key)) {
-                    continue;
-                }
-
-                if (typeof obj[key] === 'string' && !isSafeSQLInput(obj[key])) {
-                    return false;
-                }
-                if (typeof obj[key] === 'object' && !checkObject(obj[key])) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    };
-
-    if (req.body && !checkObject(req.body)) {
-        return res.status(400).json({ error: 'Invalid input detected' });
-    }
-
-    if (req.query && !checkObject(req.query)) {
-        return res.status(400).json({ error: 'Invalid query parameters' });
-    }
-
-    next();
-}
+// NOTE: a keyword blocklist (isSafeSQLInput / preventSQLInjection) used to sit
+// here and reject any request whose body or query contained "-- ", "/*",
+// "UNION SELECT", "sleep(n)" and similar. It protected nothing — every query in
+// this codebase is parameterised, which is what actually prevents SQL injection
+// — while rejecting ordinary customer text with a bare "Invalid input detected".
+// "Deliver 9-5 -- thanks" in an order note or a contact message was a 400.
+// Removed rather than narrowed: a blocklist in front of parameterised SQL can
+// only ever produce false positives.
 
 function restrictBody(...allowedFields) {
     const allowedSet = new Set(allowedFields);
@@ -242,8 +182,5 @@ module.exports = {
     sanitizeQueryParams,
     isValidEmail,
     validatePassword,
-    isSafeSQLInput,
-    preventSQLInjection,
     restrictBody,
-    escapeHTML,
 };

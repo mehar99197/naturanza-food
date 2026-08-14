@@ -19,7 +19,7 @@ import { ProductCardSkeleton } from"@/components/Skeletons/ProductCardSkeleton";
 import { SearchBar } from"@/components/SearchBar";
 import { useSettings } from"@/context/SettingsContext";
 import { useProducts } from"@/context/ProductContext";
-import { formatCurrency, formatPrice } from"@/lib/utils";
+import { formatCurrency } from"@/lib/utils";
 import { convertFromPkr, hasExchangeRate } from"@/lib/exchangeRates";
 import { categoryAPI } from"@/services/api";
 import { ShopSEO } from "@/components/SEO";
@@ -99,8 +99,7 @@ export function Shop() {
  }
 
  setCategories([{ id:"all", name:"All Products", icon: ShoppingBag }, ...dynamic]);
- } catch (err) {
-  } finally {
+ } catch { /* ignored: not fatal to this flow */ } finally {
   if (showLoader) {
   setIsLoading(false);
   }

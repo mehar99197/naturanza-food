@@ -53,8 +53,11 @@ const { isDisposableEmail, hasDeliverableDomain } = require("../utils/emailValid
 const { getClientIp } = require("../utils/clientIp");
 const {
   createVerificationCode,
+  getPendingCredentialHash,
   verifyCode,
+  claimVerificationCode,
   secondsUntilResendAllowed,
+  CODE_EXPIRY_MINUTES,
 } = require("../utils/emailVerificationCodes");
 const {
   createPasswordResetToken,
@@ -226,6 +229,47 @@ const lookupLocationByIp = async (ipAddress) => {
   } catch (error) {
     return "Unknown";
   }
+};
+
+// Placeholder written to users.password while an account is unverified, and
+// whenever an account is activated by someone whose password we cannot
+// attribute. It is not a bcrypt hash, so bcrypt.compare against it is always
+// false — no password can ever match. Paired with password_set_by_user = FALSE,
+// which routes the owner to the existing first-time password setup.
+const UNUSABLE_PASSWORD = "!";
+
+// Nonce cookie proving that the browser completing verification is the browser
+// that registered. Lives only as long as a code can be redeemed.
+const PENDING_SIGNUP_COOKIE = "pending_signup";
+const getPendingSignupCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+  maxAge: CODE_EXPIRY_MINUTES * 60 * 1000,
+  path: "/",
+});
+
+// Issue a verification code bound to this registration attempt, mail it, and
+// hand the nonce to the caller's browser. Used by register and resend alike so
+// the binding can never be set up in only one of them.
+const issueVerificationChallenge = async (
+  res,
+  { userId, email, name, credentialHash },
+) => {
+  const { code, expiresInMinutes, verifierNonce } = await createVerificationCode(
+    db.promise(),
+    userId,
+    email,
+    { credentialHash },
+  );
+
+  res.cookie(
+    PENDING_SIGNUP_COOKIE,
+    verifierNonce,
+    getPendingSignupCookieOptions(),
+  );
+
+  void sendVerificationCodeEmail(email, name, code, expiresInMinutes);
 };
 
 const toBooleanFlag = (value, fallback = true) => {
@@ -462,12 +506,39 @@ router.post("/register", async (req, res) => {
 
     if (existingUsers.length > 0) {
       if (isAdminAccount(existingUsers[0])) {
+        // Deliberately the same wording an unrelated taken address gets, so an
+        // admin address cannot be told apart from an ordinary one here.
         return res.status(400).json({ error: "Email already registered" });
       }
 
       // A prior signup that was never verified: steer them to verification
       // instead of a dead-end "already registered" error.
+      //
+      // SECURITY: that earlier signup may have been someone registering an
+      // address they do not own. Re-issue the challenge so the code now in the
+      // mailbox belongs to THIS attempt and carries THIS password — otherwise
+      // the person who owns the mailbox would verify a stranger's registration
+      // and activate the account with a stranger's password. The resend
+      // cooldown still applies, so this cannot be used to flood an inbox; when
+      // it blocks, no nonce cookie is set and verification falls through to the
+      // no-usable-password path, which is safe either way.
       if (!existingUsers[0].email_verified) {
+        const waitSeconds = await secondsUntilResendAllowed(
+          db.promise(),
+          existingUsers[0].id,
+        );
+
+        if (waitSeconds > 0) {
+          res.clearCookie(PENDING_SIGNUP_COOKIE, { path: "/" });
+        } else {
+          await issueVerificationChallenge(res, {
+            userId: existingUsers[0].id,
+            email: normalizedEmail,
+            name,
+            credentialHash: await bcrypt.hash(password, 12),
+          });
+        }
+
         return res.status(409).json({
           error: "This email is already registered but not verified. Please verify it.",
           code: "EMAIL_NOT_VERIFIED",
@@ -477,6 +548,12 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "Email already registered" });
     }
 
+    // SECURITY: the submitted password is NOT written to the users row here. An
+    // unverified account must never hold a usable credential, because anyone can
+    // register an address they do not own — and that password would then be
+    // waiting on the account when the real owner verified it. The hash is held
+    // against the verification code instead and applied once the code is
+    // redeemed from the browser that registered.
     const hashedPassword = await bcrypt.hash(password, 12);
     const [insertResult] = await db.promise().query(
       `INSERT INTO users
@@ -485,23 +562,23 @@ router.post("/register", async (req, res) => {
       [
         name,
         normalizedEmail,
-        hashedPassword,
+        UNUSABLE_PASSWORD,
         phone || null,
         address || null,
         "customer",
         "password",
-        true,
+        false,
       ],
     );
 
     // Email the verification code. The account stays inactive (cannot log in)
     // until the code is confirmed at POST /verify-email.
-    const { code, expiresInMinutes } = await createVerificationCode(
-      db.promise(),
-      insertResult.insertId,
-      normalizedEmail,
-    );
-    void sendVerificationCodeEmail(normalizedEmail, name, code, expiresInMinutes);
+    await issueVerificationChallenge(res, {
+      userId: insertResult.insertId,
+      email: normalizedEmail,
+      name,
+      credentialHash: hashedPassword,
+    });
 
     res.setHeader("Cache-Control", "no-store");
     return res.status(201).json({
@@ -523,15 +600,56 @@ router.post("/verify-email", async (req, res) => {
     }
 
     const normalizedEmail = String(parsedBody.data.email).trim().toLowerCase();
-    const result = await verifyCode(db.promise(), normalizedEmail, parsedBody.data.code);
+    const submittedPassword = parsedBody.data.password || null;
+
+    // Validate WITHOUT consuming the code, so the "this code needs a password"
+    // answer below can be returned with the code still redeemable. Wrong guesses
+    // are still counted against the attempt cap on this pass.
+    const result = await verifyCode(db.promise(), normalizedEmail, parsedBody.data.code, {
+      verifierNonce: req.cookies?.[PENDING_SIGNUP_COOKIE] || null,
+      claim: false,
+    });
 
     if (!result.valid) {
       return res.status(400).json({ error: result.reason, code: "INVALID_CODE" });
     }
 
-    await db
-      .promise()
-      .query("UPDATE users SET email_verified = TRUE WHERE id = ?", [result.userId]);
+    // Redeeming the code proves control of the mailbox. Which password the
+    // account gets is a separate question: apply the one bound to this code only
+    // when the nonce shows the same browser registered it. Otherwise the code
+    // belongs to a registration this person did not make — a stranger's password
+    // must never be applied, so ask the person holding the mailbox to choose one.
+    // Codes issued before this binding existed carry no credential and take the
+    // same path.
+    if (!result.credentialHash && !submittedPassword) {
+      return res.status(400).json({
+        error:
+          "Choose a password to finish setting up this account. For your security we can't reuse the one from the original signup.",
+        code: "PASSWORD_REQUIRED",
+        email: normalizedEmail,
+      });
+    }
+
+    const activationPasswordHash =
+      result.credentialHash || (await bcrypt.hash(submittedPassword, 12));
+
+    if (!(await claimVerificationCode(db.promise(), result.codeId))) {
+      return res.status(400).json({
+        error: "This code was already used. Please request a new one.",
+        code: "INVALID_CODE",
+      });
+    }
+
+    res.clearCookie(PENDING_SIGNUP_COOKIE, { path: "/" });
+
+    await db.promise().query(
+      `UPDATE users
+          SET email_verified = TRUE,
+              password = ?,
+              password_set_by_user = TRUE
+        WHERE id = ?`,
+      [activationPasswordHash, result.userId],
+    );
 
     const [users] = await db.promise().query(
       "SELECT id, name, email, phone, address, profile_image, role, admin_role, is_active, signup_provider, password_set_by_user FROM users WHERE id = ? LIMIT 1",
@@ -612,12 +730,18 @@ router.post("/resend-verification", async (req, res) => {
       });
     }
 
-    const { code, expiresInMinutes } = await createVerificationCode(
-      db.promise(),
-      user.id,
-      normalizedEmail,
-    );
-    void sendVerificationCodeEmail(normalizedEmail, user.name, code, expiresInMinutes);
+    // Carry the pending registration's password onto the new code. Without this
+    // a user who simply never received the first email would finish
+    // verification with no password at all. A resend requested by anyone else
+    // just rotates the nonce, so it hands the requester nothing: the code still
+    // goes only to the mailbox, and the nonce cookie they receive is worthless
+    // unless they also read that mailbox.
+    await issueVerificationChallenge(res, {
+      userId: user.id,
+      email: normalizedEmail,
+      name: user.name,
+      credentialHash: await getPendingCredentialHash(db.promise(), user.id),
+    });
 
     return genericOk();
   } catch (error) {
@@ -628,6 +752,16 @@ router.post("/resend-verification", async (req, res) => {
 // Login user
 router.post("/login", async (req, res) => {
   const connection = await db.promise().getConnection();
+  // Idempotent so the connection can go back to the pool as soon as this
+  // handler is done with it, while `finally` still guarantees release on the
+  // paths that return or throw first. Not relying on the driver tolerating a
+  // double release — that behaviour is an implementation detail of mysql2.
+  let connectionReleased = false;
+  const releaseConnection = () => {
+    if (connectionReleased) return;
+    connectionReleased = true;
+    connection.release();
+  };
 
   try {
     const parsedBody = parsePayload(loginSchema, req.body || {});
@@ -642,7 +776,6 @@ router.post("/login", async (req, res) => {
         failureReason: "Invalid login payload",
       });
 
-      connection.release();
       return res.status(400).json({ error: parsedBody.error });
     }
 
@@ -663,7 +796,6 @@ router.post("/login", async (req, res) => {
         failureReason: "Invalid credentials",
       });
 
-      connection.release();
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
@@ -679,7 +811,6 @@ router.post("/login", async (req, res) => {
         failureReason: "Account disabled",
       });
 
-      connection.release();
       return res
         .status(403)
         .json({ error: "Account is disabled. Please contact support." });
@@ -688,7 +819,6 @@ router.post("/login", async (req, res) => {
     const lockStatus = await checkAccountLockout(connection, user.id, false);
     if (lockStatus.locked) {
       // Uniform generic response prevents account enumeration via lockout.
-      connection.release();
       return res.status(401).json({
         error: "Invalid email or password",
       });
@@ -707,16 +837,17 @@ router.post("/login", async (req, res) => {
         failureReason: "Invalid credentials",
       });
 
-      connection.release();
-
       // Uniform generic response prevents account enumeration via lockout.
       return res.status(401).json({
         error: "Invalid email or password",
       });
     }
 
+    // Last use of the pooled connection — hand it straight back. Everything
+    // below runs against the pool itself, so holding this one would only add
+    // contention against DB_CONNECTION_LIMIT.
     await resetLoginFailuresAtomic(connection, user.id);
-    connection.release();
+    releaseConnection();
 
     if (isAdminAccount(user)) {
       void recordLoginHistorySafely({
@@ -746,7 +877,6 @@ router.post("/login", async (req, res) => {
         failureReason: "Email not verified",
       });
 
-      connection.release();
       return res.status(403).json({
         error: "Please verify your email before logging in. Check your inbox for the verification code.",
         code: "EMAIL_NOT_VERIFIED",
@@ -773,6 +903,12 @@ router.post("/login", async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ error: "Server error" });
+  } finally {
+    // Catches every path the early release above does not reach. Eight inline
+    // release() calls used to cover the returns, but the catch was not one of
+    // them: any thrown error leaked a pooled connection, and ten of those
+    // exhaust the pool (DB_CONNECTION_LIMIT defaults to 10) and hang the app.
+    releaseConnection();
   }
 });
 
@@ -870,10 +1006,29 @@ router.post("/google", async (req, res) => {
 
       // Google has verified this email — clear any unverified flag so a user who
       // signed up with a password but never verified can still get in via Google.
+      //
+      // SECURITY: an unverified row may have been created by someone who does NOT
+      // own this mailbox — anyone can register an address and set their own
+      // password, the row just stays unverified and unusable. Flipping
+      // email_verified without touching that password handed the attacker a
+      // working credential for the real owner’s account the moment the owner
+      // signed in with Google. Proving mailbox ownership must therefore discard
+      // every credential set before ownership was proven. The column is NOT NULL,
+      // so it is overwritten with an unusable random hash; password_set_by_user
+      // = FALSE routes the owner through the existing first-time password setup
+      // in Security settings, which does not ask for a current password.
       if (!existingUser.email_verified) {
-        await db
-          .promise()
-          .query("UPDATE users SET email_verified = TRUE WHERE id = ?", [existingUser.id]);
+        await db.promise().query(
+          `UPDATE users
+              SET email_verified = TRUE,
+                  password = ?,
+                  password_set_by_user = FALSE
+            WHERE id = ?`,
+          [UNUSABLE_PASSWORD, existingUser.id],
+        );
+        // Keep the response in step with the row so the client shows the
+        // "set a password" state instead of "change password".
+        existingUser.password_set_by_user = false;
       }
 
       const authSession = await issueAuthSession(req, res, existingUser, "google");
@@ -1733,59 +1888,67 @@ router.post("/reset-password", async (req, res) => {
     }
 
     const connection = await db.promise().getConnection();
-    await ensurePasswordHistoryTable(connection);
-
-    const [userRows] = await connection.query(
-      "SELECT password, role, admin_role FROM users WHERE id = ?",
-      [tokenValidation.userId]
-    );
-
-    // Reset links issued to an admin before the check above existed — and any
-    // admin link opened on the customer page by mistake — stop here. Admin
-    // passwords change only through POST /api/admin/reset-password.
-    if (userRows.length && isAdminAccount(userRows[0])) {
+    // The outer catch below returns 500 without touching the connection, so every thrown
+    // error here used to leak a pooled slot permanently. Scope the connection to its
+    // own try/finally instead of releasing at each of the five early returns.
+    let connectionReleased = false;
+    const releaseConnection = () => {
+      if (connectionReleased) return;
+      connectionReleased = true;
       connection.release();
-      return res.status(400).json({ success: false, error: "Invalid or expired reset link." });
-    }
+    };
 
-    if (userRows.length && userRows[0].password) {
-      const isSamePassword = await bcrypt.compare(newPassword, userRows[0].password);
-      if (isSamePassword) {
-        connection.release();
+    try {
+      await ensurePasswordHistoryTable(connection);
+
+      const [userRows] = await connection.query(
+        "SELECT password, role, admin_role FROM users WHERE id = ?",
+        [tokenValidation.userId]
+      );
+
+      // Reset links issued to an admin before the check above existed — and any
+      // admin link opened on the customer page by mistake — stop here. Admin
+      // passwords change only through POST /api/admin/reset-password.
+      if (userRows.length && isAdminAccount(userRows[0])) {
+        return res.status(400).json({ success: false, error: "Invalid or expired reset link." });
+      }
+
+      if (userRows.length && userRows[0].password) {
+        const isSamePassword = await bcrypt.compare(newPassword, userRows[0].password);
+        if (isSamePassword) {
+          return res.status(400).json({
+            error: "New password must be different from your current password.",
+            success: false,
+          });
+        }
+      }
+
+      const reusedPassword = await hasReusedPassword(connection, tokenValidation.userId, newPassword, 5);
+      if (reusedPassword) {
         return res.status(400).json({
-          error: "New password must be different from your current password.",
+          error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
           success: false,
         });
       }
+
+      if (!(await claimPasswordResetToken(connection, tokenValidation.tokenId))) {
+        return res.status(400).json({
+          error: "This reset link has already been used or expired.",
+          success: false,
+        });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+      await connection.query(
+        "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
+        [hashedPassword, tokenValidation.userId]
+      );
+
+      await addPasswordToHistory(connection, tokenValidation.userId, newPassword);
+    } finally {
+      releaseConnection();
     }
-
-    const reusedPassword = await hasReusedPassword(connection, tokenValidation.userId, newPassword, 5);
-    if (reusedPassword) {
-      connection.release();
-      return res.status(400).json({
-        error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
-        success: false,
-      });
-    }
-
-    if (!(await claimPasswordResetToken(connection, tokenValidation.tokenId))) {
-      connection.release();
-      return res.status(400).json({
-        error: "This reset link has already been used or expired.",
-        success: false,
-      });
-    }
-
-    const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-    await connection.query(
-      "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
-      [hashedPassword, tokenValidation.userId]
-    );
-
-    await addPasswordToHistory(connection, tokenValidation.userId, newPassword);
-
-    connection.release();
 
 
     await invalidateAllUserTokens(db.promise(), tokenValidation.userId);

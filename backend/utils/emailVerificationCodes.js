@@ -24,11 +24,29 @@ const hashCode = (code) =>
 
 /**
  * Create + store a fresh verification code for a user, invalidating older ones.
- * Returns { code, expiresInMinutes } — the raw code is for emailing only.
+ *
+ * `credentialHash` is the bcrypt hash of the password submitted with THIS
+ * registration attempt. It is held here rather than on the users row so an
+ * unverified account never carries a usable credential: whoever registered an
+ * address they do not own cannot leave a working password behind for the real
+ * owner to activate. It is applied to users.password at verification time.
+ *
+ * The returned `verifierNonce` goes to the registrant's browser in an HttpOnly
+ * cookie; only its hash is stored. Verification compares the two so it can tell
+ * the registrant from someone completing a registration that is not theirs.
+ *
+ * Returns { code, expiresInMinutes, verifierNonce } — `code` is for emailing
+ * only, `verifierNonce` is for the cookie only. Neither is stored in the clear.
  */
-const createVerificationCode = async (dbPool, userId, email) => {
+const createVerificationCode = async (
+  dbPool,
+  userId,
+  email,
+  { credentialHash = null } = {},
+) => {
   const code = generateCode();
   const codeHash = hashCode(code);
+  const verifierNonce = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + CODE_EXPIRY_MINUTES * 60 * 1000);
 
   await dbPool.query(
@@ -37,12 +55,40 @@ const createVerificationCode = async (dbPool, userId, email) => {
   );
 
   await dbPool.query(
-    `INSERT INTO email_verification_codes (user_id, email, code_hash, expires_at)
-     VALUES (?, ?, ?, ?)`,
-    [userId, String(email).toLowerCase(), codeHash, expiresAt],
+    `INSERT INTO email_verification_codes
+       (user_id, email, code_hash, credential_hash, verifier_nonce_hash, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      String(email).toLowerCase(),
+      codeHash,
+      credentialHash,
+      hashCode(verifierNonce),
+      expiresAt,
+    ],
   );
 
-  return { code, expiresInMinutes: CODE_EXPIRY_MINUTES };
+  return { code, expiresInMinutes: CODE_EXPIRY_MINUTES, verifierNonce };
+};
+
+/**
+ * The credential still pending on a user's most recent unused code.
+ *
+ * "Resend code" must carry the original registration's password forward, or a
+ * user who simply did not receive the first email would finish verification
+ * with no password at all.
+ */
+const getPendingCredentialHash = async (dbPool, userId) => {
+  const [rows] = await dbPool.query(
+    `SELECT credential_hash
+       FROM email_verification_codes
+      WHERE user_id = ? AND is_used = FALSE AND expires_at > NOW()
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [userId],
+  );
+
+  return rows[0]?.credential_hash || null;
 };
 
 /**
@@ -66,11 +112,42 @@ const secondsUntilResendAllowed = async (dbPool, userId) => {
   return remaining > 0 ? remaining : 0;
 };
 
+// Constant-time compare of two hex digests of equal, fixed length.
+const nonceMatches = (submittedNonce, storedNonceHash) => {
+  if (!submittedNonce || !storedNonceHash) {
+    return false;
+  }
+
+  const submitted = Buffer.from(hashCode(submittedNonce), "utf8");
+  const stored = Buffer.from(String(storedNonceHash), "utf8");
+  if (submitted.length !== stored.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(submitted, stored);
+};
+
 /**
  * Verify a submitted code for an email.
- * Returns { valid: true, userId } on success, or { valid: false, reason } otherwise.
+ *
+ * Returns { valid: true, userId, credentialHash, codeId } on success, or
+ * { valid: false, reason } otherwise. `credentialHash` is non-null only when
+ * `verifierNonce` proves this is the same browser that registered — otherwise
+ * the caller must obtain a password from the person redeeming the code, because
+ * a password from someone else's registration attempt must never be applied.
+ *
+ * Pass `claim: false` to validate WITHOUT consuming the code. The caller then
+ * calls claimVerificationCode() once it can actually complete activation — that
+ * two-step exists so "this code needs a password" can be answered without
+ * burning the code and stranding the user. Wrong guesses still increment
+ * `attempts` on the check pass, so brute-force protection is unaffected.
  */
-const verifyCode = async (dbPool, email, code) => {
+const verifyCode = async (
+  dbPool,
+  email,
+  code,
+  { verifierNonce = null, claim = true } = {},
+) => {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   const cleanCode = String(code || "").trim();
 
@@ -79,7 +156,8 @@ const verifyCode = async (dbPool, email, code) => {
   }
 
   const [rows] = await dbPool.query(
-    `SELECT id, user_id, code_hash, expires_at, attempts, is_used
+    `SELECT id, user_id, code_hash, credential_hash, verifier_nonce_hash,
+            expires_at, attempts, is_used
      FROM email_verification_codes
      WHERE email = ?
      ORDER BY created_at DESC
@@ -117,23 +195,41 @@ const verifyCode = async (dbPool, email, code) => {
     return { valid: false, reason: "Incorrect code. Please try again." };
   }
 
-  const [claimResult] = await dbPool.query(
-    `UPDATE email_verification_codes
-        SET is_used = TRUE, used_at = NOW()
-      WHERE id = ? AND is_used = FALSE AND expires_at > NOW()`,
-    [record.id],
-  );
-
-  if (claimResult.affectedRows !== 1) {
+  if (claim && !(await claimVerificationCode(dbPool, record.id))) {
     return { valid: false, reason: "This code was already used. Please request a new one." };
   }
 
-  return { valid: true, userId: record.user_id };
+  return {
+    valid: true,
+    userId: record.user_id,
+    codeId: record.id,
+    credentialHash: nonceMatches(verifierNonce, record.verifier_nonce_hash)
+      ? record.credential_hash || null
+      : null,
+  };
+};
+
+/**
+ * Consume a code that verifyCode() already validated with `claim: false`.
+ * Atomic, so two requests racing the same code cannot both succeed.
+ * Returns true when this caller is the one that consumed it.
+ */
+const claimVerificationCode = async (dbPool, codeId) => {
+  const [result] = await dbPool.query(
+    `UPDATE email_verification_codes
+        SET is_used = TRUE, used_at = NOW()
+      WHERE id = ? AND is_used = FALSE AND expires_at > NOW()`,
+    [codeId],
+  );
+
+  return result.affectedRows === 1;
 };
 
 module.exports = {
   createVerificationCode,
+  getPendingCredentialHash,
   verifyCode,
+  claimVerificationCode,
   secondsUntilResendAllowed,
   CODE_EXPIRY_MINUTES,
   RESEND_COOLDOWN_SECONDS,

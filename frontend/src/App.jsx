@@ -146,7 +146,7 @@ function ReloadScrollRestoration() {
     let stored = null;
     try {
       stored = safeSessionStorage.getItem(key);
-    } catch {}
+    } catch { /* ignored: not fatal to this flow */ }
     const y = Number(stored);
     if (Number.isFinite(y)) {
       window.scrollTo({ top: y, left: 0, behavior: "auto" });
@@ -162,7 +162,7 @@ function ReloadScrollRestoration() {
       const key = `scroll:reload:${pathnameRef.current}`;
       try {
         safeSessionStorage.setItem(key, String(window.scrollY || 0));
-      } catch {}
+      } catch { /* ignored: not fatal to this flow */ }
     };
 
     const handleVisibilityChange = () => {
@@ -500,7 +500,7 @@ function App() {
             setLoading(false);
             try {
               safeSessionStorage.setItem("hasVisitedHome", "true");
-            } catch {}
+            } catch { /* ignored: not fatal to this flow */ }
 
             // Restore scroll position after loader hides
             setTimeout(() => {

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { authenticateToken, optionalAuthenticateToken, isAdmin } = require('../middleware/auth');
 const requirePermission = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
@@ -57,7 +57,7 @@ router.get('/:id', authenticateToken, isAdmin, requirePermission('manage_coupons
 });
 
 // Validate coupon (Public - used during checkout)
-router.post('/validate', restrictBody('code', 'orderAmount'), (req, res) => {
+router.post('/validate', optionalAuthenticateToken, restrictBody('code', 'orderAmount'), (req, res) => {
     const { code, orderAmount } = req.body;
     const parsedOrderAmount = Number(orderAmount);
 
@@ -72,22 +72,40 @@ router.post('/validate', restrictBody('code', 'orderAmount'), (req, res) => {
         AND (expiry_date IS NULL OR expiry_date > NOW())
     `;
     
-    db.query(query, [code.trim().toUpperCase()], (err, results) => {
+    db.query(query, [code.trim().toUpperCase()], async (err, results) => {
         if (err) {
             return res.status(500).json({ error: 'Database error' });
         }
-        
+
         if (results.length === 0) {
             return res.status(404).json({ error: 'Invalid or expired coupon code' });
         }
-        
+
         const coupon = results[0];
-        
+
         // Check if usage limit reached
         if (coupon.usage_limit && coupon.used_count >= coupon.usage_limit) {
             return res.status(400).json({ error: 'Coupon usage limit reached' });
         }
-        
+
+        // Per-customer cap. Order creation is the authority — this only tells a
+        // signed-in shopper up front instead of letting them reach the last step
+        // and get rejected. Guests skip it; there is no one to count yet.
+        if (req.user?.id && coupon.per_user_limit !== null && coupon.per_user_limit !== undefined) {
+            try {
+                const [[{ redemptions }]] = await db.promise().query(
+                    'SELECT COUNT(*) AS redemptions FROM coupon_redemptions WHERE coupon_id = ? AND user_id = ?',
+                    [coupon.id, req.user.id],
+                );
+                if (Number(redemptions) >= Number(coupon.per_user_limit)) {
+                    return res.status(400).json({ error: 'You have already used this coupon' });
+                }
+            } catch {
+                // Never block checkout on this advisory check — order creation
+                // enforces the same rule inside its transaction.
+            }
+        }
+
         // Check minimum order amount
         if (coupon.min_order_amount && parsedOrderAmount < coupon.min_order_amount) {
             return res.status(400).json({ 
@@ -122,10 +140,10 @@ router.post('/validate', restrictBody('code', 'orderAmount'), (req, res) => {
 });
 
 // Create coupon (Admin only)
-router.post('/', authenticateToken, isAdmin, requirePermission('manage_coupons'), restrictBody('code', 'description', 'discount_type', 'discount_value', 'min_order_amount', 'max_discount', 'usage_limit', 'expiry_date'), (req, res) => {
+router.post('/', authenticateToken, isAdmin, requirePermission('manage_coupons'), restrictBody('code', 'description', 'discount_type', 'discount_value', 'min_order_amount', 'max_discount', 'usage_limit', 'per_user_limit', 'expiry_date'), (req, res) => {
     const { 
         code, description, discount_type, discount_value, 
-        min_order_amount, max_discount, usage_limit, expiry_date 
+        min_order_amount, max_discount, usage_limit, per_user_limit, expiry_date 
     } = req.body;
 
     if (!String(code || '').trim()) {
@@ -149,18 +167,29 @@ router.post('/', authenticateToken, isAdmin, requirePermission('manage_coupons')
     const normalizedUsageLimit = usage_limit === null || usage_limit === undefined || usage_limit === ''
         ? null
         : Number(usage_limit);
+    // Secure default for NEW coupons only. Omitting the field entirely (an older
+    // client, a script) means "no opinion", so it gets one-per-customer — that
+    // default lives here rather than as a column default, which on ALTER TABLE
+    // would have rewritten every coupon already in circulation. Sending null or
+    // "" is an explicit "unlimited" and is honoured.
+    const normalizedPerUserLimit = per_user_limit === undefined
+        ? 1
+        : (per_user_limit === null || per_user_limit === ''
+            ? null
+            : Number(per_user_limit));
     if (!Number.isFinite(normalizedDiscountValue) || normalizedDiscountValue <= 0 ||
         (normalizedDiscountType === 'percentage' && normalizedDiscountValue > 100) ||
         !Number.isFinite(normalizedMinOrder) || normalizedMinOrder < 0 ||
         (normalizedMaxDiscount !== null && (!Number.isFinite(normalizedMaxDiscount) || normalizedMaxDiscount < 0)) ||
-        (normalizedUsageLimit !== null && (!Number.isInteger(normalizedUsageLimit) || normalizedUsageLimit < 1))) {
+        (normalizedUsageLimit !== null && (!Number.isInteger(normalizedUsageLimit) || normalizedUsageLimit < 1)) ||
+        (normalizedPerUserLimit !== null && (!Number.isInteger(normalizedPerUserLimit) || normalizedPerUserLimit < 1))) {
         return res.status(400).json({ error: 'Coupon values are invalid' });
     }
     
     const query = `
         INSERT INTO coupons 
-        (code, description, discount_type, discount_value, min_order_amount, max_discount, usage_limit, expiry_date) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (code, description, discount_type, discount_value, min_order_amount, max_discount, usage_limit, per_user_limit, expiry_date) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     
     db.query(query, [
@@ -171,6 +200,7 @@ router.post('/', authenticateToken, isAdmin, requirePermission('manage_coupons')
         normalizedMinOrder,
         normalizedMaxDiscount,
         normalizedUsageLimit,
+        normalizedPerUserLimit,
         expiry_date || null
     ], (err, result) => {
         if (err) {
@@ -201,16 +231,20 @@ router.post('/', authenticateToken, isAdmin, requirePermission('manage_coupons')
 });
 
 // Update coupon (Admin only)
-router.put('/:id', authenticateToken, isAdmin, requirePermission('manage_coupons'), restrictBody('code', 'description', 'discount_type', 'discount_value', 'min_order_amount', 'max_discount', 'usage_limit', 'expiry_date', 'is_active'), (req, res) => {
+router.put('/:id', authenticateToken, isAdmin, requirePermission('manage_coupons'), restrictBody('code', 'description', 'discount_type', 'discount_value', 'min_order_amount', 'max_discount', 'usage_limit', 'per_user_limit', 'expiry_date', 'is_active'), (req, res) => {
     const { 
         code, description, discount_type, discount_value, 
-        min_order_amount, max_discount, usage_limit, expiry_date, is_active 
+        min_order_amount, max_discount, usage_limit, per_user_limit, expiry_date, is_active 
     } = req.body;
     
     const query = `
         UPDATE coupons SET 
         code = ?, description = ?, discount_type = ?, discount_value = ?, 
-        min_order_amount = ?, max_discount = ?, usage_limit = ?, expiry_date = ?, is_active = ?
+        min_order_amount = ?, max_discount = ?, usage_limit = ?,
+        -- Leave per_user_limit alone when the client did not send it, rather than
+        -- resetting a limit an admin set. Sending null clears it on purpose.
+        per_user_limit = CASE WHEN ? = 1 THEN per_user_limit ELSE ? END,
+        expiry_date = ?, is_active = ?
         WHERE id = ?
     `;
 
@@ -223,12 +257,19 @@ router.put('/:id', authenticateToken, isAdmin, requirePermission('manage_coupons
     const normalizedUsageLimit = usage_limit === null || usage_limit === undefined || usage_limit === ''
         ? null
         : Number(usage_limit);
+    // On update an absent field means "unchanged" (see the CASE above), not
+    // "reset to unlimited". Sending null or "" is an explicit "unlimited".
+    const perUserLimitUnset = per_user_limit === undefined;
+    const normalizedPerUserLimit = per_user_limit === null || per_user_limit === ''
+        ? null
+        : Number(per_user_limit);
     if (!VALID_DISCOUNT_TYPES.has(normalizedDiscountType) ||
         !Number.isFinite(normalizedDiscountValue) || normalizedDiscountValue <= 0 ||
         (normalizedDiscountType === 'percentage' && normalizedDiscountValue > 100) ||
         !Number.isFinite(normalizedMinOrder) || normalizedMinOrder < 0 ||
         (normalizedMaxDiscount !== null && (!Number.isFinite(normalizedMaxDiscount) || normalizedMaxDiscount < 0)) ||
-        (normalizedUsageLimit !== null && (!Number.isInteger(normalizedUsageLimit) || normalizedUsageLimit < 1))) {
+        (normalizedUsageLimit !== null && (!Number.isInteger(normalizedUsageLimit) || normalizedUsageLimit < 1)) ||
+        (normalizedPerUserLimit !== null && (!Number.isInteger(normalizedPerUserLimit) || normalizedPerUserLimit < 1))) {
         return res.status(400).json({ error: 'Coupon values are invalid' });
     }
     
@@ -240,6 +281,8 @@ router.put('/:id', authenticateToken, isAdmin, requirePermission('manage_coupons
         normalizedMinOrder,
         normalizedMaxDiscount,
         normalizedUsageLimit,
+        perUserLimitUnset ? 1 : 0,
+        normalizedPerUserLimit,
         expiry_date,
         is_active !== undefined ? is_active : true,
         req.params.id

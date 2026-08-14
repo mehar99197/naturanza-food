@@ -2,7 +2,7 @@ const getStorage = (kind) => {
   try {
     if (typeof window === "undefined") return null;
     return window[kind] || null;
-  } catch (_) {
+  } catch {
     return null;
   }
 };
@@ -11,19 +11,19 @@ export const safeStorage = {
   get(kind, key) {
     try {
       return getStorage(kind)?.getItem(key) || null;
-    } catch (_) {
+    } catch {
       return null;
     }
   },
   set(kind, key, value) {
     try {
       getStorage(kind)?.setItem(key, value);
-    } catch (_) {}
+    } catch { /* ignored: not fatal to this flow */ }
   },
   remove(kind, key) {
     try {
       getStorage(kind)?.removeItem(key);
-    } catch (_) {}
+    } catch { /* ignored: not fatal to this flow */ }
   },
 };
 

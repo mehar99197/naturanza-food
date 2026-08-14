@@ -108,9 +108,9 @@ export function AdminSubscribers() {
               (c) => String(c.code || "").toUpperCase() === code,
             );
             setPromoCoupon(match || null);
-          } catch {}
+          } catch { /* ignored: not fatal to this flow */ }
         }
-      } catch {}
+      } catch { /* ignored: not fatal to this flow */ }
     })();
   }, []);
 

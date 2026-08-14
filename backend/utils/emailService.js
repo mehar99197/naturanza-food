@@ -10,6 +10,7 @@
 const nodemailer = require("nodemailer");
 const path = require("path");
 const dotenv = require("dotenv");
+const { escapeHtml } = require("./htmlEscape");
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
@@ -484,14 +485,6 @@ const generateNewsletterBroadcastEmail = ({ storeName, subject, bodyHtml, unsubs
 </html>
 `;
 };
-
-const escapeHtml = (value) =>
-  String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 
 const messageBodyToHtml = (message) =>
   escapeHtml(message)

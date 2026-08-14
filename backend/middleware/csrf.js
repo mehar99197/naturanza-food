@@ -65,14 +65,18 @@ const verifySignedToken = (signedToken, salt = "") => {
   }
 };
 
+// NOTE: there is deliberately no path exclusion list here. One used to exist,
+// documented as "GET requests only" — but SAFE_METHODS below already skips every
+// GET, so the list could only ever take effect on POST/PUT/PATCH/DELETE, the
+// exact requests it was meant not to cover. It left POST /api/products and
+// POST /api/categories with no CSRF check at all, reachable with an admin's
+// cookie session. Anything genuinely needing an exemption must be matched on
+// method AND path, not path alone.
 const csrfMiddleware = (options = {}) => {
   const {
     cookieSecure = process.env.NODE_ENV === "production",
     cookieSameSite = process.env.NODE_ENV === "production" ? "strict" : "lax",
-    excludePaths = [],
   } = options;
-
-  const excludedPaths = new Set(excludePaths);
 
   const shouldSkip = (req) => {
     if (SAFE_METHODS.has(req.method)) {
@@ -80,10 +84,6 @@ const csrfMiddleware = (options = {}) => {
     }
 
     if (isStaticAssetPath(req.path)) {
-      return true;
-    }
-
-    if (excludedPaths.has(req.path)) {
       return true;
     }
 

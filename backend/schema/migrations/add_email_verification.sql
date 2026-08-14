@@ -12,6 +12,12 @@ CREATE TABLE IF NOT EXISTS email_verification_codes (
     user_id INT NOT NULL,
     email VARCHAR(254) NOT NULL,
     code_hash CHAR(64) NOT NULL,
+    -- Password submitted with the registration attempt that issued this code.
+    -- Applied to users.password only on successful verification — see 026.
+    credential_hash VARCHAR(255) NULL,
+    -- SHA-256 of the nonce handed to the registrant's browser, proving the
+    -- person entering the code is the person who registered.
+    verifier_nonce_hash CHAR(64) NULL,
     expires_at DATETIME NOT NULL,
     attempts INT NOT NULL DEFAULT 0,
     is_used BOOLEAN NOT NULL DEFAULT FALSE,

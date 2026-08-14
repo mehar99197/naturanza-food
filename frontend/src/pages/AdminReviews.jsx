@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AlertCircle, RefreshCw, Star, Trash2 } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
 import { adminAPI } from "@/services/api";

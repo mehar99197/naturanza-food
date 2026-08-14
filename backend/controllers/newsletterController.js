@@ -8,6 +8,7 @@ const {
   sendNewsletterBroadcastEmail,
   FRONTEND_URL,
 } = require("../utils/emailService");
+const { escapeHtml } = require("../utils/htmlEscape");
 
 const BACKEND_URL =
   process.env.BACKEND_URL ||
@@ -151,7 +152,7 @@ const unsubscribe = async (req, res) => {
       renderMessagePage({
         title: "Unsubscribed",
         heading: "You're unsubscribed",
-        message: `<strong>${subscriber.email}</strong> has been removed from our list. We're sorry to see you go!`,
+        message: `<strong>${escapeHtml(subscriber.email)}</strong> has been removed from our list. We're sorry to see you go!`,
       }),
     );
   } catch (error) {
@@ -211,7 +212,7 @@ const verify = async (req, res) => {
       renderMessagePage({
         title: "Subscription confirmed",
         heading: "You're all set! 🌿",
-        message: `<strong>${subscriber.email}</strong> has been successfully subscribed to our newsletter.`,
+        message: `<strong>${escapeHtml(subscriber.email)}</strong> has been successfully subscribed to our newsletter.`,
       }),
     );
   } catch (error) {

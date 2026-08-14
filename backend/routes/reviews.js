@@ -41,6 +41,28 @@ router.post('/', authenticateToken, restrictBody('product_id', 'rating', 'commen
       return res.status(400).json({ error: 'You have already reviewed this product' });
     }
 
+    // Only customers who actually received this product may review it. Without
+    // this, any signed-up account could rate any product, which turns review
+    // moderation into a manual workload that grows with traffic and lets a
+    // competitor or a bot shape the storefront's ratings.
+    const [purchases] = await db.promise().query(
+      `SELECT o.id
+         FROM orders o
+         JOIN order_items oi ON oi.order_id = o.id
+        WHERE o.user_id = ?
+          AND oi.product_id = ?
+          AND o.status = 'delivered'
+        LIMIT 1`,
+      [user_id, parsedProductId]
+    );
+
+    if (purchases.length === 0) {
+      return res.status(403).json({
+        error: 'You can review this product once your order for it has been delivered.',
+        code: 'PURCHASE_REQUIRED',
+      });
+    }
+
     // New reviews remain pending until an authorized admin approves them.
     const [result] = await db.promise().query(
       `INSERT INTO reviews (user_id, product_id, rating, comment, is_approved, created_at)

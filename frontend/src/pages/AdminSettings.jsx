@@ -82,7 +82,7 @@ export function AdminSettings() {
           setSettings((prev) => ({ ...prev, currency: adminData.currency }));
           setOriginalSettings((prev) => ({ ...prev, currency: adminData.currency }));
         }
-      } catch {}
+      } catch { /* ignored: not fatal to this flow */ }
     })();
   }, []);
 

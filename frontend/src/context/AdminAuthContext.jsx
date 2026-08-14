@@ -11,10 +11,10 @@ const safeLocalStorage = {
     try { return localStorage.getItem(key); } catch { return null; }
   },
   setItem(key, value) {
-    try { localStorage.setItem(key, value); } catch {}
+    try { localStorage.setItem(key, value); } catch { /* ignored: not fatal to this flow */ }
   },
   removeItem(key) {
-    try { localStorage.removeItem(key); } catch {}
+    try { localStorage.removeItem(key); } catch { /* ignored: not fatal to this flow */ }
   },
 };
 
@@ -62,7 +62,7 @@ export const AdminAuthProvider = ({ children }) => {
       }
 
       return { state: "unknown" };
-    } catch (error) {
+    } catch {
       return { state: "unknown" };
     }
   };
@@ -80,7 +80,7 @@ export const AdminAuthProvider = ({ children }) => {
       try {
         const parsedAdmin = JSON.parse(adminData);
         setAdmin(parsedAdmin);
-      } catch (error) {
+      } catch {
         safeLocalStorage.removeItem("adminData");
         setLoading(false);
         return;
@@ -240,7 +240,7 @@ export const AdminAuthProvider = ({ children }) => {
   const adminLogout = async () => {
     try {
       await adminAPI.logout();
-    } catch (error) {
+    } catch {
       // Local cleanup still happens even if backend logout fails.
     }
     clearAdminAuthState();

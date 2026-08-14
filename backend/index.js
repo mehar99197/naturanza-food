@@ -331,14 +331,59 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 // Serve static files (images)
 // Persistent user uploads first — these live outside the git-deployed tree so
-// they survive redeploys (payment screenshots, uploaded product/category images).
-const { UPLOADS_IMAGES_DIR } = require("./middleware/upload");
+// they survive redeploys (uploaded product/category/blog/avatar images).
+const {
+  UPLOADS_IMAGES_DIR,
+  PUBLIC_UPLOAD_FOLDERS,
+  PRIVATE_UPLOAD_FOLDERS,
+} = require("./middleware/upload");
+
 // Payment screenshots contain private customer and transaction data. They are
-// served only through the authenticated admin endpoint below, never as static files.
-app.use("/images/payment-verifications", (req, res) => {
-  return res.status(404).end();
+// served only through the authenticated admin endpoint, never as static files.
+//
+// Mounting a deny-handler on "/images/payment-verifications" was NOT enough:
+// Express matches a mount path against decoded path *segments*, so "%2f" and a
+// doubled slash never matched the prefix, while express.static's own
+// normalisation still resolved the file — "/images/payment-verifications%2fx.webp"
+// returned the screenshot unauthenticated. The path is now decoded first and
+// every segment is checked.
+const requestsPrivateUpload = (rawPath) => {
+  let decoded = String(rawPath || "");
+  // Decode repeatedly so a double-encoded separator cannot hide the segment.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let next;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      break;
+    }
+    if (next === decoded) break;
+    decoded = next;
+  }
+
+  return decoded
+    .replace(/\\/g, "/")
+    .toLowerCase()
+    .split("/")
+    .some((segment) => PRIVATE_UPLOAD_FOLDERS.has(segment));
+};
+
+app.use("/images", (req, res, next) => {
+  if (requestsPrivateUpload(req.path)) {
+    return res.status(404).end();
+  }
+  next();
 });
-app.use("/images", express.static(UPLOADS_IMAGES_DIR));
+
+// Second line of defence: give each public upload folder its own static root so
+// the private folder is not inside any static root at all, whatever the URL
+// looks like. A traversal out of one of these roots is rejected by `send`.
+for (const folder of PUBLIC_UPLOAD_FOLDERS) {
+  app.use(
+    `/images/${folder}`,
+    express.static(path.join(UPLOADS_IMAGES_DIR, folder)),
+  );
+}
 app.use(
   "/images",
   express.static(path.join(__dirname, "..", "public", "images")),
@@ -449,6 +494,36 @@ const ensureDefaultAdminAccount = async () => {
   }
 };
 
+// The overselling defence in utils/stockReservations.js rests entirely on
+// transactions and SELECT ... FOR UPDATE, and the schema declares foreign keys
+// throughout — all of which MyISAM accepts and silently ignores. schema/database.sql
+// now pins ENGINE=InnoDB, but an existing deployment created before that could
+// have drifted, and the failure mode is invisible: no error, just locks that
+// never lock. Warn loudly rather than block boot, since a running store must not
+// be taken down by a diagnostic.
+const warnOnNonInnoDbTables = async () => {
+  try {
+    const [rows] = await dbPool.query(
+      `SELECT TABLE_NAME, ENGINE
+         FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_TYPE = 'BASE TABLE'
+          AND (ENGINE IS NULL OR ENGINE <> 'InnoDB')`,
+    );
+
+    if (rows.length > 0) {
+      const names = rows.map((row) => `${row.TABLE_NAME} (${row.ENGINE || "unknown"})`);
+      console.warn(
+        `WARNING: ${rows.length} table(s) are not InnoDB: ${names.join(", ")}. ` +
+          "Transactions, row locks and foreign keys do NOT work on these — stock " +
+          "reservations can oversell. Convert with: ALTER TABLE <name> ENGINE=InnoDB;",
+      );
+    }
+  } catch (error) {
+    console.warn("Could not verify table storage engines:", error.message);
+  }
+};
+
 const ensureDatabaseCompatibility = async () => {
   try {
     await ensureProductionSchema(dbPool);
@@ -461,6 +536,7 @@ const ensureDatabaseCompatibility = async () => {
       throw error;
     }
   }
+  await warnOnNonInnoDbTables();
   await ensureDefaultAdminAccount();
 };
 
@@ -472,7 +548,6 @@ app.locals.db = db;
 const {
   sanitizeRequestBody,
   sanitizeQueryParams,
-  preventSQLInjection,
 } = require("./middleware/security");
 const { ensurePasswordHistoryTable } = require("./utils/passwordHistory");
 
@@ -494,20 +569,15 @@ const initPasswordHistory = async () => {
 // Apply security middleware globally
 app.use(sanitizeRequestBody);
 app.use(sanitizeQueryParams);
-app.use(preventSQLInjection);
 
 // Apply CSRF protection (skip in development if explicitly disabled)
 const csrfEnabled = String(process.env.ENABLE_CSRF_PROTECTION || "true").toLowerCase();
 if (csrfEnabled !== "false" && process.env.NODE_ENV !== "development") {
-  app.use(csrfMiddleware({
-    excludePaths: [
-      "/api/health",
-      "/api/products",           // GET requests only
-      "/api/categories",         // GET requests only
-      "/api/geolocation",
-      "/api/announcements/active",
-    ],
-  }));
+  // No exclusions: every path previously listed here is GET-only, and GETs are
+  // already skipped inside the middleware. The list therefore only exempted the
+  // unsafe methods on those prefixes — POST /api/products and POST
+  // /api/categories were running with no CSRF check at all.
+  app.use(csrfMiddleware());
 }
 
 // Routes

@@ -95,28 +95,34 @@ router.get('/currency', async (req, res) => {
       });
     }
 
-    // Call IP geolocation service (ip-api.com - free, no key, 45 req/min)
-    const controller = new AbortController();
-    const geoTimeout = setTimeout(() => controller.abort(), 4000);
+    // Both providers are HTTPS. The previous primary (ip-api.com) only serves
+    // plaintext on its free tier, so anyone on the network path could rewrite
+    // the response and choose the visitor's country — which selects the
+    // currency shown on the storefront. ipwho.is is the same fallback provider
+    // already used for admin login locations.
     let data;
 
     try {
-      const response = await fetch(`http://ip-api.com/json/${encodeURIComponent(userIP)}?fields=status,country,countryCode`, {
-        signal: controller.signal,
-      });
+      const response = await fetch(
+        `https://ipapi.co/${encodeURIComponent(userIP)}/json/`,
+        { signal: AbortSignal.timeout(4000) },
+      );
+      if (!response.ok) throw new Error('ipapi lookup failed');
       const body = await response.json();
-      if (body.status === 'success') {
-        data = { country_code: body.countryCode, country_name: body.country };
-      } else {
-        throw new Error('ip-api lookup failed');
-      }
+      if (body?.error || !body?.country_code) throw new Error('ipapi lookup failed');
+      data = body;
     } catch {
-      // Fall back to ipapi.co
-      const fallbackRes = await fetch(`https://ipapi.co/${encodeURIComponent(userIP)}/json/`, { signal: AbortSignal.timeout(4000) });
+      const fallbackRes = await fetch(
+        `https://ipwho.is/${encodeURIComponent(userIP)}`,
+        { signal: AbortSignal.timeout(4000) },
+      );
       if (!fallbackRes.ok) throw new Error('Geolocation service unavailable');
-      data = await fallbackRes.json();
-    } finally {
-      clearTimeout(geoTimeout);
+      const fallbackBody = await fallbackRes.json();
+      if (fallbackBody?.success !== true) throw new Error('Geolocation service unavailable');
+      data = {
+        country_code: fallbackBody.country_code,
+        country_name: fallbackBody.country,
+      };
     }
     
     // Map country to currency

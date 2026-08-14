@@ -42,13 +42,7 @@ const toPublicProduct = (product = {}) => {
 const serializeProducts = (products, req) =>
   isAdminRequest(req) ? products : products.map(toPublicProduct);
 
-const escapeHtml = (value) =>
-  String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+const { escapeHtml } = require('../utils/htmlEscape');
 
 const queueLowStockEmail = (lowStockEvent, excludeUserId) => {
   if (!lowStockEvent) {

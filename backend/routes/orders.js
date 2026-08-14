@@ -8,6 +8,7 @@ const { createInvoicePdfBuffer } = require('../utils/invoicePdf');
 const { getAdminSettings } = require('../utils/adminSettings');
 const { insertAdminNotifications, getAdminRecipients } = require('../utils/adminNotifications');
 const { sendEmail } = require('../utils/emailService');
+const { escapeHtml } = require('../utils/htmlEscape');
 const {
   reserveStockOnConnection,
   releaseReservationsOnConnection,
@@ -45,7 +46,11 @@ const safeNumber = (value, fallback = 0) => {
 
 const buildInClause = (ids) => ids.map(() => '?').join(', ');
 
-const releaseCouponUsageOnConnection = async (connection, couponCode) => {
+// Cancelling an order gives the coupon back. The redemption row must go with it,
+// otherwise the customer keeps burning their per-customer allowance on orders
+// they cancelled — and, before this row existed, place-then-cancel simply
+// restored a usage-limited code over and over.
+const releaseCouponUsageOnConnection = async (connection, couponCode, orderId = null) => {
   const normalizedCode = String(couponCode || '').trim().toUpperCase();
   if (!normalizedCode) return;
   await connection.query(
@@ -54,6 +59,12 @@ const releaseCouponUsageOnConnection = async (connection, couponCode) => {
       WHERE code = ? AND used_count > 0`,
     [normalizedCode],
   );
+  if (orderId) {
+    await connection.query(
+      'DELETE FROM coupon_redemptions WHERE order_id = ? AND code = ?',
+      [orderId, normalizedCode],
+    );
+  }
 };
 
 const normalizePaymentMethod = (rawMethod) => {
@@ -284,8 +295,8 @@ const sendAdminAlertEmails = async ({
       <div style="font-family: Arial, sans-serif; color: #1f2937;">
         <h2 style="margin: 0 0 8px; color: #0f172a;">New Order Received</h2>
         <p style="margin: 0 0 10px;">Order ${orderNumber} has been placed.</p>
-        <p style="margin: 0 0 6px;">Customer: ${order?.customer_name || "Guest"}</p>
-        <p style="margin: 0 0 6px;">Email: ${order?.customer_email || "-"}</p>
+        <p style="margin: 0 0 6px;">Customer: ${escapeHtml(order?.customer_name || "Guest")}</p>
+        <p style="margin: 0 0 6px;">Email: ${escapeHtml(order?.customer_email || "-")}</p>
         <p style="margin: 0;">Total: ${Number(totalAmount || 0).toFixed(2)}</p>
       </div>
     `;
@@ -298,7 +309,7 @@ const sendAdminAlertEmails = async ({
     const itemsHtml = lowStockEvents
       .map(
         (event) =>
-          `<li>${event.product_name} - ${event.stock_quantity} left</li>`,
+          `<li>${escapeHtml(event.product_name)} - ${escapeHtml(event.stock_quantity)} left</li>`,
       )
       .join("");
 
@@ -349,13 +360,17 @@ const sendCustomerOrderConfirmation = async ({
   const orderShipping = safeNumber(order?.shipping_cost, 0);
   const orderTotal = safeNumber(order?.total_amount, safeNumber(totalAmount, 0));
   const codRemaining = Math.max(0, orderSubtotal - orderDiscount + orderTax);
-  const orderCoupon = order?.coupon_code ? String(order.coupon_code) : null;
-  const orderNotes = order?.notes ? String(order.notes) : null;
+  // Escaped at the point of derivation: every value below is typed by the
+  // customer at checkout and is interpolated straight into the HTML body of an
+  // email. React's escaping does not apply here — nothing between the order form
+  // and the inbox escapes these.
+  const orderCoupon = order?.coupon_code ? escapeHtml(order.coupon_code) : null;
+  const orderNotes = order?.notes ? escapeHtml(order.notes) : null;
   const shippingAddress = order?.shipping_address
-    ? String(order.shipping_address)
+    ? escapeHtml(order.shipping_address)
     : "-";
-  const shippingCity = order?.city ? String(order.city) : "-";
-  const phoneNumber = order?.phone ? String(order.phone) : "-";
+  const shippingCity = order?.city ? escapeHtml(order.city) : "-";
+  const phoneNumber = order?.phone ? escapeHtml(order.phone) : "-";
   const couponRow = orderCoupon
     ? `<tr>
           <td style="padding:8px 0;color:#64748b;font-size:13px;">Coupon Code</td>
@@ -384,7 +399,7 @@ const sendCustomerOrderConfirmation = async ({
       (item, i) =>
         `<tr>
           <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:center;">${i + 1}</td>
-          <td style="padding:8px;border-bottom:1px solid #e2e8f0;">${item.name || item.product_name}</td>
+          <td style="padding:8px;border-bottom:1px solid #e2e8f0;">${escapeHtml(item.name || item.product_name)}</td>
           <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:center;">${safeNumber(item.quantity, 0)}</td>
           <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;">PKR ${safeNumber(item.final_price || item.price, 0).toFixed(2)}</td>
           <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;">PKR ${(safeNumber(item.final_price || item.price, 0) * safeNumber(item.quantity, 0)).toFixed(2)}</td>
@@ -409,7 +424,7 @@ const sendCustomerOrderConfirmation = async ({
           </tr>
           <tr>
             <td style="padding:40px;">
-              <p style="margin:0 0 24px;color:#475569;font-size:16px;line-height:1.6;">Hi <strong>${customerName || "Valued Customer"}</strong>,</p>
+              <p style="margin:0 0 24px;color:#475569;font-size:16px;line-height:1.6;">Hi <strong>${escapeHtml(customerName || "Valued Customer")}</strong>,</p>
               <p style="margin:0 0 24px;color:#475569;font-size:16px;line-height:1.6;">Thank you for your order! We're getting it ready for you.</p>
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin-bottom:24px;">
                 <tbody>
@@ -876,6 +891,7 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       ? Math.min(Math.max(safeNumber(adminSettings.storeDiscountPercentage, 0), 0), 90)
       : 0;
     let effectiveCouponCode = couponCode;
+    let appliedCouponId = null;
 
     if (storeDiscountPercentage > 0) {
       effectiveCouponCode = null;
@@ -887,18 +903,42 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       }, 0);
     } else if (couponCode) {
       const [[coupon]] = await connection.query(
-        `SELECT discount_type, discount_value, min_order_amount, max_discount, usage_limit, used_count
+        `SELECT id, discount_type, discount_value, min_order_amount, max_discount,
+                usage_limit, per_user_limit, used_count
            FROM coupons
           WHERE code = ? AND is_active = TRUE
             AND (expiry_date IS NULL OR expiry_date > NOW())
           FOR UPDATE`,
         [couponCode],
       );
+
+      // Per-customer cap. coupons.used_count is global and says nothing about
+      // who redeemed, so without this one customer could apply the same code to
+      // every order they place. NULL per_user_limit means deliberately unlimited.
+      let perUserExhausted = false;
+      if (coupon && coupon.per_user_limit !== null && coupon.per_user_limit !== undefined) {
+        // FOR UPDATE, not a plain count: under REPEATABLE READ a non-locking
+        // read uses the snapshot from the start of this transaction, so two
+        // concurrent checkouts by the same customer would both see zero prior
+        // redemptions and both pass. A locking read sees the latest committed
+        // rows and serialises them on the narrow (coupon_id, user_id) index range.
+        const [[{ redemptions }]] = await connection.query(
+          `SELECT COUNT(*) AS redemptions
+             FROM coupon_redemptions
+            WHERE coupon_id = ? AND user_id = ?
+            FOR UPDATE`,
+          [coupon.id, req.user.id],
+        );
+        perUserExhausted = Number(redemptions) >= Number(coupon.per_user_limit);
+      }
+
       if (
         coupon &&
+        !perUserExhausted &&
         !(coupon.usage_limit && coupon.used_count >= coupon.usage_limit) &&
         !(coupon.min_order_amount && subtotal < safeNumber(coupon.min_order_amount))
       ) {
+        appliedCouponId = coupon.id;
         if (String(coupon.discount_type) === 'percentage') {
           discountAmount = (subtotal * safeNumber(coupon.discount_value)) / 100;
           if (coupon.max_discount && discountAmount > safeNumber(coupon.max_discount)) {
@@ -909,6 +949,7 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
         }
       } else {
         effectiveCouponCode = null;
+        appliedCouponId = null;
       }
     }
     discountAmount = Math.min(Math.max(0, discountAmount), subtotal);
@@ -975,6 +1016,17 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     );
 
     const orderId = orderInsertResult.insertId;
+
+    // Record WHO redeemed, not just that a redemption happened. coupons.used_count
+    // is a global tally; without this row the per-customer cap checked above has
+    // nothing to count, and cancelling an order could hand the code straight back.
+    if (appliedCouponId && effectiveCouponCode) {
+      await connection.query(
+        `INSERT INTO coupon_redemptions (coupon_id, user_id, order_id, code, discount_amount)
+         VALUES (?, ?, ?, ?, ?)`,
+        [appliedCouponId, req.user.id, orderId, effectiveCouponCode, discountAmount],
+      );
+    }
 
     const orderItemsValues = cartItems.map((item) => {
       const unitPrice = safeNumber(item.final_price, safeNumber(item.price, 0));
@@ -1217,31 +1269,81 @@ router.get('/my-orders', authenticateToken, async (req, res) => {
 });
 
 // Get all orders (Admin only)
+// Admin order list. Returns one page plus the matching total, so the client can
+// render pagination instead of walking the whole table — the admin panel used to
+// request every order ever placed on each visit, hydrating items, status history,
+// shipments and transactions for all of them.
+//
+// Search is applied here rather than in the browser for the same reason: filtering
+// client-side only works if the client already holds every row.
 router.get('/admin/all', authenticateToken, isAdmin, requireAnyOrderReadPermission, async (req, res) => {
-  const status = req.query.status ? String(req.query.status).trim() : null;
+  // Accepts one status or a comma-separated list ("processing,shipped,delivered"),
+  // so a screen that covers several states — the Shipping queue — can still be
+  // narrowed server-side instead of filtering a full table in the browser.
+  const statuses = String(req.query.status || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value && value !== 'all' && ALLOWED_ORDER_STATUSES.has(value));
+  const search = req.query.search ? String(req.query.search).trim() : '';
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
 
   try {
-    let query = `
-      SELECT o.*, u.name AS customer_name, u.email AS customer_email,
-             (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) AS item_count
-      FROM orders o
-      JOIN users u ON o.user_id = u.id
-    `;
-    const params = [];
+    const filters = [];
+    const filterParams = [];
 
-    if (status) {
-      query += ' WHERE o.status = ?';
-      params.push(status);
+    if (statuses.length === 1) {
+      filters.push('o.status = ?');
+      filterParams.push(statuses[0]);
+    } else if (statuses.length > 1) {
+      filters.push(`o.status IN (${statuses.map(() => '?').join(', ')})`);
+      filterParams.push(...statuses);
     }
 
-    query += ' ORDER BY o.created_at DESC LIMIT ? OFFSET ?';
-    params.push(limit, offset);
+    if (search) {
+      // "ORD-000123", "123", a name, an email, a phone or part of an address.
+      // The order code is a display format, so strip it back to the id.
+      const numericId = Number.parseInt(String(search).replace(/^ord-?/i, ''), 10);
+      const like = `%${search}%`;
+      const clauses = [
+        'u.name LIKE ?',
+        'u.email LIKE ?',
+        'o.customer_name LIKE ?',
+        'o.customer_email LIKE ?',
+        'o.phone LIKE ?',
+        'o.shipping_address LIKE ?',
+      ];
+      filterParams.push(like, like, like, like, like, like);
 
-    const [orders] = await db.promise().query(query, params);
+      if (Number.isInteger(numericId) && numericId > 0) {
+        clauses.push('o.id = ?');
+        filterParams.push(numericId);
+      }
+
+      filters.push(`(${clauses.join(' OR ')})`);
+    }
+
+    const whereClause = filters.length ? ` WHERE ${filters.join(' AND ')}` : '';
+
+    const [[{ total }]] = await db.promise().query(
+      `SELECT COUNT(*) AS total
+         FROM orders o
+         JOIN users u ON o.user_id = u.id${whereClause}`,
+      filterParams,
+    );
+
+    const [orders] = await db.promise().query(
+      `SELECT o.*, u.name AS customer_name, u.email AS customer_email,
+              (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) AS item_count
+         FROM orders o
+         JOIN users u ON o.user_id = u.id${whereClause}
+        ORDER BY o.created_at DESC
+        LIMIT ? OFFSET ?`,
+      [...filterParams, limit, offset],
+    );
+
     const hydratedOrders = await hydrateOrders(db.promise(), orders);
-    res.json(hydratedOrders);
+    res.json({ data: hydratedOrders, total: Number(total) || 0, limit, offset });
   } catch (error) {
     res.status(500).json({ error: 'Database error' });
   }
@@ -1471,7 +1573,7 @@ router.put('/:id/cancel', authenticateToken, restrictBody(), async (req, res) =>
       'cancelled',
       orderId,
     ]);
-    await releaseCouponUsageOnConnection(connection, order.coupon_code);
+    await releaseCouponUsageOnConnection(connection, order.coupon_code, orderId);
 
     await insertOrderStatusHistory(connection, {
       orderId,
@@ -1703,7 +1805,7 @@ router.put('/:id/status', authenticateToken, isAdmin, requireOrderOrShippingPerm
         req.user.id,
         `Stock restored after admin cancelled order #${orderId}`,
       );
-      await releaseCouponUsageOnConnection(connection, order.coupon_code);
+      await releaseCouponUsageOnConnection(connection, order.coupon_code, orderId);
     }
 
     if (nextStatusRaw === 'shipped' || nextStatusRaw === 'delivered') {
@@ -1744,7 +1846,7 @@ router.put('/:id/status', authenticateToken, isAdmin, requireOrderOrShippingPerm
             verification_stage, status)
          VALUES (?, ?, ?, ?, 'cod', 'final_collection', 'pending')`,
         [
-          String(orderId),
+          Number(orderId),
           order.customer_name || 'Customer',
           order.phone || null,
           stage2Amount,
@@ -1829,7 +1931,7 @@ router.delete('/:id', authenticateToken, isAdmin, requirePermission('manage_orde
         req.user.id,
         `Stock restored after admin deleted order #${orderId}`,
       );
-      await releaseCouponUsageOnConnection(connection, order.coupon_code);
+      await releaseCouponUsageOnConnection(connection, order.coupon_code, orderId);
     }
 
     await insertNotification(

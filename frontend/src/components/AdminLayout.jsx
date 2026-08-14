@@ -245,9 +245,13 @@ function AdminLayoutShell({ children }) {
   }, [location.pathname]);
 
   useEffect(() => {
+    // Capture the node now. Reading navScrollRef.current inside the cleanup runs
+    // after React has already detached the ref, so on unmount it was usually
+    // null and the sidebar scroll position was silently never saved.
+    const navElement = navScrollRef.current;
     return () => {
-      if (navScrollRef.current) {
-        persistSidebarScrollTop(navScrollRef.current.scrollTop);
+      if (navElement) {
+        persistSidebarScrollTop(navElement.scrollTop);
       }
     };
   }, []);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -70,11 +70,19 @@ export function AdminOrders() {
     updateOrderStatus,
     deleteOrder,
     getOrderStats,
+    totalOrders,
+    orderQuery,
+    setOrderFilters,
+    adminPageSize,
   } = useOrders();
   const { settings } = useSettings();
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  // Local mirror so typing stays responsive; the server request is debounced
+  // below. statusFilter/searchQuery now select rows on the SERVER — filtering in
+  // the browser only worked while the browser held every order ever placed.
+  const [searchQuery, setSearchQuery] = useState(orderQuery.search);
+  const statusFilter = orderQuery.status;
+  const setStatusFilter = (value) => setOrderFilters({ status: value });
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -87,41 +95,31 @@ export function AdminOrders() {
     note: "",
   });
 
-  const orderRows = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+  // Claim the shared order query on mount. The Shipping screen widens the page
+  // size and pins its own status set, so arriving from there must reset both or
+  // this table would inherit them.
+  useEffect(() => {
+    setOrderFilters({ status: "all", pageSize: adminPageSize, search: "" });
+  }, [setOrderFilters, adminPageSize]);
 
-    return [...orders]
-      .filter((order) => {
-        const matchesStatus =
-          statusFilter === "all" || String(order.status || "pending") === statusFilter;
+  // The server already applied the status filter, the search and the sort, and
+  // returned exactly this page.
+  const orderRows = orders;
 
-        if (!matchesStatus) {
-          return false;
-        }
+  const pageSize = orderQuery.pageSize;
+  const currentPage = orderQuery.page;
+  const totalPages = Math.max(1, Math.ceil(totalOrders / pageSize));
+  const firstRowIndex = totalOrders === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const lastRowIndex = Math.min(currentPage * pageSize, totalOrders);
 
-        if (!query) {
-          return true;
-        }
-
-        const orderCode = `ORD-${String(order.id).padStart(6, "0")}`;
-        const searchable = [
-          orderCode,
-          order.customer_name,
-          order.customer_email,
-          order.customer_phone,
-          order.shipping_address,
-        ]
-          .map((value) => String(value || "").toLowerCase())
-          .join(" ");
-
-        return searchable.includes(query);
-      })
-      .sort(
-        (a, b) =>
-          new Date(b.order_date || b.created_at || 0) -
-          new Date(a.order_date || a.created_at || 0),
-      );
-  }, [orders, searchQuery, statusFilter]);
+  // Debounced so a search is one request per pause, not one per keystroke.
+  useEffect(() => {
+    if (searchQuery === orderQuery.search) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setOrderFilters({ search: searchQuery }), 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery, orderQuery.search, setOrderFilters]);
 
   const selectedOrder = orderRows.find((order) => order.id === selectedOrderId) || null;
   const orderStats = getOrderStats();
@@ -318,7 +316,7 @@ export function AdminOrders() {
                 mobileView === "queue" ? "bg-[#2a5f1e] text-white" : "text-gray-600"
               }`}
             >
-              Queue ({orderRows.length})
+              Queue ({totalOrders})
             </button>
             <button
               type="button"
@@ -415,6 +413,35 @@ export function AdminOrders() {
                 <p className="p-4 text-sm text-gray-500">No orders found.</p>
               )}
             </div>
+
+            {totalOrders > 0 && (
+              <div className="flex items-center justify-between gap-3 border-t border-gray-200 px-4 py-3">
+                <p className="text-xs text-gray-500 tabular-nums">
+                  {firstRowIndex}–{lastRowIndex} of {totalOrders}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOrderFilters({ page: currentPage - 1 })}
+                    disabled={currentPage <= 1}
+                    className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs text-gray-500 tabular-nums">
+                    {currentPage} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setOrderFilters({ page: currentPage + 1 })}
+                    disabled={currentPage >= totalPages}
+                    className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div

@@ -56,7 +56,22 @@ const toDateInput = (value) => {
 };
 
 export function AdminShipping() {
-  const { orders, fetchOrders, loading, error: ordersError, updateOrderStatus } = useOrders();
+  const { orders, fetchOrders, loading, error: ordersError, updateOrderStatus, setOrderFilters } =
+    useOrders();
+
+  // This screen only ever shows orders that are in, or past, fulfilment. Ask the
+  // server for exactly those instead of pulling the whole orders table and
+  // discarding most of it in the browser. The window is generous — an open
+  // shipment queue of 200 is far beyond normal — so the in-page filters below
+  // keep behaving as they always have, but the fetch can no longer grow without
+  // bound as order history accumulates.
+  useEffect(() => {
+    setOrderFilters({
+      status: "processing,shipped,delivered",
+      pageSize: 200,
+      search: "",
+    });
+  }, [setOrderFilters]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");

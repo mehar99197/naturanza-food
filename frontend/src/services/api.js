@@ -279,12 +279,20 @@ axiosInstance.interceptors.request.use(async (config) => {
   let token = null;
   let authScope = "none";
 
-  if (isUserScopedRoute) {
-    token = userToken || null;
-    authScope = token ? "user" : "none";
-  } else if (isAdminRoute || isAdminPage) {
+  // Admin scope is resolved FIRST, then user scope fills in. isUserScopedRoute
+  // matches /orders/*, which also covers /orders/admin/all and /orders/:id/status
+  // — checking it first meant an admin's request went out with no Authorization
+  // header at all, working only because authenticateToken falls back to the
+  // adminAccessToken cookie, and burning a wasted 401 round-trip on the reads
+  // that do get retried. An admin without a user session is the normal case.
+  if (isAdminRoute || isAdminPage) {
     token = adminToken || null;
     authScope = token ? "admin" : "none";
+  }
+
+  if (!token && isUserScopedRoute) {
+    token = userToken || null;
+    authScope = token ? "user" : "none";
   }
 
   config._authScope = authScope;
@@ -302,7 +310,7 @@ axiosInstance.interceptors.request.use(async (config) => {
         config.headers = config.headers || {};
         config.headers["x-csrf-token"] = resolvedCsrfToken;
       }
-    } catch (error) {
+    } catch {
       // Allow request to proceed without CSRF header if token fetch fails.
     }
   }
@@ -369,7 +377,7 @@ axiosInstance.interceptors.response.use(
           originalRequest.headers["x-csrf-token"] = refreshedToken;
         }
         return axiosInstance(originalRequest);
-      } catch (retryError) {
+      } catch {
         return Promise.reject(withCsrfUserMessage(error));
       }
     }
@@ -417,7 +425,7 @@ axiosInstance.interceptors.response.use(
         }
         clearUserSessionStorage();
         emitAuthSessionSync("user-token-refresh-failed");
-      } catch (refreshError) {
+      } catch {
         // Refresh failed - clear user session
         clearUserSessionStorage();
         emitAuthSessionSync("user-token-refresh-failed");
@@ -493,15 +501,22 @@ const hasDownloadablePayload = (payload) => {
 };
 
 // Product APIs
+const PRODUCT_PAGE_SIZE = 500;
+// A catalog is bounded by the business in a way order history is not, and the
+// Shop page filters by category, price and search across the whole of it — so
+// loading it once is a deliberate choice, not the oversight the orders list was.
+// The ceiling exists so a runaway response can't hang the tab, and a truncated
+// catalog says so instead of silently showing a partial shop.
+const PRODUCT_FETCH_LIMIT = 5000;
+
 export const productAPI = {
   getAll: async (includeInactive = false) => {
     const allProducts = [];
-    const pageSize = 500;
-    for (let offset = 0; offset < pageSize * 100; offset += pageSize) {
+    for (let offset = 0; offset < PRODUCT_FETCH_LIMIT; offset += PRODUCT_PAGE_SIZE) {
       const response = await axiosInstance.get("/products", {
         params: {
           ...(includeInactive ? { includeInactive: "true" } : {}),
-          limit: pageSize,
+          limit: PRODUCT_PAGE_SIZE,
           offset,
         },
       });
@@ -509,8 +524,16 @@ export const productAPI = {
         ? response.data
         : response.data?.data || [];
       allProducts.push(...page);
-      if (page.length < pageSize) break;
+      if (page.length < PRODUCT_PAGE_SIZE) break;
     }
+
+    if (allProducts.length >= PRODUCT_FETCH_LIMIT) {
+      console.warn(
+        `Catalog reached the ${PRODUCT_FETCH_LIMIT}-product client limit; the list shown is incomplete. ` +
+          "Move the product screens to server-side pagination before growing past this.",
+      );
+    }
+
     return { data: allProducts };
   },
 
@@ -587,8 +610,14 @@ export const userAPI = {
     return response.data;
   },
 
-  verifyEmail: async ({ email, code }) => {
-    const response = await axiosInstance.post("/auth/verify-email", { email, code });
+  // `password` is sent only on a retry, after the server answered
+  // PASSWORD_REQUIRED because this code isn't bound to a password this browser set.
+  verifyEmail: async ({ email, code, password }) => {
+    const response = await axiosInstance.post("/auth/verify-email", {
+      email,
+      code,
+      ...(password ? { password } : {}),
+    });
     const nextToken = response.data.accessToken || response.data.token;
     if (nextToken) {
       setUserAccessToken(nextToken);
@@ -641,7 +670,7 @@ export const userAPI = {
           },
         },
       );
-    } catch (error) {}
+    } catch { /* ignored: not fatal to this flow */ }
     clearUserSessionStorage();
     emitAuthSessionSync("user-logout");
     return { success: true };
@@ -1037,7 +1066,7 @@ export const adminAPI = {
   logout: async () => {
     try {
       await axiosInstance.post("/admin/logout");
-    } catch (error) {}
+    } catch { /* ignored: not fatal to this flow */ }
     clearAdminSessionStorage();
     emitAuthSessionSync("admin-logout");
     return { success: true };
@@ -1494,30 +1523,39 @@ export const paymentAPI = {
 
 // Order APIs
 export const orderAPI = {
+  // Customer's own orders — inherently bounded, one request.
   getAll: async () => {
-    const hasAdminToken = !!getAdminAccessToken();
-    const userToken = getUserAccessToken();
-    if (!hasAdminToken && !userToken) {
+    if (!getUserAccessToken()) {
       return [];
     }
-    const endpoint = hasAdminToken ? "/orders/admin/all" : "/orders/my-orders";
-    if (!hasAdminToken) {
-      const response = await axiosInstance.get(endpoint);
-      return response.data;
+    const response = await axiosInstance.get("/orders/my-orders");
+    return response.data;
+  },
+
+  // One page of the admin list, with the matching total for the pager. This
+  // replaced a loop that walked up to 100 pages of 500 to pull every order the
+  // store had ever taken into browser memory on each visit — cost grew with the
+  // order table forever. Status and search are applied server-side, because
+  // filtering in the browser only works if the browser holds every row.
+  getAdminPage: async ({ limit = 25, offset = 0, status = null, search = "" } = {}) => {
+    if (!getAdminAccessToken()) {
+      return { data: [], total: 0 };
     }
-    const allOrders = [];
-    const pageSize = 500;
-    for (let offset = 0; offset < pageSize * 100; offset += pageSize) {
-      const response = await axiosInstance.get(endpoint, {
-        params: { limit: pageSize, offset },
-      });
-      const page = Array.isArray(response.data)
-        ? response.data
-        : response.data?.data || [];
-      allOrders.push(...page);
-      if (page.length < pageSize) break;
+    const response = await axiosInstance.get("/orders/admin/all", {
+      params: {
+        limit,
+        offset,
+        ...(status && status !== "all" ? { status } : {}),
+        ...(search ? { search } : {}),
+      },
+    });
+    const payload = response.data;
+    if (Array.isArray(payload)) {
+      // Tolerated so a browser holding a cached bundle keeps working against a
+      // server that has not been redeployed yet.
+      return { data: payload, total: payload.length };
     }
-    return allOrders;
+    return { data: payload?.data || [], total: Number(payload?.total) || 0 };
   },
 
   getById: async (id) => {

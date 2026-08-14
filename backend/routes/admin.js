@@ -1,5 +1,7 @@
 const express = require("express");
-const router = express.Router();
+// caseSensitive: the permission table in requireAdminRoutePermission below keys
+// off req.path, so route matching must not accept casings that table won't see.
+const router = express.Router({ caseSensitive: true });
 const bcrypt = require("bcryptjs");
 const { db } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
@@ -862,64 +864,72 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
     }
 
     const connection = await db.promise().getConnection();
-    await ensurePasswordHistoryTable(connection);
-
-    const [users] = await connection.query(
-      "SELECT id, role, email, admin_role, password, is_active FROM users WHERE id = ?",
-      [tokenValidation.userId]
-    );
-
-    const userRow = users[0];
-    const userRole = String(userRow?.role || "").toLowerCase();
-    const userAdminRole = String(userRow?.admin_role || "").toLowerCase();
-    const isAdminUser = userRole === "admin";
-    const isActiveAdmin = isAdminUser && userRow?.is_active;
-
-    if (!userRow || !isActiveAdmin) {
+    // Same leak as the storefront reset: the catch at the bottom of this handler
+    // returns 500 without releasing, so a thrown error here burned a pooled slot
+    // for good. Scope the connection to its own try/finally.
+    let connectionReleased = false;
+    const releaseConnection = () => {
+      if (connectionReleased) return;
+      connectionReleased = true;
       connection.release();
-      return res.status(400).json({
-        success: false,
-        error: "Invalid reset link. Please request a new password reset.",
-      });
-    }
+    };
 
-    if (users[0].password) {
-      const isSamePassword = await bcrypt.compare(password, users[0].password);
-      if (isSamePassword) {
-        connection.release();
+    try {
+      await ensurePasswordHistoryTable(connection);
+
+      const [users] = await connection.query(
+        "SELECT id, role, email, admin_role, password, is_active FROM users WHERE id = ?",
+        [tokenValidation.userId]
+      );
+
+      const userRow = users[0];
+      const userRole = String(userRow?.role || "").toLowerCase();
+      const userAdminRole = String(userRow?.admin_role || "").toLowerCase();
+      const isAdminUser = userRole === "admin";
+      const isActiveAdmin = isAdminUser && userRow?.is_active;
+
+      if (!userRow || !isActiveAdmin) {
         return res.status(400).json({
           success: false,
-          error: "New password must be different from your current password.",
+          error: "Invalid reset link. Please request a new password reset.",
         });
       }
+
+      if (users[0].password) {
+        const isSamePassword = await bcrypt.compare(password, users[0].password);
+        if (isSamePassword) {
+          return res.status(400).json({
+            success: false,
+            error: "New password must be different from your current password.",
+          });
+        }
+      }
+
+      const reusedPassword = await hasReusedPassword(connection, tokenValidation.userId, password, 5);
+      if (reusedPassword) {
+        return res.status(400).json({
+          success: false,
+          error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
+        });
+      }
+
+      if (!(await claimPasswordResetToken(connection, tokenValidation.tokenId))) {
+        return res.status(400).json({
+          error: "This reset link has already been used or expired.",
+        });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 12);
+
+      await connection.query(
+        "UPDATE users SET password = ?, updated_at = NOW() WHERE id = ?",
+        [hashedPassword, tokenValidation.userId]
+      );
+
+      await addPasswordToHistory(connection, tokenValidation.userId, password);
+    } finally {
+      releaseConnection();
     }
-
-    const reusedPassword = await hasReusedPassword(connection, tokenValidation.userId, password, 5);
-    if (reusedPassword) {
-      connection.release();
-      return res.status(400).json({
-        success: false,
-        error: "You cannot reuse any of your last 5 passwords. Please choose a different password.",
-      });
-    }
-
-    if (!(await claimPasswordResetToken(connection, tokenValidation.tokenId))) {
-      connection.release();
-      return res.status(400).json({
-        error: "This reset link has already been used or expired.",
-      });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    await connection.query(
-      "UPDATE users SET password = ?, updated_at = NOW() WHERE id = ?",
-      [hashedPassword, tokenValidation.userId]
-    );
-
-    await addPasswordToHistory(connection, tokenValidation.userId, password);
-
-    connection.release();
 
     // Only mirror the super admin password back into the .env shim — staff
     // admin passwords are not stored there.
@@ -979,7 +989,13 @@ const ADMIN_PERMISSION_RULES = [
 ];
 
 const requireAdminRoutePermission = (req, res, next) => {
-  const path = String(req.path || "");
+  // Lower-cased because Express matches routes case-INSENSITIVELY: a request to
+  // "/api/admin/Users" reaches the "/users" handler while req.path stays
+  // "/Users". Comparing the raw value against the lower-case prefixes below
+  // matched no rule, so next() ran and the request skipped both the per-grant
+  // check and the super-admin-only gate. The router is also created with
+  // caseSensitive:true so routing and this table can never disagree again.
+  const path = String(req.path || "").toLowerCase();
 
   if (String(req.user?.admin_role || "").toLowerCase() === "super_admin") {
     return next();

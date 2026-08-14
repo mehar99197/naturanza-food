@@ -328,7 +328,7 @@ async function sweepExpiredReservations() {
       `SELECT id, product_id, quantity FROM stock_reservations
         WHERE state='held' AND expires_at < NOW()
           AND order_id NOT IN (
-            SELECT CAST(order_id AS UNSIGNED)
+            SELECT order_id
              FROM advance_payment_verifications
              WHERE verification_stage = 'advance_shipping'
                AND status = 'pending'
@@ -373,7 +373,8 @@ function startReservationSweeper({ intervalMs = 5 * 60_000 } = {}) {
       running = false;
     }
   };
-  setTimeout(tick, intervalMs).unref();
+  // setInterval alone: a setTimeout at the same delay fired a duplicate first
+  // tick at the same moment (harmless only because of the `running` guard).
   setInterval(tick, intervalMs).unref();
 }
 

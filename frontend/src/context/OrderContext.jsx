@@ -3,6 +3,10 @@ import { orderAPI } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 
+// 25 rows fills the admin table without a scroll on a laptop and keeps the
+// hydrated payload (items + history + shipment + transactions per order) small.
+const DEFAULT_ADMIN_PAGE_SIZE = 25;
+
 const OrderContext = createContext(null);
 
 export const useOrders = () => {
@@ -20,26 +24,65 @@ export const OrderProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Admin list state. `orders` holds the CURRENT PAGE for an admin and the
+  // customer's full (bounded) list otherwise. Status and search are sent to the
+  // server; they used to filter an in-memory copy of the entire orders table.
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [orderQuery, setOrderQuery] = useState({
+    page: 1,
+    pageSize: DEFAULT_ADMIN_PAGE_SIZE,
+    status: "all",
+    search: "",
+  });
+
+  const isAdminViewer = Boolean(admin?.id);
+
+  const normalize = (list) =>
+    list.map((order) => ({
+      ...order,
+      order_date: order.order_date || order.created_at,
+    }));
+
   const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await orderAPI.getAll();
-      const rawOrders = Array.isArray(response)
-        ? response
-        : response.data || [];
-      const normalizedOrders = rawOrders.map((order) => ({
-        ...order,
-        order_date: order.order_date || order.created_at,
-      }));
-      setOrders(normalizedOrders);
+
+      if (isAdminViewer) {
+        const { page, pageSize, status, search } = orderQuery;
+        const { data, total } = await orderAPI.getAdminPage({
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
+          status,
+          search,
+        });
+        setOrders(normalize(data));
+        setTotalOrders(total);
+      } else {
+        const response = await orderAPI.getAll();
+        const rawOrders = Array.isArray(response) ? response : response.data || [];
+        setOrders(normalize(rawOrders));
+        setTotalOrders(rawOrders.length);
+      }
+
       setError(null);
     } catch (err) {
       console.error("Failed to fetch orders:", err);
       setError(err.message);
       setOrders([]);
+      setTotalOrders(0);
     } finally {
       setLoading(false);
     }
+  }, [isAdminViewer, orderQuery]);
+
+  // Changing a filter or search term must go back to page 1, otherwise the pager
+  // can sit on a page the new result set does not have.
+  const setOrderFilters = useCallback((patch) => {
+    setOrderQuery((previous) => ({
+      ...previous,
+      ...patch,
+      page: patch.page ?? 1,
+    }));
   }, []);
 
   useEffect(() => {
@@ -71,7 +114,7 @@ export const OrderProvider = ({ children }) => {
       if (!newOrder && generatedId) {
         try {
           newOrder = await orderAPI.getById(generatedId);
-        } catch (readErr) {
+        } catch {
           newOrder = null;
         }
       }
@@ -112,7 +155,7 @@ export const OrderProvider = ({ children }) => {
       let freshOrder = null;
       try {
         freshOrder = await orderAPI.getById(orderId);
-      } catch (readErr) {
+      } catch {
         freshOrder = null;
       }
 
@@ -225,6 +268,10 @@ export const OrderProvider = ({ children }) => {
     getRecentOrders,
     getOrderStats,
     fetchOrders,
+    totalOrders,
+    orderQuery,
+    setOrderFilters,
+    adminPageSize: DEFAULT_ADMIN_PAGE_SIZE,
   };
 
   return (

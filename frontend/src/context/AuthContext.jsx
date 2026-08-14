@@ -3,7 +3,6 @@ import {
   AUTH_SESSION_SYNC_EVENT,
   clearUserAccessToken,
   getUserAccessToken,
-  setUserAccessToken,
   hasUserSession,
   userAPI,
   emitAuthSessionSync,
@@ -119,10 +118,10 @@ const safeLocalStorage = {
     try { return localStorage.getItem(key); } catch { return null; }
   },
   setItem(key, value) {
-    try { localStorage.setItem(key, value); } catch {}
+    try { localStorage.setItem(key, value); } catch { /* ignored: not fatal to this flow */ }
   },
   removeItem(key) {
-    try { localStorage.removeItem(key); } catch {}
+    try { localStorage.removeItem(key); } catch { /* ignored: not fatal to this flow */ }
   },
 };
 
@@ -134,7 +133,7 @@ const getCachedUserData = () => {
 
   try {
     return normalizeUserObject(JSON.parse(raw));
-  } catch (error) {
+  } catch {
     safeLocalStorage.removeItem("userData");
     return null;
   }
@@ -219,7 +218,7 @@ export const AuthProvider = ({ children }) => {
       if (!getUserAccessToken() || !hasUserSession()) {
         try {
           await userAPI.refreshToken();
-        } catch (_) {
+        } catch {
           clearUserAccessToken();
           applyUserState(null);
           setError(null);
@@ -333,7 +332,7 @@ export const AuthProvider = ({ children }) => {
         if (nextUser) {
           applyUserState(nextUser);
         }
-      } catch (_) {
+      } catch {
         clearUserAccessToken();
         applyUserState(null);
       }
@@ -366,7 +365,7 @@ export const AuthProvider = ({ children }) => {
 
         try {
           await userAPI.refreshToken();
-        } catch (error) {
+        } catch {
           clearUserAccessToken();
           emitAuthSessionSync("user-token-refresh-failed");
         }
@@ -425,10 +424,10 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const verifyEmail = async (email, code) => {
+  const verifyEmail = async (email, code, password) => {
     try {
       setError(null);
-      const response = await userAPI.verifyEmail({ email, code });
+      const response = await userAPI.verifyEmail({ email, code, password });
       if (response.accessToken || response.token) {
         const profileUser = await refreshProfile();
         if (!profileUser) {
@@ -438,11 +437,13 @@ export const AuthProvider = ({ children }) => {
       }
       const message = response.error || "Verification failed";
       setError(message);
-      return { success: false, message };
+      return { success: false, message, code: response.code };
     } catch (err) {
       const message = err.response?.data?.error || "Verification failed";
       setError(message);
-      return { success: false, message };
+      // `code` lets the page react to PASSWORD_REQUIRED by revealing the
+      // password fields instead of just showing the message as a dead end.
+      return { success: false, message, code: err.response?.data?.code };
     }
   };
 
@@ -543,7 +544,7 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       await userAPI.logout();
-    } catch (err) {
+    } catch {
       // Local cleanup still happens if network logout fails.
     } finally {
       clearUserAccessToken();

@@ -40,10 +40,10 @@ const insertApprovedPaymentTransaction = async (conn, verification, adminId) => 
     `INSERT INTO payment_transactions
        (order_id, user_id, transaction_type, provider, amount, status,
         gateway_reference, payload, processed_at)
-     SELECT CAST(v.order_id AS UNSIGNED), o.user_id, 'payment', v.payment_method,
+     SELECT v.order_id, o.user_id, 'payment', v.payment_method,
             v.amount, 'paid', v.transaction_id, ?, NOW()
        FROM advance_payment_verifications v
-       LEFT JOIN orders o ON o.id = CAST(v.order_id AS UNSIGNED)
+       LEFT JOIN orders o ON o.id = v.order_id
       WHERE v.id = ?`,
     [JSON.stringify({ verification_id: verification.id, stage: verification.verification_stage, approved_by: adminId }), verification.id],
   );
@@ -324,11 +324,11 @@ router.put(
       // Lock + load the verification row first so the rest of the txn can
       // branch on verification_stage.
       const [[existing]] = await conn.query(
-        `SELECT v.id, CAST(v.order_id AS UNSIGNED) AS order_id,
+        `SELECT v.id, v.order_id AS order_id,
                  v.verification_stage, v.status, v.amount, v.payment_method,
                  v.transaction_id, o.user_id, o.status AS order_status
            FROM advance_payment_verifications v
-           LEFT JOIN orders o ON o.id = CAST(v.order_id AS UNSIGNED)
+           LEFT JOIN orders o ON o.id = v.order_id
           WHERE v.id = ?
           FOR UPDATE`,
         [verificationId],
@@ -378,7 +378,7 @@ router.put(
       await conn.query(
         `UPDATE orders o
            JOIN advance_payment_verifications v
-             ON CAST(v.order_id AS UNSIGNED) = o.id
+             ON v.order_id = o.id
             SET o.payment_status = ?
           WHERE v.id = ?`,
         [nextOrderPaymentStatus, verificationId],
@@ -394,7 +394,7 @@ router.put(
           await conn.query(
             `UPDATE orders o
                JOIN advance_payment_verifications v
-                 ON CAST(v.order_id AS UNSIGNED) = o.id
+                 ON v.order_id = o.id
                 SET o.transaction_id = COALESCE(v.transaction_id, o.transaction_id)
               WHERE v.id = ?`,
             [verificationId],
@@ -455,7 +455,7 @@ router.put(
                VALUES (?, ?, ?, ?, 'cod', 'final_collection', NULL, NULL, 'pending')
                ON DUPLICATE KEY UPDATE id = id`,
               [
-                String(orderId),
+                Number(orderId),
                 orderRow.customer_name || "",
                 orderRow.phone || null,
                 remainingCod,
@@ -474,7 +474,7 @@ router.put(
           `SELECT o.user_id, o.customer_name, o.customer_email,
                   v.amount AS approved_amount
              FROM orders o
-             JOIN advance_payment_verifications v ON CAST(v.order_id AS UNSIGNED) = o.id
+             JOIN advance_payment_verifications v ON v.order_id = o.id
             WHERE v.id = ?
             LIMIT 1`,
           [verificationId],
@@ -542,7 +542,7 @@ router.put(
                o.payment_method AS order_payment_method
           FROM advance_payment_verifications v
           LEFT JOIN users u ON v.verified_by = u.id
-          LEFT JOIN orders o ON CAST(v.order_id AS UNSIGNED) = o.id
+          LEFT JOIN orders o ON v.order_id = o.id
          WHERE v.id = ?`;
 
       let rows;
@@ -604,7 +604,7 @@ router.put(
       await conn.beginTransaction();
 
       const [[existing]] = await conn.query(
-        `SELECT id, CAST(order_id AS UNSIGNED) AS order_id, verification_stage, status
+        `SELECT id, order_id AS order_id, verification_stage, status
            FROM advance_payment_verifications
           WHERE id = ?
           FOR UPDATE`,
@@ -648,7 +648,7 @@ router.put(
         await conn.query(
           `UPDATE orders o
              JOIN advance_payment_verifications v
-               ON CAST(v.order_id AS UNSIGNED) = o.id
+               ON v.order_id = o.id
               SET o.payment_status = 'failed'
             WHERE v.id = ?`,
           [verificationId],
@@ -664,7 +664,7 @@ router.put(
           `SELECT o.user_id, o.customer_name, o.customer_email,
                   v.amount AS rejected_amount
              FROM orders o
-             JOIN advance_payment_verifications v ON CAST(v.order_id AS UNSIGNED) = o.id
+             JOIN advance_payment_verifications v ON v.order_id = o.id
             WHERE v.id = ?
             LIMIT 1`,
           [verificationId],

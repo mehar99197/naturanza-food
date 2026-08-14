@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, MailCheck, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Eye, EyeOff, MailCheck, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import LeftPanel from "@/components/auth/LeftPanel";
 import { NoIndexSEO } from "@/components/SEO";
@@ -13,6 +13,9 @@ const leftPoints = [
 ];
 
 const RESEND_COOLDOWN = 60;
+
+// Mirrors the server's strongPassword rule (12+, upper, lower, number, symbol).
+const PASSWORD_RULE = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,128}$/;
 
 const VerifyEmail = () => {
   const { verifyEmail, resendVerification } = useAuth();
@@ -30,6 +33,14 @@ const VerifyEmail = () => {
   const [submitting, setSubmitting] = useState(false);
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN);
   const timerRef = useRef(null);
+
+  // Revealed only when the server answers PASSWORD_REQUIRED — i.e. this code
+  // isn't tied to a password chosen in this browser, so the account must not
+  // inherit whatever password the original signup used.
+  const [passwordRequired, setPasswordRequired] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   // No email in navigation state → nothing to verify; send them to register.
   useEffect(() => {
@@ -56,14 +67,40 @@ const VerifyEmail = () => {
       return;
     }
 
+    if (passwordRequired) {
+      if (!PASSWORD_RULE.test(password)) {
+        setGeneralError(
+          "Use at least 12 characters with uppercase, lowercase, number, and symbol.",
+        );
+        return;
+      }
+      if (password !== confirmPassword) {
+        setGeneralError("Both passwords must match.");
+        return;
+      }
+    }
+
     setSubmitting(true);
-    const result = await verifyEmail(email, code);
+    const result = await verifyEmail(
+      email,
+      code,
+      passwordRequired ? password : undefined,
+    );
     setSubmitting(false);
 
     if (result.success) {
       navigate("/", { replace: true });
       return;
     }
+
+    // The code is still redeemable — the server asked for a password before
+    // consuming it. Reveal the fields and let them submit again.
+    if (result.code === "PASSWORD_REQUIRED") {
+      setPasswordRequired(true);
+      setInfo(result.message);
+      return;
+    }
+
     setGeneralError(result.message || "Verification failed. Please try again.");
   };
 
@@ -76,6 +113,11 @@ const VerifyEmail = () => {
     if (result.success) {
       setInfo("A new code has been sent. Please check your inbox (and spam).");
       setCooldown(RESEND_COOLDOWN);
+      // The fresh code is issued to this browser, so it may not need a password.
+      // Start clean and let the server decide again.
+      setPasswordRequired(false);
+      setPassword("");
+      setConfirmPassword("");
     } else {
       setGeneralError(result.message || "Could not resend the code.");
       if (result.retryAfterSeconds) {
@@ -153,12 +195,67 @@ const VerifyEmail = () => {
                   className="w-full rounded-2xl border border-green-100 bg-white px-4 py-4 text-center text-2xl font-bold tracking-[0.5em] text-slate-800 placeholder:tracking-[0.3em] placeholder:text-slate-300 shadow-sm outline-none transition focus:border-green-600 focus:ring-4 focus:ring-green-100"
                 />
 
+                {passwordRequired ? (
+                  <div className="space-y-4 rounded-2xl border border-green-100 bg-green-50/60 p-4">
+                    <div>
+                      <label
+                        htmlFor="verify-password"
+                        className="block text-sm font-semibold text-slate-800"
+                      >
+                        Choose a password
+                      </label>
+                      <p className="mt-1 text-xs text-slate-600">
+                        Use at least 12 characters with uppercase, lowercase, number, and symbol.
+                      </p>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        id="verify-password"
+                        type={showPassword ? "text" : "password"}
+                        autoComplete="new-password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="New password"
+                        className="w-full rounded-2xl border border-green-100 bg-white px-4 py-3 pr-12 text-sm text-slate-800 shadow-sm outline-none transition focus:border-green-600 focus:ring-4 focus:ring-green-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((value) => !value)}
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                        className="absolute inset-y-0 right-0 flex w-12 items-center justify-center text-slate-400 transition hover:text-green-700 focus-visible:outline-none focus-visible:text-green-700"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+
+                    <input
+                      id="verify-confirm-password"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="new-password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Confirm password"
+                      aria-label="Confirm password"
+                      className="w-full rounded-2xl border border-green-100 bg-white px-4 py-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-green-600 focus:ring-4 focus:ring-green-100"
+                    />
+                  </div>
+                ) : null}
+
                 <button
                   type="submit"
-                  disabled={submitting || code.length !== 6}
+                  disabled={
+                    submitting ||
+                    code.length !== 6 ||
+                    (passwordRequired && (!password || !confirmPassword))
+                  }
                   className="inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-green-600 to-emerald-600 px-4 py-3.5 text-[0.95rem] font-semibold text-white shadow-[0_14px_28px_rgba(5,120,78,0.28)] transition hover:from-green-700 hover:to-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 disabled:cursor-not-allowed disabled:opacity-65"
                 >
-                  {submitting ? "Verifying..." : "Verify & Continue"}
+                  {submitting
+                    ? "Verifying..."
+                    : passwordRequired
+                      ? "Set password & continue"
+                      : "Verify & Continue"}
                 </button>
               </form>
 
