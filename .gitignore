@@ -19,3 +19,7 @@ npm-debug.log*
 # Private payment verification uploads must never be committed or served as
 # public static assets.
 public/images/payment-verifications/
+
+# Scratch hero/slide image drafts (not part of the shipped app)
+.herocheck/
+_hero-*.png
