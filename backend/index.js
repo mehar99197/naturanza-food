@@ -48,7 +48,7 @@ const CONTENT_SECURITY_POLICY = [
   "form-action 'self'",
   "frame-ancestors 'self'",
   "script-src 'self' https://accounts.google.com https://apis.google.com https://www.googletagmanager.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
   "style-src-attr 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "connect-src 'self' https://accounts.google.com https://apis.google.com https://www.google-analytics.com",
