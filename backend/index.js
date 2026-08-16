@@ -131,7 +131,12 @@ app.use(
           "https://apis.google.com",
           "https://www.googletagmanager.com",
         ],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        styleSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "https://fonts.googleapis.com",
+          "https://accounts.google.com",
+        ],
         styleSrcAttr: ["'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         connectSrc: [
