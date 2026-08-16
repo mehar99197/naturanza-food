@@ -179,7 +179,6 @@ export function Hero() {
               image: p.image || p.image_url || "",
               bgGradient: gradients[idx % gradients.length],
               accentColor: accents[idx % accents.length],
-              imageSizeClass: "max-h-[200px] sm:max-h-[220px] md:max-h-none",
               price: Number.isFinite(numericPrice) ? numericPrice : null,
               discount_percentage: Number(p?.discount_percentage) || 0,
               rating: Number.isFinite(ratingValue) ? ratingValue : 0,
@@ -304,7 +303,7 @@ export function Hero() {
                               event.currentTarget.onerror = null;
                               event.currentTarget.src = fallbackHeroImage;
                             }}
-                          className="relative z-10 w-full h-auto object-contain drop-shadow-2xl max-h-[150px] sm:max-h-[220px] md:max-h-none"
+                          className="relative z-10 w-full h-auto object-contain drop-shadow-2xl max-h-[150px] sm:max-h-[220px] md:max-h-[340px] lg:max-h-[400px]"
                           loading={index === 0 ? 'eager' : 'lazy'}
                         />
                       </div>
