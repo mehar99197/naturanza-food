@@ -858,6 +858,12 @@ export function ProductDetail() {
                   : 'Out of stock'}
               </div>
 
+              {product.barcode ? (
+                <p className="mt-2 text-xs font-medium tracking-wide text-gray-400">
+                  Product Code: {product.barcode}
+                </p>
+              ) : null}
+
               <p className="mt-3 text-sm leading-relaxed text-gray-600">
                 {descriptionParagraphs[0] || 'No description added yet for this product.'}
               </p>
@@ -1118,6 +1124,12 @@ export function ProductDetail() {
                       ? `In stock${maxAllowedQty ? ` (${maxAllowedQty} left)` : ''}`
                       : 'Out of stock'}
                   </div>
+
+                  {product.barcode ? (
+                    <p className="mt-2 text-xs font-medium tracking-wide text-gray-400">
+                      Product Code: {product.barcode}
+                    </p>
+                  ) : null}
 
                   <p className="mt-4 text-[15px] leading-relaxed text-gray-600">
                     {descriptionParagraphs[0] || 'No description added yet for this product.'}

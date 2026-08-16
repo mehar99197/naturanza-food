@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Facebook,
   Instagram,
+  Music2,
   Twitter,
   Youtube,
 } from "lucide-react";
@@ -64,6 +65,7 @@ export function Contact() {
   const socialLinks = [
     { label: "Facebook", url: settings.facebookUrl, Icon: Facebook },
     { label: "Instagram", url: settings.instagramUrl, Icon: Instagram },
+    { label: "TikTok", url: settings.tiktokUrl, Icon: Music2 },
     { label: "Twitter", url: settings.twitterUrl, Icon: Twitter },
     { label: "YouTube", url: settings.youtubeUrl, Icon: Youtube },
   ].filter((item) => item.url);

@@ -219,7 +219,7 @@ const notFoundMeta = (url) => ({
 const fetchProduct = async (param) => {
   const isNumeric = /^\d+$/.test(param);
   const [rows] = await dbPool.query(
-    `SELECT p.id, p.name, p.slug, p.description, p.price, p.image_url, p.stock_quantity, p.is_active,
+    `SELECT p.id, p.name, p.slug, p.description, p.price, p.image_url, p.stock_quantity, p.is_active, p.barcode,
             c.name AS category_name
      FROM products p
      LEFT JOIN categories c ON p.category_id = c.id
@@ -253,12 +253,27 @@ const fetchBlogPost = async (slug) => {
   return rows[0] || null;
 };
 
+// Map a retail barcode (EAN-8 / UPC-A / EAN-13) to the matching Schema.org
+// GTIN field so Google can associate the scanned code with this product page.
+const barcodeToGtin = (barcode) => {
+  const code = String(barcode || "").replace(/\D/g, "");
+  if (code.length === 8) return { gtin8: code };
+  if (code.length === 12) return { gtin12: code };
+  if (code.length === 13) return { gtin13: code };
+  return code ? { gtin: code } : {};
+};
+
 const buildProductMeta = (product) => {
   const url = `${SITE_URL}/product/${product.id}`;
   const image = absoluteImage(product.image_url);
-  const description =
+  const baseDescription =
     truncate(product.description) ||
     `${product.name} — premium organic product from Naturanza Food. Order online with Cash on Delivery across Pakistan.`;
+  // Surface the retail barcode in the description so a barcode/GTIN search can
+  // match this exact product page.
+  const description = product.barcode
+    ? `${baseDescription} Product code: ${product.barcode}.`
+    : baseDescription;
   const price = Number(product.price);
 
   const offers = {
@@ -286,6 +301,7 @@ const buildProductMeta = (product) => {
       description,
       category: product.category_name || undefined,
       brand: { "@type": "Brand", name: SITE_NAME },
+      ...barcodeToGtin(product.barcode),
       offers,
     },
   };

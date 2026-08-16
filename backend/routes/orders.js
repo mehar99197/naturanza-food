@@ -751,7 +751,7 @@ const getOrderWithAuthorization = async (connection, orderId, user) => {
   }
 
   const order = orderRows[0];
-  if (order.user_id !== user.id && user.role !== 'admin') {
+  if (order.user_id !== user.id && !isAdminUser(user)) {
     return { error: { code: 403, message: 'Access denied' } };
   }
 

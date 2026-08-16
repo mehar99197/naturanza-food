@@ -686,7 +686,6 @@ app.use("/api/announcements", announcementsRoutes);
 app.use("/api/team", teamRoutes);
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api", sitemapRoutes);
-app.use("/api/shipping", shippingRoutes);
 app.use("/api/admin/shipping", adminShippingRoutes);
 
 // Health check route

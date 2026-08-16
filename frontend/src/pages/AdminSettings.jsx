@@ -15,6 +15,7 @@ import {
  MapPin,
  Facebook,
  Instagram,
+ Music2,
  Twitter,
  Youtube,
  MessageCircle,
@@ -36,6 +37,7 @@ const DEFAULT_SETTINGS = {
   supportHours: 'Available 24/7',
   facebookUrl: '',
   instagramUrl: '',
+  tiktokUrl: '',
   twitterUrl: '',
   youtubeUrl: '',
   whatsappNumber: '',
@@ -140,6 +142,7 @@ export function AdminSettings() {
  break;
  case 'facebookUrl':
  case 'instagramUrl':
+  case 'tiktokUrl':
  case 'twitterUrl':
  case 'youtubeUrl':
  if (!isValidHttpsUrl(value)) {
@@ -206,6 +209,7 @@ export function AdminSettings() {
  supportHours: settings.supportHours || '',
  facebookUrl: settings.facebookUrl || '',
  instagramUrl: settings.instagramUrl || '',
+  tiktokUrl: settings.tiktokUrl || '',
  twitterUrl: settings.twitterUrl || '',
  youtubeUrl: settings.youtubeUrl || '',
  whatsappNumber: settings.whatsappNumber || '',
@@ -563,6 +567,7 @@ export function AdminSettings() {
  {[
  { key: 'facebookUrl', label: 'Facebook URL', Icon: Facebook, placeholder: 'https://www.facebook.com/naturanzafood' },
  { key: 'instagramUrl', label: 'Instagram URL', Icon: Instagram, placeholder: 'https://www.instagram.com/naturanzafood' },
+ { key: 'tiktokUrl', label: 'TikTok URL', Icon: Music2, placeholder: 'https://www.tiktok.com/@naturanzafood' },
  { key: 'twitterUrl', label: 'Twitter URL', Icon: Twitter, placeholder: 'https://twitter.com/naturanzafood' },
  { key: 'youtubeUrl', label: 'YouTube URL', Icon: Youtube, placeholder: 'https://www.youtube.com/@naturanzafood' }
  ].map(({ key, label, Icon, placeholder }) => (

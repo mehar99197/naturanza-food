@@ -106,7 +106,9 @@ test('public products expose availability without inventory details', () => {
   assert.equal(publicProduct.is_in_stock, true);
   assert.equal(publicProduct.stock_quantity, undefined);
   assert.equal(publicProduct.reserved_stock, undefined);
-  assert.equal(publicProduct.barcode, undefined);
+  // barcode is now exposed so the product page can publish Schema.org GTIN
+  // (gtin8/gtin12/gtin13), which lets a phone scan / Google Lens resolve it.
+  assert.equal(publicProduct.barcode, '2000000000007');
   assert.equal(publicProduct.qr_code_url, undefined);
   assert.deepEqual(publicProduct.images, [{ image_url: '/images/products/honey.webp', alt_text: null }]);
 });

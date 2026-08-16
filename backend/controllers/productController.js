@@ -20,7 +20,8 @@ const toPublicProduct = (product = {}) => {
 
   delete publicProduct.stock_quantity;
   delete publicProduct.reserved_stock;
-  delete publicProduct.barcode;
+  // barcode is intentionally kept: it is exposed as Schema.org GTIN so a phone
+  // scan / Google Lens lookup resolves the retail code to this product page.
   delete publicProduct.qr_code_url;
   delete publicProduct.created_at;
   delete publicProduct.updated_at;

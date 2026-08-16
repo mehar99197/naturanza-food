@@ -883,9 +883,11 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
       );
 
       const userRow = users[0];
-      const userRole = String(userRow?.role || "").toLowerCase();
       const userAdminRole = String(userRow?.admin_role || "").toLowerCase();
-      const isAdminUser = userRole === "admin";
+      // Match the forgot-password gate: any admin record (role OR admin_role in
+      // the admin set) may complete a reset. This also lets legacy rows that
+      // carry only an admin_role value finish a reset they were emailed.
+      const isAdminUser = isAdminRecord(userRow);
       const isActiveAdmin = isAdminUser && userRow?.is_active;
 
       if (!userRow || !isActiveAdmin) {
@@ -1129,7 +1131,7 @@ router.get("/settings", async (req, res) => {
   }
 });
 
-router.put("/settings", restrictBody('storeName', 'storeEmail', 'storePhone', 'currency', 'taxRate', 'shippingFlat', 'shippingFree', 'emailNotifications', 'orderNotifications', 'lowStockAlerts', 'lowStockThreshold', 'address', 'supportHours', 'facebookUrl', 'instagramUrl', 'twitterUrl', 'youtubeUrl', 'whatsappNumber', 'whatsappEnabled', 'mapLatitude', 'mapLongitude', 'mapLocationLabel', 'newsletterWelcomePromoCode', 'storeDiscountActive', 'storeDiscountPercentage', 'storeDiscountLabel'), async (req, res) => {
+router.put("/settings", restrictBody('storeName', 'storeEmail', 'storePhone', 'currency', 'taxRate', 'shippingFlat', 'shippingFree', 'emailNotifications', 'orderNotifications', 'lowStockAlerts', 'lowStockThreshold', 'address', 'supportHours', 'facebookUrl', 'instagramUrl', 'tiktokUrl', 'twitterUrl', 'youtubeUrl', 'whatsappNumber', 'whatsappEnabled', 'mapLatitude', 'mapLongitude', 'mapLocationLabel', 'newsletterWelcomePromoCode', 'storeDiscountActive', 'storeDiscountPercentage', 'storeDiscountLabel'), async (req, res) => {
   try {
     const settings = await updateAdminSettings(db.promise(), req.body || {});
     res.json(settings);

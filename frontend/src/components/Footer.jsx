@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Mail, Phone, MapPin, Facebook, Instagram, Twitter, Youtube, ArrowRight, ChevronDown } from 'lucide-react';
+import { Mail, Phone, MapPin, Facebook, Instagram, Music2, Twitter, Youtube, ArrowRight, ChevronDown } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { categoryAPI, newsletterAPI } from '@/services/api';
 import { useSettings } from '@/context/SettingsContext';
@@ -100,6 +100,7 @@ export function Footer({ variant = 'full' }) {
  const socialLinks = [
  { label: 'Facebook', href: settings.facebookUrl, icon: Facebook },
  { label: 'Instagram', href: settings.instagramUrl, icon: Instagram },
+  { label: 'TikTok', href: settings.tiktokUrl, icon: Music2 },
  { label: 'Twitter', href: settings.twitterUrl, icon: Twitter },
  { label: 'YouTube', href: settings.youtubeUrl, icon: Youtube }
  ].filter((item) => item.href);

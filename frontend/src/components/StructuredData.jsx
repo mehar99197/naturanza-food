@@ -6,6 +6,14 @@ import { SITE_URL } from '@/config/site';
 
 const normalizePhone = (value) => String(value || '').replace(/[^\d+]/g, '');
 
+const barcodeToGtin = (barcode) => {
+  const code = String(barcode || '').replace(/\D/g, '');
+  if (code.length === 8) return { gtin8: code };
+  if (code.length === 12) return { gtin12: code };
+  if (code.length === 13) return { gtin13: code };
+  return code ? { gtin: code } : {};
+};
+
 export function OrganizationStructuredData() {
   const { settings } = useSettings();
   const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
@@ -147,6 +155,7 @@ export function ProductStructuredData({ product }) {
     "image": fullImageUrl,
     "sku": product.sku || `PROD-${product.id}`,
     "mpn": product.sku || `PROD-${product.id}`,
+    ...barcodeToGtin(product.barcode),
     "brand": {
       "@type": "Brand",
       "name": "Naturanza Food"
