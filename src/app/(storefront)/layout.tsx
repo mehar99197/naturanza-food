@@ -24,6 +24,25 @@ import { buildOrganizationJsonLd } from "@/server/seo/organization";
  * because `children` is passed through it as an already-rendered tree, the pages
  * inside stay server-rendered.
  */
+/**
+ * Every storefront route renders per request. This is set here, on the layout,
+ * because route segment config cascades to everything nested below it — one
+ * decision in one place rather than a directive on each page that a later
+ * addition can silently forget.
+ *
+ * The reason is the Content-Security-Policy (see backend/csp.js). The policy
+ * does not allow 'unsafe-inline' in script-src, so Next's inline hydration
+ * scripts are admitted by a per-request nonce instead. HTML generated once at
+ * build time would carry a nonce that matches no later response, and the
+ * browser would block the very scripts that make the page work.
+ *
+ * The cost is static generation and ISR, which this app was never going to get
+ * much from: prices, stock, cart state and announcements are per request
+ * anyway. The win that matters — real content in the first response instead of
+ * an empty shell — is unaffected.
+ */
+export const dynamic = "force-dynamic";
+
 export default function StorefrontLayout({ children }: { children: React.ReactNode }) {
   return (
     <AppProviders>

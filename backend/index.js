@@ -41,24 +41,10 @@ const jwtRuntime = getJwtRuntimeInfo();
 // own edge headers, but the application must not advertise Express/Node.
 app.disable("x-powered-by");
 
-const CONTENT_SECURITY_POLICY = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-  "form-action 'self'",
-  "frame-ancestors 'self'",
-  "script-src 'self' https://accounts.google.com https://apis.google.com https://www.googletagmanager.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
-  "style-src-attr 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
-  "connect-src 'self' https://accounts.google.com https://apis.google.com https://www.google-analytics.com",
-  "font-src 'self' https://fonts.gstatic.com data:",
-  "media-src 'self'",
-  "frame-src 'self' https://accounts.google.com https://www.openstreetmap.org",
-  "worker-src 'self' blob:",
-  "manifest-src 'self'",
-  "upgrade-insecure-requests",
-].join("; ");
+// The policy itself, and the per-request nonce Next.js needs to be allowed to
+// run its own inline hydration scripts, live in ./csp.
+const { createCspMiddleware } = require("./csp");
+
 const normalizedRateLimitFlag = String(
   process.env.ENABLE_RATE_LIMITS || "",
 ).trim().toLowerCase();
@@ -175,12 +161,14 @@ app.use(
 );
 
 // Keep the complete policy on every production origin response.
-app.use((req, res, next) => {
-  if (process.env.NODE_ENV === "production") {
-    res.setHeader("Content-Security-Policy", CONTENT_SECURITY_POLICY);
-  }
-  next();
-});
+//
+// The policy now carries a per-request nonce. That nonce is written to the
+// REQUEST as well, because that is where Next.js looks for it before deciding
+// whether it may emit its inline hydration scripts — without it the browser
+// blocks them, React aborts hydration, and every server-rendered page loads as
+// inert markup. Adding 'unsafe-inline' would also have "fixed" it, by removing
+// the directive that stops an injected script from executing at all.
+app.use(createCspMiddleware({ enabled: process.env.NODE_ENV === "production" }));
 
 app.use((req, res, next) => {
   res.setHeader(
