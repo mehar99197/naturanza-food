@@ -649,11 +649,16 @@ const updateProduct = async (productId, payload = {}) => {
 const deleteById = async (productId) => {
   // Products are referenced by historical order and inventory rows. Deactivate
   // instead of hard-deleting so reporting and audit history remain intact.
-  const [result] = await dbPool.query(
-    "UPDATE products SET is_active = FALSE WHERE id = ? AND is_active = TRUE",
-    [productId],
-  );
-  return result.affectedRows > 0;
+  const [rows] = await dbPool.query("SELECT id FROM products WHERE id = ? LIMIT 1", [productId]);
+  if (!rows.length) {
+    return false;
+  }
+
+  // Scoped to id only (not `AND is_active = TRUE`): MySQL reports affectedRows
+  // as 0 when a row matches but is already FALSE, which previously made
+  // deleting an already-inactive product look like "not found".
+  await dbPool.query("UPDATE products SET is_active = FALSE WHERE id = ?", [productId]);
+  return true;
 };
 
 const updateStock = async (productId, stockQuantity, userId) => {
