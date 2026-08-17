@@ -22,7 +22,7 @@ import { SettingsProvider } from "@/context/SettingsContext";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { CartDrawer } from "@/components/CartDrawer";
-import { Loader } from "@/components/Loader";
+import { Loader, RouteFallback } from "@/components/Loader";
 import { safeSessionStorage } from "@/lib/storage";
 import { WishlistToast } from "@/components/WishlistToast";
 import { AdminLayout } from "@/components/AdminLayout";
@@ -317,7 +317,7 @@ function AppContent() {
             survives navigation, so React keeps the previous page on screen while the next
             chunk resolves (React Router 7 already runs navigations inside startTransition)
             and the fallback is reached only on a genuine cold start. */}
-        <Suspense fallback={<Loader />}>
+        <Suspense fallback={<RouteFallback />}>
         <AnimatePresence mode={isAdminRoute ? "sync" : "wait"} initial={false}>
           <RouteErrorBoundary key={location.key || location.pathname}>
           <Routes location={location} key={isAdminRoute ? "/admin" : location.pathname}>

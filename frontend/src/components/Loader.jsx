@@ -58,6 +58,41 @@ export function Loader({ fullScreen = true, label = '' }) {
   );
 }
 
+// Route-transition fallback.
+//
+// The full-screen <Loader /> is position:fixed, so it reserves NO layout height,
+// and it fades in over 0.5s. A route change unmounts the previous page first,
+// so <main> collapsed to almost nothing while an overlay that was still at
+// opacity 0 failed to hide it — the footer rode up into the viewport for a few
+// hundred milliseconds before the next page pushed it back down.
+//
+// This fallback is in-flow instead: it holds the viewport height so the footer
+// physically cannot move up, and the spinner is delayed so a fast navigation
+// shows nothing at all rather than a pointless flash.
+export function RouteFallback() {
+  return (
+    <div
+      className="flex min-h-[calc(100vh-4rem)] items-center justify-center"
+      aria-busy="true"
+      aria-live="polite"
+    >
+      <style>{`
+        @keyframes nz-fallback-in { to { opacity: 1; } }
+        .nz-route-fallback {
+          opacity: 0;
+          animation: nz-fallback-in 0.2s ease-out 0.25s forwards;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .nz-route-fallback { animation-delay: 0.25s; animation-duration: 0.01s; }
+        }
+      `}</style>
+      <div className="nz-route-fallback">
+        <Loader fullScreen={false} />
+      </div>
+    </div>
+  );
+}
+
 // Simple spinner
 export function Spinner({ className = '' }) {
   return (
