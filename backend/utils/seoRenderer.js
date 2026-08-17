@@ -115,13 +115,20 @@ const setHreflang = (html, url) =>
     (match, open, close) => `${open}${escapeAttr(url)}${close}`,
   );
 
-// Server-rendered body content, injected INSIDE #root. main.jsx mounts with
-// createRoot (not hydrateRoot), which empties the container before its first
-// paint — so React silently replaces everything below and no hydration mismatch
-// is possible. Until then, this is the only product content a crawler that does
-// not execute JavaScript can read.
+// Server-rendered body content for clients that do not run JavaScript.
+//
+// This was briefly injected as a plain <div> inside #root. React (createRoot)
+// does clear the container, but only once the ~185KB bundle has downloaded and
+// executed — so every visitor saw a flash of unstyled product text first. That
+// is a real regression for humans and the SEO gain does not justify it.
+//
+// <noscript> is the correct mechanism: a JS-enabled browser never renders it at
+// all, so the flash is structurally impossible, while the markup still sits in
+// the raw HTML for a crawler's first pass and for genuinely JS-less clients.
+// It is also not hidden text — nothing is being shown to crawlers and withheld
+// from users; the same facts render visibly once the app mounts.
 const renderBodyFallback = (inner) =>
-  `<div id="ssr-content">${inner}</div>`;
+  `<noscript><div id="ssr-content">${inner}</div></noscript>`;
 
 const productBodyHtml = (product, meta) => {
   const name = escapeAttr(product.name);
@@ -190,10 +197,12 @@ const applyMeta = (template, meta) => {
   html = setCanonical(html, meta.url);
   html = setHreflang(html, meta.url);
 
+  // Placed BEFORE #root, not inside it: React never needs to clear it, and a
+  // no-JS client sees the fallback above an empty root rather than nothing.
   if (meta.bodyHtml) {
     html = html.replace(
       '<div id="root"></div>',
-      () => `<div id="root">${meta.bodyHtml}</div>`,
+      () => `${meta.bodyHtml}<div id="root"></div>`,
     );
   }
 
