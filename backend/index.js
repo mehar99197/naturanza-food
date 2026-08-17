@@ -800,7 +800,33 @@ if (process.env.NODE_ENV === "production") {
     }
     next();
   });
+}
 
+// Next.js owns the routes listed in nextRoutes.js and nothing else; every other
+// path falls through to the Vite build below exactly as before.
+//
+// Position is load-bearing in both directions: below the www -> apex redirect,
+// so a migrated page cannot answer on the non-canonical host, and above
+// express.static, so a migrated page is never shadowed by a stale file of the
+// same name left in dist/ by an earlier build.
+//
+// The flag is separate from NODE_ENV so the composition can be exercised locally
+// without also switching on production-only schema enforcement.
+const NEXT_ENABLED =
+  String(
+    process.env.ENABLE_NEXT ||
+      (process.env.NODE_ENV === "production" ? "true" : "false"),
+  )
+    .trim()
+    .toLowerCase() !== "false";
+
+if (NEXT_ENABLED) {
+  const { createNextMiddleware } = require("./nextServer");
+  const { isNextRoute } = require("./nextRoutes");
+  app.use(createNextMiddleware({ dbPool, isNextRoute }));
+}
+
+if (process.env.NODE_ENV === "production") {
   // index:false is load-bearing. With the default, express.static answers "/"
   // with dist/index.html directly and the SEO renderer below never runs for the
   // homepage — it shipped the raw shell: an empty body, the template's homepage
