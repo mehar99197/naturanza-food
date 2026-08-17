@@ -45,11 +45,27 @@ const CANONICAL_PATH = "/blog";
 const MAX_POSTS = 50;
 
 /**
- * Revalidate rather than render per request. Posts change when an admin saves
- * one, not when a reader arrives, so the page is served from cache and refreshed
- * in the background — the fastest option that still keeps the HTML real.
+ * Rendered per request, deliberately — this page must not be prerendered.
+ *
+ * `npm run build:next` runs from `postinstall` during a Hostinger deploy, and
+ * that hook does not reliably see the Passenger app's database environment. The
+ * sibling [slug] route already accounts for this: its generateStaticParams
+ * swallows the failure and returns [] so the build still finishes. This page had
+ * no such guard — with `revalidate` and an unguarded `listPosts()` it was
+ * prerendered at build time, so an unreachable database threw, `next build`
+ * failed, and postinstall died *after* `preinstall` had already run
+ * `rm -rf node_modules`. That is a broken storefront, not a failed deploy.
+ *
+ * A try/catch would be worse than useless here: it would let the build succeed
+ * and cache an empty blog index for the revalidate window, turning a loud
+ * failure into a silent one.
+ *
+ * The cost is one bounded, indexed query per view of the index. The SPA it
+ * replaces made the same query per view and paid a client round-trip on top, so
+ * this is still strictly faster — and it makes the build independent of the
+ * database, which is what lets the deploy be safe to repeat.
  */
-export const revalidate = 300;
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: PAGE_TITLE,
