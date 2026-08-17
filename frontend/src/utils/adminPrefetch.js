@@ -5,8 +5,10 @@
 // the user actually clicks, the chunk is in browser memory and the only
 // remaining latency is the page's own API call.
 //
-// Each entry runs at most once per session — dynamic import caches the
-// promise internally, so repeat calls are free.
+// De-duplication and error handling live in routePrefetch.js; this module is
+// just the admin route map.
+
+import { runPrefetch } from "@/utils/routePrefetch";
 
 const ROUTE_IMPORTS = {
   "/admin/dashboard":       () => import("@/pages/AdminDashboard"),
@@ -31,12 +33,6 @@ const ROUTE_IMPORTS = {
   "/admin/settings":        () => import("@/pages/AdminSettings"),
 };
 
-const fired = new Set();
-
 export function prefetchAdminRoute(path) {
-  const loader = ROUTE_IMPORTS[path];
-  if (!loader || fired.has(path)) return;
-  fired.add(path);
-  // Swallow rejections — a failed prefetch must never affect the real navigation.
-  loader().catch(() => fired.delete(path));
+  runPrefetch(path, ROUTE_IMPORTS[path]);
 }

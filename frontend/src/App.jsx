@@ -34,6 +34,7 @@ import ProfileLayout from "@/components/ProfileLayout";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminProtectedRoute from "@/components/AdminProtectedRoute";
 import { AnalyticsTracker } from "./components/Analytics";
+import { attachLinkPrefetch, warmLikelyRoutes } from "@/utils/routePrefetch";
 // Home stays eager — it's the landing page, so we want its LCP as fast as
 // possible with no extra chunk round-trip. Every other public page is lazy
 // (declared below, after the `named` helper) to keep the initial bundle small.
@@ -103,6 +104,17 @@ const OAuthCallback = lazy(() => import("@/pages/OAuthCallback"));
 const NotFound = named(() => import("@/pages/NotFound"), "NotFound");
 const Blog = lazy(() => import("@/pages/Blog"));
 const BlogPost = lazy(() => import("@/pages/BlogPost"));
+
+// Warms lazy route chunks before they are needed, so moving between pages does
+// not hit the Suspense fallback. Mounted once; it listens at the document.
+function RoutePrefetcher() {
+  useEffect(() => {
+    const detach = attachLinkPrefetch();
+    warmLikelyRoutes();
+    return detach;
+  }, []);
+  return null;
+}
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -287,6 +299,7 @@ function AppContent() {
       >
         Skip to main content
       </a>
+<RoutePrefetcher />
 <ScrollToTop />
 <ReloadScrollRestoration />
       <AnalyticsTracker />
@@ -296,9 +309,17 @@ function AppContent() {
       {showPublicChrome && <CartDrawer />}
       <WishlistToast />
       <main id="main-content" className={mainWrapperClass}>
+        {/* <Suspense> sits ABOVE the keyed boundary deliberately. RouteErrorBoundary is
+            keyed on location.key, so every navigation unmounts its whole subtree. With the
+            Suspense boundary inside that subtree it was remounted empty on each route
+            change, and an empty boundary has no choice but to paint its fallback — which
+            is why a full-screen loader flashed between pages. Hoisted out, the boundary
+            survives navigation, so React keeps the previous page on screen while the next
+            chunk resolves (React Router 7 already runs navigations inside startTransition)
+            and the fallback is reached only on a genuine cold start. */}
+        <Suspense fallback={<Loader />}>
         <AnimatePresence mode={isAdminRoute ? "sync" : "wait"} initial={false}>
           <RouteErrorBoundary key={location.key || location.pathname}>
-          <Suspense fallback={<Loader />}>
           <Routes location={location} key={isAdminRoute ? "/admin" : location.pathname}>
             {/* Public Routes */}
             <Route
@@ -454,9 +475,9 @@ function AppContent() {
             {/* 404 Catch-All Route */}
             <Route path="*" element={<NotFound />} />
           </Routes>
-          </Suspense>
           </RouteErrorBoundary>
         </AnimatePresence>
+        </Suspense>
       </main>
 
       {showFooter && <Footer variant={footerVariant} />}
