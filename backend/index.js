@@ -786,7 +786,13 @@ if (process.env.NODE_ENV === "production") {
     next();
   });
 
-  app.use(express.static(frontendDist));
+  // index:false is load-bearing. With the default, express.static answers "/"
+  // with dist/index.html directly and the SEO renderer below never runs for the
+  // homepage — it shipped the raw shell: an empty body, the template's homepage
+  // canonical, and none of the crawlable product links. Every other route
+  // already fell through because no file matches them. Requests for the literal
+  // /index.html still resolve here as a normal static file.
+  app.use(express.static(frontendDist, { index: false }));
 
   const { renderPage } = require("./utils/seoRenderer");
   const ASSET_EXTENSION = /\.[a-zA-Z0-9]{1,8}$/;
