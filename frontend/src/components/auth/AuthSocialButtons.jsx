@@ -169,6 +169,7 @@ const AuthSocialButtons = ({
                   size="large"
                   shape={isIconVariant ? 'circle' : 'rectangular'}
                   text="continue_with"
+                  logo_alignment="left"
                   width={requestedWidth}
                 />
               </div>
