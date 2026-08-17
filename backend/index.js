@@ -154,8 +154,23 @@ app.use(
       },
     },
     crossOriginEmbedderPolicy: false,
-    crossOriginOpenerPolicy: { policy: "same-origin" },
+    // Google Identity Services signs the user in through a popup on
+    // accounts.google.com and talks back to us through window.opener. COOP
+    // "same-origin" drops the popup into a new browsing context group and
+    // severs that link — the popup handle reads .closed === true immediately
+    // and the credential never arrives. "same-origin-allow-popups" keeps the
+    // opener link for windows WE open while still refusing to be adopted as a
+    // popup by a cross-origin opener, which is the protection that matters.
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     crossOriginResourcePolicy: { policy: "same-origin" },
+    // Helmet defaults to "no-referrer", which sends no Referer to
+    // accounts.google.com. GSI resolves the calling origin from that header,
+    // so with it absent Google answers /gsi/button with 400 and logs "The
+    // given origin is not allowed for the given client ID" — the sign-in
+    // button never renders. This value leaks only the bare origin
+    // (https://naturanzafood.com, no path or query) cross-origin, and nothing
+    // at all when downgrading to HTTP.
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
   }),
 );
 

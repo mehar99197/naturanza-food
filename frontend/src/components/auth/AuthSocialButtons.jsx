@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import { Loader2 } from 'lucide-react';
 
@@ -23,11 +23,66 @@ const GoogleBrandIcon = ({ className = 'h-4 w-4' }) => (
   </svg>
 );
 
+// Hover is expressed with group-hover rather than hover because the visual
+// layer never receives the pointer itself — Google's iframe sits on top of it.
+// CSS :hover still applies to the shared ancestor, so the styling stays live.
 const iconButtonClassName =
-  'mobile-icon-button-feel relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#d5e3d3] bg-white text-slate-600 shadow-sm transition-all duration-200 hover:border-[#bed2bc] disabled:cursor-not-allowed disabled:opacity-60';
+  'mobile-icon-button-feel relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#d5e3d3] bg-white text-slate-600 shadow-sm transition-all duration-200 group-hover:border-[#bed2bc]';
 
 const fullButtonClassName =
-  'mobile-button-feel inline-flex w-full items-center justify-center gap-2.5 rounded-[11px] border border-[#d9e4d7] bg-[#f4f8f3] px-4 py-3 text-[0.92rem] font-medium text-[#2f3f35] transition-colors duration-200 hover:border-[#bfd3bd] hover:bg-[#ecf5ea] disabled:cursor-not-allowed disabled:opacity-70';
+  'mobile-button-feel inline-flex w-full items-center justify-center gap-2.5 rounded-[11px] border border-[#d9e4d7] bg-[#f4f8f3] px-4 py-3 text-[0.92rem] font-medium text-[#2f3f35] transition-colors duration-200 group-hover:border-[#bfd3bd] group-hover:bg-[#ecf5ea]';
+
+// Google renders its button inside a cross-origin <iframe> on
+// accounts.google.com. Nothing in that iframe is reachable from this document,
+// so a styled button of ours cannot forward a click into it — and a synthetic
+// click would carry no user activation even if it could, which the sign-in
+// popup requires. The only workable arrangement is to let the real Google
+// button receive the pointer event: it is stretched over our styled button at
+// zero opacity, so the user sees our design and Google sees a genuine click.
+//
+// Layout sizes are read with a ResizeObserver rather than hard-coded because
+// Google picks the iframe's dimensions and revises them (locale, font loading,
+// the FedCM variant). `offsetWidth`/`offsetHeight` and ResizeObserver's
+// contentRect both report pre-transform layout size, so measuring the overlay
+// while it is scaled does not feed its own scale back into the next frame.
+const useLayoutSize = (ref) => {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) {
+      return undefined;
+    }
+
+    const read = () => {
+      const width = element.offsetWidth;
+      const height = element.offsetHeight;
+      setSize((previous) =>
+        previous.width === width && previous.height === height
+          ? previous
+          : { width, height },
+      );
+    };
+
+    read();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(read);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return size;
+};
+
+// Google clamps the rendered button to 200-400px. Asking for a width near the
+// slot we have keeps the overlay's scale factor close to 1, so Google's own hit
+// target stays roughly the size the user sees.
+const GSI_MIN_WIDTH = 200;
+const GSI_MAX_WIDTH = 400;
 
 const AuthSocialButtons = ({
   dividerLabel = 'Or continue with',
@@ -41,32 +96,31 @@ const AuthSocialButtons = ({
   variant = 'full',
   buttonLabel = 'Sign in with Google',
 }) => {
-  const googleButtonRef = useRef(null);
+  const hostRef = useRef(null);
+  const overlayRef = useRef(null);
+  const hostSize = useLayoutSize(hostRef);
+  const overlaySize = useLayoutSize(overlayRef);
+
   const isIconVariant = variant === 'icon';
+  const isInteractive = Boolean(isGoogleConfigured) && !googleLoading;
 
   const justifyClass =
     align === 'left' ? 'justify-start' : align === 'right' ? 'justify-end' : 'justify-center';
 
-  const triggerGoogleSignIn = () => {
-    if (!isGoogleConfigured || googleLoading) {
-      return;
-    }
+  const requestedWidth = isIconVariant
+    ? undefined
+    : Math.round(
+        Math.min(GSI_MAX_WIDTH, Math.max(GSI_MIN_WIDTH, hostSize.width || GSI_MAX_WIDTH)),
+      );
 
-    const button = googleButtonRef.current?.querySelector('div[role="button"]');
-    if (button instanceof HTMLElement) {
-      button.click();
-      return;
-    }
+  const scaleX = hostSize.width && overlaySize.width ? hostSize.width / overlaySize.width : 1;
+  const scaleY = hostSize.height && overlaySize.height ? hostSize.height / overlaySize.height : 1;
 
-    if (typeof window !== 'undefined') {
-      window.setTimeout(() => {
-        const retryButton = googleButtonRef.current?.querySelector('div[role="button"]');
-        if (retryButton instanceof HTMLElement) {
-          retryButton.click();
-        }
-      }, 100);
-    }
-  };
+  const visualContent = googleLoading ? (
+    <Loader2 className="h-4 w-4 animate-spin" />
+  ) : (
+    <GoogleBrandIcon className="h-[17px] w-[17px]" />
+  );
 
   return (
     <div className={`relative ${className}`}>
@@ -82,49 +136,46 @@ const AuthSocialButtons = ({
       ) : null}
 
       <div className={`flex items-center ${justifyClass}`}>
-        {isIconVariant ? (
-          <button
-            type="button"
-            onClick={triggerGoogleSignIn}
-            disabled={!isGoogleConfigured || googleLoading}
-            className={iconButtonClassName}
-            aria-label={isGoogleConfigured ? 'Continue with Google' : 'Google sign-in unavailable'}
+        <div className={`group relative ${isIconVariant ? '' : 'w-full'}`} ref={hostRef}>
+          {/* Presentation only. The real control is Google's iframe below, so
+              this must not take focus or swallow the pointer event. */}
+          <div
+            aria-hidden="true"
+            className={`${isIconVariant ? iconButtonClassName : fullButtonClassName} pointer-events-none ${
+              isInteractive ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
+            }`}
           >
-            {googleLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <GoogleBrandIcon className="h-[17px] w-[17px]" />
+            {visualContent}
+            {isIconVariant ? null : (
+              <span>{googleLoading ? 'Connecting Google...' : buttonLabel}</span>
             )}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={triggerGoogleSignIn}
-            disabled={!isGoogleConfigured || googleLoading}
-            className={fullButtonClassName}
-          >
-            {googleLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <GoogleBrandIcon className="h-[17px] w-[17px]" />
-            )}
-            <span>{googleLoading ? 'Connecting Google...' : buttonLabel}</span>
-          </button>
-        )}
-      </div>
+          </div>
 
-      {isGoogleConfigured ? (
-        <div ref={googleButtonRef} aria-hidden="true" className="absolute -left-[9999px] top-0 h-0 w-0 overflow-hidden opacity-0">
-          <GoogleLogin
-            onSuccess={onGoogleSuccess}
-            onError={onGoogleError}
-            theme="outline"
-            type="icon"
-            size="large"
-            shape="circle"
-          />
+          {isInteractive ? (
+            <div className="absolute inset-0 z-10 overflow-hidden opacity-0">
+              <div
+                ref={overlayRef}
+                className="origin-top-left"
+                style={{
+                  transform: `scale(${scaleX}, ${scaleY})`,
+                  width: requestedWidth ? `${requestedWidth}px` : 'max-content',
+                }}
+              >
+                <GoogleLogin
+                  onSuccess={onGoogleSuccess}
+                  onError={onGoogleError}
+                  theme="outline"
+                  type={isIconVariant ? 'icon' : 'standard'}
+                  size="large"
+                  shape={isIconVariant ? 'circle' : 'rectangular'}
+                  text="continue_with"
+                  width={requestedWidth}
+                />
+              </div>
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
     </div>
   );
 };
