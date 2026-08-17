@@ -55,8 +55,17 @@ export const notificationEndpoints = {
 };
 
 /**
- * The admin dashboard exposes a strict subset — it has no settings screen of
- * its own, but the source still wires both settings methods onto `adminAPI`,
- * so the subset is the whole object.
+ * The storefront also polls an unread badge. The source declares this one on
+ * `userAPI` only — `adminAPI` has no counterpart — so it is spread in
+ * separately rather than added to the shared set.
  */
+export const userNotificationEndpoints = {
+  ...notificationEndpoints,
+
+  /** GET /auth/notifications/unread-count */
+  getNotificationsUnreadCount: <T = unknown>(): Promise<T> =>
+    apiClient.get<T>("/auth/notifications/unread-count"),
+};
+
+/** The admin dashboard wires up exactly the shared set, and nothing more. */
 export const adminNotificationEndpoints = notificationEndpoints;

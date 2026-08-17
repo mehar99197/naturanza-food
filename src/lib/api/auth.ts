@@ -9,7 +9,7 @@
 
 import { addressEndpoints } from "./addresses";
 import { apiClient, refreshUserAccessToken } from "./client";
-import { notificationEndpoints } from "./notifications";
+import { userNotificationEndpoints } from "./notifications";
 import { readAccessToken } from "./payload";
 import {
   clearUserAccessToken,
@@ -112,7 +112,7 @@ export const sessionEndpoints = {
 export const userAPI = {
   ...sessionEndpoints,
   ...addressEndpoints,
-  ...notificationEndpoints,
+  ...userNotificationEndpoints,
 
   /** GET /auth/profile */
   getProfile: <T = unknown>(): Promise<T> => apiClient.get<T>("/auth/profile"),

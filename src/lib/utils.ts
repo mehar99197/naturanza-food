@@ -1,35 +1,33 @@
 /**
- * Money formatting, ported from frontend/src/lib/utils.js.
+ * Money formatting and class-name merging, ported from frontend/src/lib/utils.js.
  *
- * Two things did not come across, both deliberately:
- *
- *  - `cn()` needs `clsx` + `tailwind-merge`, which are dependencies of the Vite
- *    app only and are not installed at the Next root. Reimplementing
- *    tailwind-merge's conflict resolution would change behaviour, so `cn` is
- *    omitted until those two are added to the root package.json.
- *  - `getProductPricing` already lives in @/server/catalog/pricing and is
- *    re-exported below rather than duplicated. That module imports nothing at
- *    runtime (its only import is `import type`), so it bundles safely into a
- *    client component — do not add a value import or `server-only` to it.
- *
- * ⚠ `formatCurrency` calls `toLocaleString()` for whole-unit currencies, which
- * reads the *runtime* locale. Node and the browser can disagree, which under
- * Next means server HTML and client HTML differ and React reports a hydration
- * mismatch. Format prices in a client component, or pass an explicit locale
- * here before using it in a server component.
+ * `getProductPricing` is not duplicated here — it lives in @/lib/pricing, which
+ * both server and client code share, and is re-exported below so call sites that
+ * expect it on `utils` keep working.
  */
 
-import { clampPercent, type StoreDiscountSettings } from "@/server/catalog/pricing";
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+import { clampPercent, type StoreDiscountSettings } from "@/lib/pricing";
 import { convertFromPkr, hasExchangeRate } from "@/lib/exchangeRates";
 
-export {
-  clampPercent,
-  getProductPricing,
-} from "@/server/catalog/pricing";
-export type {
-  ProductPricing,
-  StoreDiscountSettings,
-} from "@/server/catalog/pricing";
+/**
+ * Conditional class names with Tailwind conflict resolution, identical to the
+ * Vite app's `cn`.
+ *
+ * ⚠ `twMerge` does not merely concatenate — it *drops* earlier classes that
+ * conflict with later ones (`px-2 px-4` collapses to `px-4`). That is the point
+ * when composing variants, but it makes `cn` the wrong tool for a straight port
+ * of existing markup: the shared site chrome keeps its original template
+ * literals precisely so the emitted class attribute stays byte-identical.
+ */
+export function cn(...inputs: ClassValue[]): string {
+  return twMerge(clsx(inputs));
+}
+
+export { clampPercent, getProductPricing } from "@/lib/pricing";
+export type { PriceableProduct, ProductPricing, StoreDiscountSettings } from "@/lib/pricing";
 
 /** An amount as it arrives from the API — DECIMAL columns come back as strings. */
 export type MoneyInput = number | string | null | undefined;

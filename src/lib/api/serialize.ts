@@ -29,31 +29,34 @@ const encodeQueryPart = (value: string): string =>
     .replace(/%2C/gi, ",")
     .replace(/%20/g, "+");
 
-/** axios's `convertValue`: null becomes empty, Dates become ISO strings. */
-const stringifyParam = (value: string | number | boolean | null | Date): string => {
-  if (value === null) return "";
-  if (value instanceof Date) return value.toISOString();
-  return String(value);
-};
+/** axios's `convertValue`: Dates become ISO strings, everything else stringifies. */
+const stringifyParam = (value: string | number | boolean | Date): string =>
+  value instanceof Date ? value.toISOString() : String(value);
 
 /**
  * Serializes a params object the way axios's default `AxiosURLSearchParams`
- * does: `undefined` entries are dropped entirely, and a flat array is repeated
- * under a `key[]` name.
+ * does.
+ *
+ * Two details that are easy to miss and both matter here: `undefined` *and*
+ * `null` entries are dropped outright rather than sent as an empty value
+ * (axios's `toFormData` skips them before the visitor ever runs), and a flat
+ * array is repeated under a `key[]` name with its own nulls skipped. Several
+ * call sites lean on the null behaviour — a `status: null` filter must mean
+ * "unfiltered", not `status=`.
  */
 export const serializeParams = (params: QueryParams | undefined): string => {
   if (!params) return "";
 
   const pairs: string[] = [];
 
-  const push = (key: string, value: string | number | boolean | null | Date): void => {
+  const push = (key: string, value: string | number | boolean | Date): void => {
     pairs.push(`${encodeQueryPart(key)}=${encodeQueryPart(stringifyParam(value))}`);
   };
 
   for (const [key, value] of Object.entries(params) as Array<
     [string, QueryParamValue]
   >) {
-    if (value === undefined) continue;
+    if (value === undefined || value === null) continue;
 
     if (Array.isArray(value)) {
       for (const item of value) {
@@ -63,7 +66,7 @@ export const serializeParams = (params: QueryParams | undefined): string => {
       continue;
     }
 
-    push(key, value as string | number | boolean | null | Date);
+    push(key, value as string | number | boolean | Date);
   }
 
   return pairs.join("&");

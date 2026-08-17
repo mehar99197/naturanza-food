@@ -13,7 +13,7 @@
 
 import { performRequest } from "./http";
 import { isRecord } from "./errors";
-import type { RequestState } from "./types";
+import type { CsrfTokenResponse, RequestState } from "./types";
 
 let csrfToken: string | null = null;
 let csrfTokenPromise: Promise<string | null> | null = null;
@@ -28,10 +28,15 @@ const CSRF_REQUEST: RequestState = {
   csrfRetry: false,
 };
 
+const readToken = (payload: unknown): string | null => {
+  if (!isRecord(payload)) return null;
+  const { csrfToken: token } = payload as CsrfTokenResponse;
+  return token ? String(token) : null;
+};
+
 const fetchCsrfToken = async (): Promise<string | null> => {
   const response = await performRequest({ ...CSRF_REQUEST, headers: {} });
-  const payload = response.data;
-  const nextToken = isRecord(payload) ? payload.csrfToken || null : null;
+  const nextToken = readToken(response.data);
   if (nextToken) {
     csrfToken = String(nextToken);
   }
