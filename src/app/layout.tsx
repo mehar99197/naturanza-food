@@ -72,10 +72,12 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
+    // <body> carries no classes on purpose: frontend/index.html renders a bare
+    // body too, and every rule that styles it lives in styles/app.css, which
+    // both apps share. Adding Tailwind utilities here would style the Next
+    // pages differently from the ones still served by the Vite build.
     <html lang="en">
-      <body className="min-h-screen bg-background font-sans text-foreground antialiased">
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

@@ -21,11 +21,19 @@ const NEXT_INTERNAL_PATTERNS = [
 /**
  * Pages migrated so far, most specific first.
  *
- * Phase 1 deliberately claims only a route that does not exist today, so the
- * proving deploy cannot regress a page a customer can reach.
+ * Everything absent from this list is still answered by the Vite build and its
+ * SEO meta renderer, exactly as before. Deleting a line here is a complete
+ * rollback for that one page.
  */
 const MIGRATED_PAGE_PATTERNS = [
+  // Internal diagnostic. Unlinked and noindex; removed in the final phase.
   /^\/render-check\/?$/,
+
+  // Phase 2 — server-rendered content pages.
+  /^\/about\/?$/,
+  /^\/contact\/?$/,
+  /^\/blog\/?$/,
+  /^\/blog\/[^/]+\/?$/,
 ];
 
 const ALL_PATTERNS = [...NEXT_INTERNAL_PATTERNS, ...MIGRATED_PAGE_PATTERNS];

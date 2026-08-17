@@ -4,74 +4,32 @@
  * Every value is byte-for-byte the original. What is new is the typing: these
  * were untyped object literals, and `ease: "easeOut"` widens to `string`
  * without help, which then fails to satisfy Framer's `Easing` union at the use
- * site. The interfaces below give the literals somewhere to be checked.
+ * site. Annotating each constant gives the literals somewhere to be checked.
  *
- * They are deliberately *structural stand-ins* rather than re-exports of
- * Framer's own types: `framer-motion` is a dependency of the Vite app only and
- * is not installed at the Next root, so importing from it here would not
- * compile. They are a strict subset of Framer's shapes, so these objects stay
- * assignable to `Variants`/`MotionProps` once it is added — swap the aliases
- * for the real imports then, and nothing below needs to change.
+ * The types below are Framer's own. An earlier revision declared structural
+ * stand-ins because framer-motion was not installed at the Next root; it is now,
+ * and the stand-ins were not merely redundant but wrong — v12's `Target`
+ * carries a `--${string}` index signature for CSS custom properties that a plain
+ * interface cannot satisfy, so a perfectly valid value like `buttonTap` failed
+ * to spread onto `motion.button`. Re-exporting the real types removes the whole
+ * class of mismatch rather than papering over each site with an assertion.
  */
 
-/** Named easing curves, matching Framer's string easings. */
-export type Easing =
-  | "linear"
-  | "easeIn"
-  | "easeOut"
-  | "easeInOut"
-  | "circIn"
-  | "circOut"
-  | "circInOut"
-  | "backIn"
-  | "backOut"
-  | "backInOut"
-  | "anticipate";
+import type { MotionProps, TargetAndTransition, Transition, Variants } from "framer-motion";
 
-export type TransitionType = "spring" | "tween" | "keyframes" | "inertia";
+export type { TargetAndTransition, Transition, Variants };
 
-export type RepeatType = "loop" | "reverse" | "mirror";
+/** One animation target. Alias kept so existing imports keep resolving. */
+export type AnimationTarget = TargetAndTransition;
 
-export interface Transition {
-  duration?: number;
-  delay?: number;
-  ease?: Easing;
-  type?: TransitionType;
-  stiffness?: number;
-  damping?: number;
-  mass?: number;
-  repeat?: number;
-  repeatType?: RepeatType;
-  repeatDelay?: number;
-  /** Seconds between each child's animation, on a parent variant. */
-  staggerChildren?: number;
-  /** Seconds to wait before the first child animates. */
-  delayChildren?: number;
-}
-
-/** One animation target. An array value is a keyframe sequence. */
-export interface AnimationTarget {
-  opacity?: number | number[];
-  x?: number | string | Array<number | string>;
-  y?: number | string | Array<number | string>;
-  scale?: number | number[];
-  rotate?: number | string | Array<number | string>;
-  backgroundPosition?: string | string[];
-  transition?: Transition;
-}
-
-/** A named set of targets, driven by `variants` + `initial`/`animate`. */
-export type Variants = Record<string, AnimationTarget>;
-
-/** Motion props meant to be spread onto an element, not used as variants. */
-export interface MotionAnimationProps {
-  initial?: AnimationTarget;
-  animate?: AnimationTarget;
-  exit?: AnimationTarget;
-  whileHover?: AnimationTarget;
-  whileTap?: AnimationTarget;
-  transition?: Transition;
-}
+/**
+ * Props meant to be spread onto a motion element rather than used as a variants
+ * map. Picked from Framer's own MotionProps so a spread always type-checks.
+ */
+export type MotionAnimationProps = Pick<
+  MotionProps,
+  "initial" | "animate" | "exit" | "whileHover" | "whileTap" | "transition"
+>;
 
 // Fade in animation
 export const fadeIn: Variants = {

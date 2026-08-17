@@ -6,6 +6,16 @@
  * PUBLIC_SITE_URL is a server variable, not a NEXT_PUBLIC_ one: every consumer
  * below runs during server rendering, and the value is emitted into the HTML
  * rather than read by browser JavaScript.
+ *
+ * ⚠ WHEN THIS IS READ DEPENDS ON THE ROUTE. A statically prerendered page bakes
+ * SITE_URL into its HTML at BUILD time; a dynamic one reads it per request. So a
+ * build run with PUBLIC_SITE_URL pointing somewhere else — a staging host, a
+ * local port — ships canonicals and og:url for that host on every static page,
+ * and search engines would be told the canonical home of the content is there.
+ *
+ * The fallback below is the production origin precisely so that a build with the
+ * variable unset is still correct. Set it during a build only when the build's
+ * output really is meant to be served from that origin.
  */
 const RAW_SITE_URL = process.env.PUBLIC_SITE_URL || "https://naturanzafood.com";
 

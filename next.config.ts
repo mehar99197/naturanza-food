@@ -33,7 +33,7 @@ const nextConfig: NextConfig = {
     // Keeps the client bundle from pulling a whole icon/UI package in for a few
     // named imports — the current SPA ships 612 kB of first-load JS, much of it
     // from exactly this pattern.
-    optimizePackageImports: ["lucide-react", "date-fns"],
+    optimizePackageImports: ["lucide-react", "date-fns", "framer-motion"],
   },
 };
 
