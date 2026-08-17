@@ -52,9 +52,9 @@ export function SEO({
       <meta property="og:type" content={type} />
       <meta property="og:title" content={fullTitle} />
       <meta property="og:description" content={finalDescription} />
+      {/* og:image varies per route, so a fixed 1200x630 hint was wrong on every
+          product page. Omitted so scrapers measure the real file instead. */}
       <meta property="og:image" content={imageUrl} />
-      <meta property="og:image:width" content="1200" />
-      <meta property="og:image:height" content="630" />
       <meta property="og:image:alt" content={fullTitle} />
       <meta property="og:site_name" content={SITE_NAME} />
       <meta property="og:locale" content="en_PK" />

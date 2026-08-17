@@ -15,7 +15,21 @@ Disallow: /signup
 Disallow: /forgot-password
 Disallow: /reset-password
 Disallow: /auth/
+
+# The storefront is a React app: every product/category/review field is fetched
+# from these read-only GET endpoints at render time. Googlebot honours robots.txt
+# for subresources too, so blocking them made the RENDERED product page read
+# "This product does not exist or has been removed" — a soft-404 contradicting the
+# page's own InStock structured data. Google resolves by LONGEST match, so these
+# Allow lines win over the /api/ catch-all below while everything else stays shut.
+Allow: /api/products
+Allow: /api/categories
+Allow: /api/reviews/
+Allow: /api/settings
+Allow: /api/announcements/
+Allow: /api/sitemap
 Disallow: /api/
+
 Disallow: /images/uploads/
 Disallow: /images/payment-verifications/
 Disallow: /uploads/

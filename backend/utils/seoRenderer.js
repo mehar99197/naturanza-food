@@ -105,6 +105,67 @@ const setCanonical = (html, url) =>
     (match, open, close) => `${open}${escapeAttr(url)}${close}`,
   );
 
+// The template ships two hreflang links (en-pk + x-default) both pointing at the
+// homepage. Left alone they told Google that the canonical alternate for EVERY
+// product page was "/" — a direct contradiction of the self-referencing canonical
+// two lines above. The /g flag rewrites both to the current URL.
+const setHreflang = (html, url) =>
+  html.replace(
+    /(<link\s+rel="alternate"\s+hreflang="[^"]*"\s+href=")[^"]*(")/g,
+    (match, open, close) => `${open}${escapeAttr(url)}${close}`,
+  );
+
+// Server-rendered body content, injected INSIDE #root. main.jsx mounts with
+// createRoot (not hydrateRoot), which empties the container before its first
+// paint — so React silently replaces everything below and no hydration mismatch
+// is possible. Until then, this is the only product content a crawler that does
+// not execute JavaScript can read.
+const renderBodyFallback = (inner) =>
+  `<div id="ssr-content">${inner}</div>`;
+
+const productBodyHtml = (product, meta) => {
+  const name = escapeAttr(product.name);
+  const price = Number(product.price);
+  const inStock = Number(product.stock_quantity) > 0;
+  const category = product.category_name
+    ? `<li><a href="/shop/${escapeAttr(product.category_slug || "")}">${escapeAttr(product.category_name)}</a></li>`
+    : "";
+
+  return renderBodyFallback(
+    `<nav aria-label="Breadcrumb"><ol>` +
+      `<li><a href="/">Home</a></li>` +
+      `<li><a href="/shop">Shop</a></li>` +
+      category +
+      `<li>${name}</li>` +
+      `</ol></nav>` +
+      `<h1>${name}</h1>` +
+      `<img src="${escapeAttr(meta.image)}" alt="${name} — Naturanza Food" />` +
+      `<p>${escapeAttr(meta.description)}</p>` +
+      `<p><strong>Price:</strong> <span>PKR</span> ` +
+      `<span>${Number.isFinite(price) ? price.toFixed(2) : ""}</span></p>` +
+      `<p><strong>Availability:</strong> ${inStock ? "In stock" : "Out of stock"}</p>` +
+      `<p><strong>Brand:</strong> ${escapeAttr(SITE_NAME)}</p>` +
+      (product.barcode ? `<p><strong>Product code:</strong> ${escapeAttr(product.barcode)}</p>` : "") +
+      `<p><a href="/shop">Browse all products</a></p>`,
+  );
+};
+
+// A crawlable link graph for the two pages Google reaches first. Without this the
+// sitemap was the ONLY path to a product page — there was not a single
+// <a href="/product/N"> anywhere in the pre-JavaScript HTML of the whole site.
+const linkListBodyHtml = (heading, products) =>
+  renderBodyFallback(
+    `<h1>${escapeAttr(heading)}</h1>` +
+      `<ul>` +
+      products
+        .map(
+          (product) =>
+            `<li><a href="/product/${product.id}">${escapeAttr(product.name)}</a></li>`,
+        )
+        .join("") +
+      `</ul>`,
+  );
+
 const applyMeta = (template, meta) => {
   let html = template;
   const ogTitle = meta.ogTitle || meta.title;
@@ -122,7 +183,19 @@ const applyMeta = (template, meta) => {
   html = setMeta(html, "property", "twitter:title", ogTitle);
   html = setMeta(html, "property", "twitter:description", meta.description);
   html = setMeta(html, "property", "twitter:image", image);
+  // Template default is the generic site tagline; a product page must describe
+  // its own image or the alt text is simply wrong.
+  html = setMeta(html, "property", "og:image:alt", meta.imageAlt || ogTitle);
+  html = setMeta(html, "property", "twitter:image:alt", meta.imageAlt || ogTitle);
   html = setCanonical(html, meta.url);
+  html = setHreflang(html, meta.url);
+
+  if (meta.bodyHtml) {
+    html = html.replace(
+      '<div id="root"></div>',
+      () => `<div id="root">${meta.bodyHtml}</div>`,
+    );
+  }
 
   if (meta.robots) {
     html = setMeta(html, "name", "robots", meta.robots);
@@ -220,7 +293,7 @@ const fetchProduct = async (param) => {
   const isNumeric = /^\d+$/.test(param);
   const [rows] = await dbPool.query(
     `SELECT p.id, p.name, p.slug, p.description, p.price, p.image_url, p.stock_quantity, p.is_active, p.barcode,
-            c.name AS category_name
+            c.name AS category_name, c.slug AS category_slug
      FROM products p
      LEFT JOIN categories c ON p.category_id = c.id
      WHERE ${isNumeric ? "p.id = ?" : "p.slug = ?"}
@@ -287,11 +360,12 @@ const buildProductMeta = (product) => {
     offers.price = price.toFixed(2);
   }
 
-  return {
+  const meta = {
     title: `${product.name} | ${SITE_NAME}`,
     description,
     url,
     image,
+    imageAlt: `${product.name} — ${SITE_NAME}`,
     ogType: "product",
     jsonLd: {
       "@context": "https://schema.org",
@@ -299,12 +373,43 @@ const buildProductMeta = (product) => {
       name: product.name,
       image: [image],
       description,
+      // The stable internal identifier. Distinct from the GTIN: the GTIN is a
+      // retail code that may or may not be ours, the SKU is always ours.
+      sku: String(product.id),
       category: product.category_name || undefined,
       brand: { "@type": "Brand", name: SITE_NAME },
       ...barcodeToGtin(product.barcode),
       offers,
     },
   };
+
+  meta.bodyHtml = productBodyHtml(product, meta);
+  return meta;
+};
+
+// Active products for the crawlable link lists on / and /shop. The limit is a
+// module constant rather than a bound parameter because MySQL will not accept a
+// placeholder in LIMIT on a prepared statement.
+const LINK_LIST_LIMIT = 100;
+
+const fetchActiveProducts = async (categorySlug = null) => {
+  if (categorySlug) {
+    const [rows] = await dbPool.query(
+      `SELECT p.id, p.name
+         FROM products p
+         JOIN categories c ON p.category_id = c.id
+        WHERE p.is_active = 1 AND c.slug = ?
+        ORDER BY p.name ASC
+        LIMIT ${LINK_LIST_LIMIT}`,
+      [categorySlug],
+    );
+    return rows;
+  }
+
+  const [rows] = await dbPool.query(
+    `SELECT id, name FROM products WHERE is_active = 1 ORDER BY name ASC LIMIT ${LINK_LIST_LIMIT}`,
+  );
+  return rows;
 };
 
 // Resolve { status, meta } for a request path.
@@ -313,10 +418,25 @@ const resolveMeta = async (reqPath) => {
 
   const staticPage = STATIC_PAGES[pathname];
   if (staticPage) {
-    return {
-      status: 200,
-      meta: { ...staticPage, url: `${SITE_URL}${pathname === "/" ? "/" : pathname}` },
+    const meta = {
+      ...staticPage,
+      url: `${SITE_URL}${pathname === "/" ? "/" : pathname}`,
     };
+
+    // "/" and "/shop" are where Googlebot lands first, so they carry the
+    // crawlable product links that let it reach every product page without
+    // depending on the sitemap alone.
+    if (pathname === "/" || pathname === "/shop") {
+      const products = await fetchActiveProducts();
+      if (products.length > 0) {
+        meta.bodyHtml = linkListBodyHtml(
+          pathname === "/" ? `${SITE_NAME} — Shop Organic & Natural Products` : "Shop All Products",
+          products,
+        );
+      }
+    }
+
+    return { status: 200, meta };
   }
 
   if (NOINDEX_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
@@ -346,6 +466,7 @@ const resolveMeta = async (reqPath) => {
     if (!category) {
       return { status: 404, meta: notFoundMeta(`${SITE_URL}${pathname}`) };
     }
+    const categoryProducts = await fetchActiveProducts(category.slug);
     return {
       status: 200,
       meta: {
@@ -353,6 +474,11 @@ const resolveMeta = async (reqPath) => {
         description: truncate(category.description) || `Shop ${category.name} at Naturanza Food.`,
         url: `${SITE_URL}${pathname}`,
         image: category.image_url ? absoluteImage(category.image_url) : DEFAULT_OG_IMAGE,
+        imageAlt: `${category.name} — ${SITE_NAME}`,
+        bodyHtml:
+          categoryProducts.length > 0
+            ? linkListBodyHtml(category.name, categoryProducts)
+            : undefined,
       },
     };
   }

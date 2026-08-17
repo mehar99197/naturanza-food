@@ -42,9 +42,14 @@
     <meta property="og:url" content="https://naturanzafood.com/" />
     <meta property="og:title" content="Naturanza Food - Premium Organic & Natural Products in Pakistan" />
     <meta property="og:description" content="Shop premium organic honey, herbal teas, natural supplements, and wellness products. 100% natural, sustainably sourced. Free shipping on Rs. 5,000+." />
+    <!--
+      No og:image:width/height here. They are static, but og:image is swapped
+      per-route by the server meta renderer, so the declared 1200x630 was a lie
+      for every product image (product 5's file is 553x799). Scrapers read the
+      real dimensions off the file when the hint is absent; a wrong hint they
+      trust and crop against.
+    -->
     <meta property="og:image" content="https://naturanzafood.com/images/og-image.jpg" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="Naturanza Food - Premium Organic & Natural Products" />
     <meta property="og:site_name" content="Naturanza Food" />
     <meta property="og:locale" content="en_PK" />

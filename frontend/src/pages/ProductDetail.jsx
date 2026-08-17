@@ -36,11 +36,7 @@ import { ProductDetailSkeleton } from '@/components/Skeletons/ProductDetailSkele
 import ProductReviews from '@/components/ProductReviews';
 import { SEO } from '@/components/SEO';
 import reviewEvents from '@/utils/reviewEvents';
-import {
-  ProductStructuredData,
-  BreadcrumbStructuredData,
-  OrganizationStructuredData,
-} from '@/components/StructuredData';
+import { BreadcrumbStructuredData } from '@/components/StructuredData';
 
 const FALLBACK_IMAGE = '/images/products/herbs.webp';
 
@@ -728,18 +724,15 @@ export function ProductDetail() {
         url={`${typeof window !== 'undefined' ? window.location.origin : ''}/product/${id}`}
       />
 
-      <ProductStructuredData
-        product={{
-          ...product,
-          image_url: productImages[0],
-          averageRating: liveReviewCount > 0 ? displayedRating : undefined,
-          reviewCount: liveReviewCount > 0 ? liveReviewCount : undefined,
-          is_in_stock: hasStock,
-        }}
-      />
-
-      <OrganizationStructuredData />
-
+      {/*
+        Product and Organization JSON-LD are emitted server-side (see
+        backend/utils/seoRenderer.js and index.html) so they are present in the
+        raw HTML a crawler reads without executing JavaScript. Rendering them
+        again here produced a SECOND Product node that disagreed with the first
+        on sku, price type and offers.url — the client copy appended the page’s
+        tracking query string to offers.url, contradicting the canonical.
+        Only the breadcrumb, which the server does not emit, is rendered here.
+      */}
       <BreadcrumbStructuredData items={breadcrumbItems} />
 
       <main className="pt-20 md:pt-24 pb-10 md:pb-16 bg-gradient-to-b from-[#f8fbf8] via-white to-[#f6faf6] min-h-screen">
