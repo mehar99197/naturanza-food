@@ -66,13 +66,15 @@ export function Loader({ fullScreen = true, label = '' }) {
 // opacity 0 failed to hide it — the footer rode up into the viewport for a few
 // hundred milliseconds before the next page pushed it back down.
 //
-// This fallback is in-flow instead: it holds the viewport height so the footer
+// This fallback is in-flow instead: it holds a FULL viewport height (the nav is
+// fixed, so <main> starts at y=0 and anything less leaves the footer poking in
+// at the bottom) so the footer
 // physically cannot move up, and the spinner is delayed so a fast navigation
 // shows nothing at all rather than a pointless flash.
 export function RouteFallback() {
   return (
     <div
-      className="flex min-h-[calc(100vh-4rem)] items-center justify-center"
+      className="flex min-h-screen items-center justify-center"
       aria-busy="true"
       aria-live="polite"
     >
