@@ -28,6 +28,6 @@ Disallow: /shop?min=
 Disallow: /shop?max=
 Disallow: /shop?page=
 
-# Sitemap location — dynamic index lists DB-driven product + category sitemaps
-Sitemap: https://naturanzafood.com/api/sitemap-index.xml
+# Sitemap location — dynamically generated, includes every active product,
+# category and blog URL from the database on every request
 Sitemap: https://naturanzafood.com/sitemap.xml

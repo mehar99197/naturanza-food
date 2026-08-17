@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import JsBarcode from "jsbarcode";
 import { QRCodeSVG } from "qrcode.react";
-import { Download, Printer } from "lucide-react";
+import { Download, ExternalLink, Printer, Search, ShoppingBag } from "lucide-react";
 
 // On-screen preview sizing. Print sizing is defined separately in millimetres
 // below, because a scanner only reads reliably at (or near) nominal scale.
@@ -245,6 +245,15 @@ const printProductLabel = (productName, barcode, format, qrSvgOuterHTML) => {
   printWindow.document.close();
 };
 
+// Deep links into Google's own search UI — never scrapes or predicts results,
+// just pre-fills a query that should surface this product once Google has
+// indexed its canonical page (see backend/utils/seoRenderer.js).
+const buildGoogleSiteSearchUrl = (url) =>
+  `https://www.google.com/search?q=${encodeURIComponent(`site:naturanzafood.com "${url}"`)}`;
+
+const buildGoogleShoppingUrl = (code) =>
+  `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(code)}`;
+
 export function ProductBarcode({ productName, barcode, productUrl }) {
   const svgRef = useRef(null);
   const qrWrapperRef = useRef(null);
@@ -385,6 +394,45 @@ export function ProductBarcode({ productName, barcode, productUrl }) {
           Print Label
         </button>
       </div>
+
+      {hasQr ? (
+        <div className="flex w-full flex-col items-center gap-2 border-t border-slate-100 pt-4">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+            Resolve EAN {barcode} → Product → Google
+          </span>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <a
+              href={productUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-[40px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:bg-slate-50"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Open Product
+            </a>
+            <a
+              href={buildGoogleSiteSearchUrl(productUrl)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-[40px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:bg-slate-50"
+            >
+              <Search className="h-4 w-4" />
+              Search Google
+            </a>
+            {format ? (
+              <a
+                href={buildGoogleShoppingUrl(barcode)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-[40px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:bg-slate-50"
+              >
+                <ShoppingBag className="h-4 w-4" />
+                Search Google Shopping
+              </a>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

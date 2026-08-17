@@ -691,6 +691,12 @@ app.use("/api/announcements", announcementsRoutes);
 app.use("/api/team", teamRoutes);
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api", sitemapRoutes);
+// Canonical sitemap at the well-known root path (not under /api) so
+// robots.txt's "Sitemap: https://naturanzafood.com/sitemap.xml" and Google
+// Search Console's sitemap submission resolve directly to it. Registered
+// before the production static/SPA-fallback block below so it always wins
+// over the pre-built frontend/dist/sitemap.xml.
+app.get("/sitemap.xml", sitemapRoutes.fullSitemapHandler);
 app.use("/api/admin/shipping", adminShippingRoutes);
 
 // Health check route
