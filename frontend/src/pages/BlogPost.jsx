@@ -439,7 +439,11 @@ export function BlogPost() {
                   <img
                     src={coverImage}
                     alt={post.title}
-                    className="w-full h-60 sm:h-[380px] object-cover"
+                    /* contain, not cover: these covers are product shots taller
+                       than this slot, so cover cropped the jar to a middle band.
+                       The article is already white, so the letterboxing reads as
+                       deliberate padding rather than a gap. */
+                    className="w-full h-60 sm:h-[380px] object-contain bg-white p-4"
                     onError={(event) => {
                       event.currentTarget.onerror = null;
                       event.currentTarget.src = BLOG_FALLBACK_IMAGE;
@@ -503,7 +507,7 @@ export function BlogPost() {
                               src={getAbsoluteImageUrl(rp.image, { defaultFolder: 'blog' })}
                               alt={rp.title}
                               loading="lazy"
-                              className="h-full w-full object-cover"
+                              className="h-full w-full object-contain p-2"
                               onError={(event) => {
                                 event.currentTarget.onerror = null;
                                 event.currentTarget.src = BLOG_FALLBACK_IMAGE;
