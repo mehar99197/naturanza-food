@@ -292,10 +292,11 @@ const listProducts = async (filters = {}) => {
     LEFT JOIN categories c ON p.category_id = c.id
   `;
   
-  const conditions = [];
+  // A deleted product is skipped for every caller. is_active is the admin's own
+  // show/hide switch, so it is the only one includeInactive may lift.
+  const conditions = ["p.deleted_at IS NULL"];
   const params = [];
 
-  // Only filter by is_active if includeInactive is false
   if (!includeInactive) {
     conditions.push("p.is_active = TRUE");
   }
@@ -344,7 +345,7 @@ const listFeaturedProducts = async (maxRows = 10) => {
     `SELECT p.*, c.name AS category_name
      FROM products p
      LEFT JOIN categories c ON p.category_id = c.id
-     WHERE p.is_featured = TRUE AND p.is_active = TRUE
+     WHERE p.is_featured = TRUE AND p.is_active = TRUE AND p.deleted_at IS NULL
      ORDER BY p.created_at DESC
      LIMIT ?`,
     [safeNumber(maxRows, 10)],
@@ -358,7 +359,7 @@ const findById = async (productId, { includeInactive = false } = {}) => {
     `SELECT p.*, c.name AS category_name
      FROM products p
      LEFT JOIN categories c ON p.category_id = c.id
-     WHERE p.id = ?${includeInactive ? "" : " AND p.is_active = TRUE"}
+     WHERE p.id = ? AND p.deleted_at IS NULL${includeInactive ? "" : " AND p.is_active = TRUE"}
      LIMIT 1`,
     [productId],
   );
@@ -386,7 +387,7 @@ const findByBarcode = async (code) => {
     `SELECT p.*, c.name AS category_name
      FROM products p
      LEFT JOIN categories c ON p.category_id = c.id
-      WHERE p.barcode = ? AND p.is_active = TRUE
+      WHERE p.barcode = ? AND p.is_active = TRUE AND p.deleted_at IS NULL
      LIMIT 1`,
     [barcode],
   );
@@ -480,7 +481,10 @@ const createProduct = async (payload = {}) => {
 const updateProduct = async (productId, payload = {}) => {
   return withTransaction(async (connection) => {
     const [existingRows] = await connection.query(
-      "SELECT id, name, slug, stock_quantity, reserved_stock FROM products WHERE id = ? LIMIT 1 FOR UPDATE",
+      `SELECT id, name, slug, stock_quantity, reserved_stock
+         FROM products
+        WHERE id = ? AND deleted_at IS NULL
+        LIMIT 1 FOR UPDATE`,
       [productId],
     );
 
@@ -646,15 +650,44 @@ const updateProduct = async (productId, payload = {}) => {
   });
 };
 
+/**
+ * Retire a product whose row cannot leave the table. deleted_at takes it out of
+ * every product query, and the slug and barcode are released so the same product
+ * can be created again from scratch. The row lives on only so that an old order
+ * line can still resolve its name.
+ */
+const archiveProduct = async (connection, product) => {
+  const releasedSlug = await generateUniqueSlug(
+    connection,
+    `${product.slug || "product"}-deleted-${product.id}`,
+    product.id,
+  );
+
+  await connection.query(
+    `UPDATE products
+     SET is_active = FALSE, deleted_at = NOW(), slug = ?, barcode = NULL
+     WHERE id = ?`,
+    [releasedSlug, product.id],
+  );
+};
+
+/**
+ * Delete a product. The outcome is "removed" when the row itself is gone,
+ * "archived" when it had to stay behind for order history, and "already-deleted"
+ * when there was nothing left to do.
+ */
 const deleteById = async (productId) => {
   return withTransaction(async (connection) => {
     const [rows] = await connection.query(
-      "SELECT id FROM products WHERE id = ? LIMIT 1 FOR UPDATE",
+      "SELECT id, slug, deleted_at FROM products WHERE id = ? LIMIT 1 FOR UPDATE",
       [productId],
     );
 
-    if (!rows.length) {
-      return { removed: false, archived: false, orderCount: 0 };
+    // Deleting is idempotent: an id that is already gone (removed outright,
+    // archived by an earlier click, or never real) reports success instead of
+    // the 404 a second click used to raise.
+    if (!rows.length || rows[0].deleted_at) {
+      return { outcome: "already-deleted", orderCount: 0 };
     }
 
     // order_items.product_id is ON DELETE CASCADE and an order line stores no
@@ -667,31 +700,28 @@ const deleteById = async (productId) => {
     );
     const orderCount = safeNumber(countRows[0]?.orderCount, 0);
 
-    if (orderCount > 0) {
-      await connection.query("UPDATE products SET is_active = FALSE WHERE id = ?", [productId]);
-      return { removed: false, archived: true, orderCount };
-    }
-
-    try {
-      await connection.query("DELETE FROM products WHERE id = ?", [productId]);
-    } catch (error) {
-      // A child table on the live schema may still be RESTRICT rather than
-      // CASCADE; archive instead of failing the admin's delete outright.
-      if (error.errno !== 1451) {
-        throw error;
+    if (orderCount === 0) {
+      try {
+        await connection.query("DELETE FROM products WHERE id = ?", [productId]);
+        return { outcome: "removed", orderCount: 0 };
+      } catch (error) {
+        // A child table on the live schema may still be RESTRICT rather than
+        // CASCADE; archive instead of failing the admin's delete outright.
+        if (error.errno !== 1451) {
+          throw error;
+        }
       }
-      await connection.query("UPDATE products SET is_active = FALSE WHERE id = ?", [productId]);
-      return { removed: false, archived: true, orderCount: 0 };
     }
 
-    return { removed: true, archived: false, orderCount: 0 };
+    await archiveProduct(connection, rows[0]);
+    return { outcome: "archived", orderCount };
   });
 };
 
 const updateStock = async (productId, stockQuantity, userId) => {
   return withTransaction(async (connection) => {
     const [rows] = await connection.query(
-      "SELECT name, stock_quantity, reserved_stock FROM products WHERE id = ? FOR UPDATE",
+      "SELECT name, stock_quantity, reserved_stock FROM products WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
       [productId],
     );
 

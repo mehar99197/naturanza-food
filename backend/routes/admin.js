@@ -1042,7 +1042,8 @@ router.get("/dashboard/stats", async (req, res) => {
       `SELECT
                 COUNT(*) AS totalProducts,
                 SUM(CASE WHEN stock_quantity < 10 THEN 1 ELSE 0 END) AS lowStockProducts
-             FROM products`,
+             FROM products
+             WHERE deleted_at IS NULL`,
     );
 
     const [[orderStats]] = await db.promise().query(
@@ -1659,7 +1660,7 @@ router.get("/inventory/low-stock", async (req, res) => {
       SELECT p.*, c.name as category_name
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
-      WHERE p.stock_quantity < ?
+      WHERE p.stock_quantity < ? AND p.deleted_at IS NULL
       ORDER BY p.stock_quantity ASC
     `, [threshold]);
     res.json(results);
@@ -2255,7 +2256,7 @@ router.get("/products/:id/barcode-data", async (req, res) => {
     }
 
     const [rows] = await db.promise().query(
-      "SELECT id, name, barcode FROM products WHERE id = ? LIMIT 1",
+      "SELECT id, name, barcode FROM products WHERE id = ? AND deleted_at IS NULL LIMIT 1",
       [productId],
     );
 

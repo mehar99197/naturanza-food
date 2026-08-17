@@ -155,20 +155,20 @@ const updateProduct = async (req, res) => {
 };
 
 const deleteProduct = async (req, res) => {
-  const { removed, archived, orderCount } = await productModel.deleteById(req.params.id);
+  const { outcome, orderCount } = await productModel.deleteById(req.params.id);
 
-  if (!removed && !archived) {
-    return res.status(404).json({ error: "Product not found" });
-  }
-
-  if (archived) {
+  if (outcome === "archived") {
     return res.json({
       message: orderCount
-        ? `Product hidden from the store. It still appears in ${orderCount} past order line${orderCount === 1 ? "" : "s"}, so it is kept for order history instead of being deleted.`
-        : "Product hidden from the store. Other records still reference it, so it is kept instead of being deleted.",
+        ? `Product deleted. It appears in ${orderCount} past order line${orderCount === 1 ? "" : "s"}, so a hidden copy stays behind to keep that order history readable.`
+        : "Product deleted. Other records still reference it, so a hidden copy stays behind.",
       archived: true,
       orderCount,
     });
+  }
+
+  if (outcome === "already-deleted") {
+    return res.json({ message: "Product was already deleted", archived: false });
   }
 
   return res.json({ message: "Product deleted successfully", archived: false });

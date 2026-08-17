@@ -370,7 +370,7 @@ export function AdminProducts() {
   const removeProduct = async (productId) => {
     if (
       !window.confirm(
-        "Delete this product? A product nobody has ordered is removed permanently. One that appears in past orders is hidden from the store instead, so order history stays intact.",
+        "Delete this product? It leaves the store and this list for good. If it appears in past orders, a hidden copy stays behind so that order history still reads correctly.",
       )
     ) {
       return;
@@ -382,7 +382,7 @@ export function AdminProducts() {
       const response = await deleteProduct(productId);
 
       if (response?.archived) {
-        setNotice(response.message || "Product hidden from the store to preserve order history.");
+        setNotice(response.message || "Product deleted. A hidden copy stays behind for order history.");
       }
     } catch (requestError) {
       setError(requestError?.response?.data?.error || "Failed to delete product");

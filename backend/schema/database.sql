@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS products (
     is_organic BOOLEAN DEFAULT FALSE,
     is_featured BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN DEFAULT TRUE,
+    -- Set when a product is deleted but its row has to stay for order history.
+    -- Every product query skips a row that carries a timestamp here.
+    deleted_at DATETIME NULL DEFAULT NULL,
     discount_percentage DECIMAL(5, 2) DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

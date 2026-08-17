@@ -671,7 +671,10 @@ const ensurePaymentAccountsSeed = async (db) => {
  */
 const backfillProductBarcodes = async (db) => {
   const [rows] = await db.query(
-    "SELECT id FROM products WHERE barcode IS NULL OR barcode = ''",
+    `SELECT id
+       FROM products
+      WHERE (barcode IS NULL OR barcode = '')
+        AND deleted_at IS NULL`,
   );
 
   for (const row of rows) {
@@ -778,6 +781,7 @@ const ensureProductionSchema = async (db) => {
     benefits: "TEXT NULL",
     usage: "TEXT NULL",
     reserved_stock: "INT NOT NULL DEFAULT 0",
+    deleted_at: "DATETIME NULL DEFAULT NULL",
   });
 
   await db.query(
