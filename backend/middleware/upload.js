@@ -72,6 +72,54 @@ const upload = multer({
     }
 });
 
+// Category cards render every image inside the same fixed box, so two cards
+// only look alike if the subject inside each image is framed alike — and
+// uploads never are. The honey shot arrived with its jar flush against the
+// right edge and 193px of dead space on the left; the ispaghol shot arrived
+// centred and touching the top and bottom edges. `fit: 'cover'` could not help:
+// it crops to fill the canvas, so wherever the subject sat in the source is
+// where it stays, and no amount of CSS downstream can pull it back — scaling
+// the image scales the empty space with it.
+//
+// Framing is therefore normalised here, at the single point every category
+// image passes through: trim the empty border away, scale what remains to a
+// fixed share of the canvas, and re-centre it on a transparent field. Whatever
+// an admin uploads, the cards then agree, with nothing to retouch by hand.
+const frameContainCenter = async (buffer, { width, height, contentScale }) => {
+    // trim() measures against the top-left pixel, which is the empty corner of
+    // a product cut-out. A photograph that already fills its frame trims to
+    // nothing and simply passes through.
+    let subject = buffer;
+    try {
+        subject = await sharp(buffer).trim({ threshold: 12 }).toBuffer();
+    } catch {
+        // An image of a single flat colour trims away to nothing and sharp
+        // rejects it; framing the untrimmed original is the sane outcome.
+    }
+
+    const scaled = await sharp(subject)
+        .resize(Math.round(width * contentScale), Math.round(height * contentScale), {
+            fit: 'inside',
+            // Enlargement is wanted here, unlike everywhere else: a subject that
+            // arrives small must still fill its share of the canvas, or its card
+            // reads as the odd one out.
+            withoutEnlargement: false,
+        })
+        .toBuffer();
+
+    const { width: scaledWidth = 0, height: scaledHeight = 0 } = await sharp(scaled).metadata();
+    const left = Math.max(0, Math.round((width - scaledWidth) / 2));
+    const top = Math.max(0, Math.round((height - scaledHeight) / 2));
+
+    return sharp(scaled).extend({
+        top,
+        left,
+        bottom: Math.max(0, height - scaledHeight - top),
+        right: Math.max(0, width - scaledWidth - left),
+        background: { r: 255, g: 255, b: 255, alpha: 0 },
+    });
+};
+
 // Image compression function with WebP support
 const compressImage = async (buffer, options = {}) => {
     const {
@@ -79,15 +127,19 @@ const compressImage = async (buffer, options = {}) => {
         height = 800,
         quality = 80,
         fit = 'inside',
-        format = 'webp' // Default to WebP for better compression
+        format = 'webp', // Default to WebP for better compression
+        frame = null, // 'contain-center' normalises the subject's framing
+        contentScale = 0.9 // Share of the canvas the subject fills when framed
     } = options;
 
     try {
-        let sharpInstance = sharp(buffer)
-            .resize(width, height, {
-                fit: fit,
-                withoutEnlargement: true // Don't enlarge smaller images
-            });
+        let sharpInstance = frame === 'contain-center'
+            ? await frameContainCenter(buffer, { width, height, contentScale })
+            : sharp(buffer)
+                .resize(width, height, {
+                    fit: fit,
+                    withoutEnlargement: true // Don't enlarge smaller images
+                });
 
         // Apply format-specific compression
         if (format === 'webp') {
@@ -193,12 +245,15 @@ const uploadProductImage = uploadAndCompress('product_image', 'products', {
     fit: 'inside'
 });
 
-// Category image upload
+// Category image upload. 4:3 rather than 3:2 because the card's image slot is
+// nearer square than the old canvas was, so a 3:2 image letterboxed inside it
+// and left the product looking small in a tall white box.
 const uploadCategoryImage = uploadAndCompress('category_image', 'categories', {
     width: 600,
-    height: 400,
+    height: 450,
     quality: 80,
-    fit: 'cover'
+    frame: 'contain-center',
+    contentScale: 0.9
 });
 
 // Blog cover image upload (1200x630 = social/OG card ratio)
