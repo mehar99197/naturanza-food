@@ -1,9 +1,11 @@
 /**
  * Wishlist endpoints.
  *
- * Note the two removal paths: `DELETE /wishlist/:id` takes a wishlist row id
- * while `DELETE /wishlist/remove/:productId` takes a product id. Both exist on
- * the server and both are called from the UI, so both are kept.
+ * There are two removal paths and both take a PRODUCT id, not a wishlist row id.
+ * routes/wishlist.js declares `DELETE /:product_id` and
+ * `DELETE /remove/:productId` and routes them to the same handler, keyed on the
+ * product either way. They are kept as two methods only because both call sites
+ * exist in the current UI — `remove` and `removeByProduct` are interchangeable.
  */
 
 import { apiClient } from "./client";
@@ -16,7 +18,7 @@ export const wishlistAPI = {
   add: <T = unknown>(productId: string | number): Promise<T> =>
     apiClient.post<T>("/wishlist/add", { product_id: productId }),
 
-  /** DELETE /wishlist/:id */
+  /** DELETE /wishlist/:product_id */
   remove: <T = unknown>(productId: string | number): Promise<T> =>
     apiClient.delete<T>(`/wishlist/${productId}`),
 
