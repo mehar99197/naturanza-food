@@ -99,7 +99,9 @@ const getProducts = async (req, res) => {
 };
 
 const getProductById = async (req, res) => {
-  const product = await productModel.findById(req.params.id);
+  const product = await productModel.findById(req.params.id, {
+    includeInactive: isAdminRequest(req),
+  });
 
   if (!product) {
     return res.status(404).json({ error: "Product not found" });
@@ -153,13 +155,23 @@ const updateProduct = async (req, res) => {
 };
 
 const deleteProduct = async (req, res) => {
-  const deleted = await productModel.deleteById(req.params.id);
+  const { removed, archived, orderCount } = await productModel.deleteById(req.params.id);
 
-  if (!deleted) {
+  if (!removed && !archived) {
     return res.status(404).json({ error: "Product not found" });
   }
 
-  return res.json({ message: "Product deleted successfully" });
+  if (archived) {
+    return res.json({
+      message: orderCount
+        ? `Product hidden from the store. It still appears in ${orderCount} past order line${orderCount === 1 ? "" : "s"}, so it is kept for order history instead of being deleted.`
+        : "Product hidden from the store. Other records still reference it, so it is kept instead of being deleted.",
+      archived: true,
+      orderCount,
+    });
+  }
+
+  return res.json({ message: "Product deleted successfully", archived: false });
 };
 
 const updateStock = async (req, res) => {

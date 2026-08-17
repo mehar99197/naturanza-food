@@ -189,6 +189,7 @@ export function AdminProducts() {
   const [formData, setFormData] = useState(initialFormState);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadingGallery, setUploadingGallery] = useState(false);
@@ -367,13 +368,22 @@ export function AdminProducts() {
   };
 
   const removeProduct = async (productId) => {
-    if (!window.confirm("Delete this product?")) {
+    if (
+      !window.confirm(
+        "Delete this product? A product nobody has ordered is removed permanently. One that appears in past orders is hidden from the store instead, so order history stays intact.",
+      )
+    ) {
       return;
     }
 
     try {
       setError("");
-      await deleteProduct(productId);
+      setNotice("");
+      const response = await deleteProduct(productId);
+
+      if (response?.archived) {
+        setNotice(response.message || "Product hidden from the store to preserve order history.");
+      }
     } catch (requestError) {
       setError(requestError?.response?.data?.error || "Failed to delete product");
     }
@@ -601,6 +611,12 @@ export function AdminProducts() {
           <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
             <AlertCircle className="h-5 w-5" />
             {error}
+          </div>
+        ) : null}
+        {notice ? (
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 shadow-sm">
+            <AlertCircle className="h-5 w-5" />
+            {notice}
           </div>
         ) : null}
         {productsError || adminDataError ? (

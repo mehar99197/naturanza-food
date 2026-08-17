@@ -174,8 +174,9 @@ export const ProductProvider = ({ children }) => {
 
   // Delete product via API
   const deleteProduct = async (productId) => {
-    await productAPI.delete(productId);
+    const response = await productAPI.delete(productId);
     await fetchProducts();
+    return response;
   };
 
   // Get product by ID

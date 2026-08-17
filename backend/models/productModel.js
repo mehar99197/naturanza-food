@@ -353,12 +353,12 @@ const listFeaturedProducts = async (maxRows = 10) => {
   return hydrateProducts(rows);
 };
 
-const findById = async (productId) => {
+const findById = async (productId, { includeInactive = false } = {}) => {
   const [rows] = await dbPool.query(
     `SELECT p.*, c.name AS category_name
      FROM products p
      LEFT JOIN categories c ON p.category_id = c.id
-      WHERE p.id = ? AND p.is_active = TRUE
+     WHERE p.id = ?${includeInactive ? "" : " AND p.is_active = TRUE"}
      LIMIT 1`,
     [productId],
   );
@@ -647,18 +647,45 @@ const updateProduct = async (productId, payload = {}) => {
 };
 
 const deleteById = async (productId) => {
-  // Products are referenced by historical order and inventory rows. Deactivate
-  // instead of hard-deleting so reporting and audit history remain intact.
-  const [rows] = await dbPool.query("SELECT id FROM products WHERE id = ? LIMIT 1", [productId]);
-  if (!rows.length) {
-    return false;
-  }
+  return withTransaction(async (connection) => {
+    const [rows] = await connection.query(
+      "SELECT id FROM products WHERE id = ? LIMIT 1 FOR UPDATE",
+      [productId],
+    );
 
-  // Scoped to id only (not `AND is_active = TRUE`): MySQL reports affectedRows
-  // as 0 when a row matches but is already FALSE, which previously made
-  // deleting an already-inactive product look like "not found".
-  await dbPool.query("UPDATE products SET is_active = FALSE WHERE id = ?", [productId]);
-  return true;
+    if (!rows.length) {
+      return { removed: false, archived: false, orderCount: 0 };
+    }
+
+    // order_items.product_id is ON DELETE CASCADE and an order line stores no
+    // snapshot of the product (routes/orders.js resolves the name via JOIN), so
+    // hard-deleting an ordered product would erase paid invoice lines. Archive
+    // those, and only truly delete a product no customer has ever ordered.
+    const [countRows] = await connection.query(
+      "SELECT COUNT(*) AS orderCount FROM order_items WHERE product_id = ?",
+      [productId],
+    );
+    const orderCount = safeNumber(countRows[0]?.orderCount, 0);
+
+    if (orderCount > 0) {
+      await connection.query("UPDATE products SET is_active = FALSE WHERE id = ?", [productId]);
+      return { removed: false, archived: true, orderCount };
+    }
+
+    try {
+      await connection.query("DELETE FROM products WHERE id = ?", [productId]);
+    } catch (error) {
+      // A child table on the live schema may still be RESTRICT rather than
+      // CASCADE; archive instead of failing the admin's delete outright.
+      if (error.errno !== 1451) {
+        throw error;
+      }
+      await connection.query("UPDATE products SET is_active = FALSE WHERE id = ?", [productId]);
+      return { removed: false, archived: true, orderCount: 0 };
+    }
+
+    return { removed: true, archived: false, orderCount: 0 };
+  });
 };
 
 const updateStock = async (productId, stockQuantity, userId) => {
