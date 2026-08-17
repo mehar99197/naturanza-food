@@ -55,17 +55,29 @@ export const runChecks = async (): Promise<Check[]> =>
     }),
 
     attempt("Pricing rules", async () => {
-      // A fixed input, so the answer is a regression check and not a reflection
+      // Fixed inputs, so the answer is a regression check and not a reflection
       // of whatever happens to be in the catalogue today.
-      const { salePrice, effectivePct } = getProductPricing(
+      const sale = getProductPricing(
         { price: 1000, discountPercentage: 10 },
         { storeDiscountActive: true, storeDiscountPercentage: 25, storeDiscountLabel: "Sale" },
       );
       // Store-wide 25% beats the product's 10% and replaces it — never stacks.
-      if (salePrice !== 750 || effectivePct !== 25) {
-        throw new Error(`expected 750 at 25%, got ${salePrice} at ${effectivePct}%`);
+      if (sale.salePrice !== 750 || sale.effectivePct !== 25) {
+        throw new Error(`expected 750 at 25%, got ${sale.salePrice} at ${sale.effectivePct}%`);
       }
-      return "store-wide sale overrides product discount correctly";
+
+      // Both casings must price identically. A raw API row uses
+      // discount_percentage; a mapped domain object uses discountPercentage.
+      // When only the latter was read, a raw row quietly priced at full price.
+      const rawRow = getProductPricing({ price: 1000, discount_percentage: 20 });
+      const mapped = getProductPricing({ price: 1000, discountPercentage: 20 });
+      if (rawRow.salePrice !== 800 || mapped.salePrice !== 800) {
+        throw new Error(
+          `casing mismatch: raw row priced ${rawRow.salePrice}, mapped ${mapped.salePrice}, both should be 800`,
+        );
+      }
+
+      return "store-wide override and both field casings price correctly";
     }),
 
     attempt("Structured data", async () => {
