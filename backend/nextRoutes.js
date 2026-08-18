@@ -34,6 +34,21 @@ const MIGRATED_PAGE_PATTERNS = [
   /^\/contact\/?$/,
   /^\/blog\/?$/,
   /^\/blog\/[^/]+\/?$/,
+
+  // Phase 2 (cont.) — the catalog. These are the pages search engines and
+  // customers actually land on, and the ones the SPA served as an empty shell.
+  /^\/$/,
+  /^\/shop\/?$/,
+  /^\/shop\/[^/]+\/?$/,
+  /^\/product\/[^/]+\/?$/,
+
+  // Phase 2 (cont.) — static policy pages.
+  /^\/faq\/?$/,
+  /^\/shipping\/?$/,
+  /^\/returns\/?$/,
+  /^\/terms\/?$/,
+  /^\/privacy\/?$/,
+  /^\/cookies\/?$/,
 ];
 
 const ALL_PATTERNS = [...NEXT_INTERNAL_PATTERNS, ...MIGRATED_PAGE_PATTERNS];

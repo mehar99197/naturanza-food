@@ -1,9 +1,4 @@
-import { AnnouncementBar } from "@/components/AnnouncementBar";
-import { FooterForRoute } from "@/components/footer/FooterForRoute";
-import { Navigation } from "@/components/navigation/Navigation";
-import { JsonLdScript } from "@/components/seo/JsonLdScript";
-import { AppProviders } from "@/providers/AppProviders";
-import { buildOrganizationJsonLd } from "@/server/seo/organization";
+import { StorefrontShell } from "@/components/layout/StorefrontShell";
 
 /**
  * The public storefront shell.
@@ -44,30 +39,5 @@ import { buildOrganizationJsonLd } from "@/server/seo/organization";
 export const dynamic = "force-dynamic";
 
 export default function StorefrontLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <AppProviders>
-      {/* Who the business is, once per document. Pages add only the schema that
-          is specific to them — a product, a post, their breadcrumb trail. */}
-      <JsonLdScript data={buildOrganizationJsonLd()} />
-
-      <div className="min-h-screen flex flex-col site-glass-shell">
-        {/* Skip to main content link for keyboard accessibility */}
-        <a
-          href="#main-content"
-          className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2 focus:bg-green-600 focus:text-white focus:rounded-lg focus:font-semibold focus:text-sm"
-        >
-          Skip to main content
-        </a>
-
-        <AnnouncementBar />
-        <Navigation />
-
-        <main id="main-content" className="w-full flex-1">
-          {children}
-        </main>
-
-        <FooterForRoute />
-      </div>
-    </AppProviders>
-  );
+  return <StorefrontShell>{children}</StorefrontShell>;
 }

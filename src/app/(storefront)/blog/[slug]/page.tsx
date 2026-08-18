@@ -21,7 +21,7 @@ import {
   SITE_URL,
   absoluteUrl,
 } from "@/config/site";
-import { getPostBySlug, listPostSlugs, listRelatedPosts } from "@/server/blog/posts";
+import { getPostBySlug, listRelatedPosts } from "@/server/blog/posts";
 import { buildBlogPostJsonLd, buildBreadcrumbJsonLd } from "@/server/seo/jsonLd";
 import type { BlogPost } from "@/types/blog";
 
@@ -39,25 +39,27 @@ interface BlogPostPageProps {
   params: Promise<{ slug: string }>;
 }
 
-export const revalidate = 300;
+/**
+ * Rendered per request, inherited from the storefront layout.
+ *
+ * This route previously used ISR (`revalidate = 300`). It cannot: the
+ * Content-Security-Policy admits Next's inline hydration scripts by a
+ * per-request nonce, so cached HTML would carry a nonce matching no later
+ * response and the browser would block the scripts that hydrate the page.
+ * See backend/csp.js and the storefront layout.
+ */
 
 /**
- * Pre-renders every published post at build time.
+ * Deliberately no `generateStaticParams`.
  *
- * The empty fallback is deliberate: `npm run build:next` runs from `postinstall`,
- * which can execute in an environment with no database reachable. Returning []
- * there costs the prerender but lets the build finish, and each page is then
- * generated on first request and cached — `dynamicParams` defaults to true, so a
- * post published after the build is served either way.
+ * Prerendering this route would bake build-time HTML — including Next's inline
+ * hydration scripts — into the output. Those scripts are admitted by a
+ * per-request CSP nonce (backend/csp.js), so a build-time nonce matches no
+ * later response and the browser blocks them: the page would render and then
+ * fail to hydrate. Removing it also drops the build's last dependency on a
+ * reachable database, which matters because `build:next` runs from
+ * `postinstall`, after `preinstall` has already deleted node_modules.
  */
-export async function generateStaticParams(): Promise<{ slug: string }[]> {
-  try {
-    const slugs = await listPostSlugs();
-    return slugs.map(({ slug }) => ({ slug }));
-  } catch {
-    return [];
-  }
-}
 
 /** Absolute cover URL, resolved through the blog folder before being made absolute. */
 const coverUrl = (post: BlogPost): string =>
