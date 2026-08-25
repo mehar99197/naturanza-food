@@ -448,7 +448,27 @@ app.use("/images", (req, res, next) => {
     },
   );
 });
-// Serve uploaded files (admin profile pictures, etc.)
+// Serve uploaded files (legacy admin profile pictures, etc.). Restricted to
+// raster image extensions — the same whitelist the /images fallback uses, and
+// deliberately excluding markup-capable types like .svg/.html — so this static
+// root can never serve executable/markup content inline from the app origin,
+// whatever ends up in the directory. Legacy image URLs pointing at /uploads/...
+// still resolve.
+const UPLOADS_IMAGE_EXTENSIONS = new Set([
+  ".avif",
+  ".gif",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".webp",
+]);
+app.use("/uploads", (req, res, next) => {
+  const extension = path.extname(String(req.path || "")).toLowerCase();
+  if (!UPLOADS_IMAGE_EXTENSIONS.has(extension)) {
+    return res.status(404).end();
+  }
+  next();
+});
 app.use(
   "/uploads",
   express.static(path.join(__dirname, "uploads")),
