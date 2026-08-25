@@ -15,7 +15,7 @@ and regenerate them before going live:**
 
 | Secret | How to rotate |
 | --- | --- |
-| **JWT_SECRET** | Already done — a fresh value is in `backend/.env.example`. (Or generate your own: `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`.) Rotating it logs out all existing sessions, which is fine for a new deploy. |
+| **JWT_SECRET** | Generate a unique value and set it as an Environment Variable (step 3): `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`. `backend/.env.example` intentionally ships this **empty** — the app refuses to start in production if it is shorter than 64 bytes, so it must never be a shared placeholder. Rotating it logs out all existing sessions, which is fine for a new deploy. |
 | **Gmail App Password** (`SMTP_PASS`) | Google Account → Security → App passwords → delete the old one, create a new one. |
 | **Google OAuth client secret** (`GOOGLE_CLIENT_SECRET`) | Google Cloud Console → APIs & Services → Credentials → your OAuth client → reset/replace the secret. |
 | **DEFAULT_ADMIN_PASSWORD** | Choose a new strong password (≥ 12 chars). |
