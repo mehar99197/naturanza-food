@@ -296,7 +296,8 @@ app.use(cookieParser());
 // and every form failed with "CSRF token required". API responses are
 // per-request, per-session state and must never be stored by a shared cache —
 // the public sitemap XML is the one exception.
-const isCacheableApiPath = (reqPath) => reqPath.startsWith("/api/sitemap");
+const isCacheableApiPath = (reqPath) =>
+  reqPath.startsWith("/api/sitemap") || reqPath.startsWith("/api/merchant-feed");
 
 app.use((req, res, next) => {
   if (req.path.startsWith("/api/") && !isCacheableApiPath(req.path)) {
@@ -626,6 +627,7 @@ const announcementsRoutes = require("./routes/announcements");
 const teamRoutes = require("./routes/team");
 const newsletterRoutes = require("./routes/newsletter");
 const sitemapRoutes = require("./routes/sitemap");
+const merchantFeedRoutes = require("./routes/merchantFeed");
 const shippingRoutes = require("./routes/shipping");
 const adminShippingRoutes = require("./routes/adminShipping");
 
@@ -706,6 +708,7 @@ app.use("/api/announcements", announcementsRoutes);
 app.use("/api/team", teamRoutes);
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api", sitemapRoutes);
+app.use("/api", merchantFeedRoutes);
 // Canonical sitemap at the well-known root path (not under /api) so
 // robots.txt's "Sitemap: https://naturanzafood.com/sitemap.xml" and Google
 // Search Console's sitemap submission resolve directly to it. Registered
