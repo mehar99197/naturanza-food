@@ -1,0 +1,9 @@
+/*
+ * The Next.js stylesheet entry.
+ *
+ * It pulls in the same file the Vite app uses, which carries the @tailwind
+ * directives, the design tokens on :root, and every shared component class. One
+ * stylesheet for both apps is what lets a page keep its exact appearance on the
+ * day it migrates — there is no second copy to drift.
+ */
+@import "../../styles/app.css";

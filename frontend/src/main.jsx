@@ -2,7 +2,9 @@ import { StrictMode, Fragment } from 'react'
 import { createRoot } from 'react-dom/client'
 import { HelmetProvider } from 'react-helmet-async'
 import { GoogleOAuthProvider } from '@react-oauth/google'
-import './index.css'
+// Shared with the Next.js app (src/app/globals.css) so both render the same
+// design tokens and component classes while pages migrate between them.
+import '../../styles/app.css'
 import App from './App.jsx'
 
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
