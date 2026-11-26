@@ -342,8 +342,6 @@ const isAdminRecord = (user) =>
   ADMIN_ACCOUNT_ROLES.has(String(user?.role || "").trim().toLowerCase()) ||
   ADMIN_ACCOUNT_ROLES.has(String(user?.admin_role || "").trim().toLowerCase());
 
-const ADMIN_FORGOT_PASSWORD_COOLDOWN_MS = 90 * 1000;
-const adminForgotPasswordCooldowns = new Map();
 const SIMPLE_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Shared login handler — parameterized so the super-admin route and the
@@ -734,13 +732,26 @@ router.post("/logout", authenticateToken, isAdmin, restrictBody(), (req, res) =>
 // ADMIN FORGOT PASSWORD ENDPOINTS (No auth required)
 // ============================================
 
-const { sendEmail, sendPasswordResetEmail } = require("../utils/emailService");
+const { sendEmail, sendPasswordResetEmail, sendPasswordChangedEmail } = require("../utils/emailService");
 const {
   createPasswordResetToken,
+  hasRecentPasswordResetRequest,
   validatePasswordResetToken,
   claimPasswordResetToken,
   invalidateAllUserTokens,
 } = require("../utils/passwordResetTokens");
+
+// Who/where an admin account email was triggered from (display only — the
+// forwarded-for IP is the real client here; see utils/clientIp.js).
+const buildAdminEmailRequestContext = async (req) => {
+  const ip = getClientIp(req);
+  const location = await resolveRequestLocation(req, ip).catch(() => null);
+  return {
+    ip,
+    device: resolveDeviceName(req.headers["user-agent"] || ""),
+    location: location && location !== "Unknown" ? location : null,
+  };
+};
 
 // Admin Forgot Password — works for super admin AND staff admins.
 // To avoid email-enumeration, we return the same generic success response
@@ -780,20 +791,11 @@ router.post("/forgot-password", restrictBody('email'), async (req, res) => {
       return res.json(genericSuccess);
     }
 
-    // Per-email cooldown prevents reset-email bombing on an admin address.
-    const now = Date.now();
-    const lastSentAt = adminForgotPasswordCooldowns.get(normalizedEmail) || 0;
-    if (now - lastSentAt < ADMIN_FORGOT_PASSWORD_COOLDOWN_MS) {
+    // Per-account cooldown (persisted in the tokens table, so it survives
+    // restarts) prevents reset-email bombing on an admin address.
+    if (await hasRecentPasswordResetRequest(db.promise(), admin.id)) {
       return res.json(genericSuccess);
     }
-    if (adminForgotPasswordCooldowns.size > 2000) {
-      for (const [key, ts] of adminForgotPasswordCooldowns.entries()) {
-        if (now - ts >= ADMIN_FORGOT_PASSWORD_COOLDOWN_MS) {
-          adminForgotPasswordCooldowns.delete(key);
-        }
-      }
-    }
-    adminForgotPasswordCooldowns.set(normalizedEmail, now);
 
     // Dispatch token creation & SMTP asynchronously so response timing and
     // transient SMTP failures never act as an account-enumeration oracle.
@@ -813,6 +815,7 @@ router.post("/forgot-password", restrictBody('email'), async (req, res) => {
             admin.name,
             tokenData.token,
             true,
+            await buildAdminEmailRequestContext(req),
           );
         } catch (dispatchError) {
           console.error("[admin] forgot-password email dispatch failed:", dispatchError?.message);
@@ -991,6 +994,19 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
     // Everyone else (staff_admin / admin / moderator) → /admin/staff-login.
     const redirectTo =
       userAdminRole === "super_admin" ? "/admin/login" : "/admin/staff-login";
+
+    void (async () => {
+      try {
+        await sendPasswordChangedEmail({
+          email: userRow.email,
+          userName: tokenValidation.userName,
+          isAdmin: true,
+          requestContext: await buildAdminEmailRequestContext(req),
+        });
+      } catch (notifyError) {
+        console.error("[admin] password-changed email failed:", notifyError?.message);
+      }
+    })();
 
     res.json({
       success: true,

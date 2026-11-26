@@ -57,6 +57,22 @@ const createPasswordResetToken = async (dbPool, userId, email) => {
 };
 
 /**
+ * Per-account reset cooldown, read from the tokens table so it survives server
+ * restarts and is shared across processes (an in-memory map is neither).
+ */
+const PASSWORD_RESET_COOLDOWN_SECONDS = 90;
+
+const hasRecentPasswordResetRequest = async (dbPool, userId) => {
+  const [rows] = await dbPool.query(
+    `SELECT 1 FROM password_reset_tokens
+      WHERE user_id = ? AND created_at > (NOW() - INTERVAL ? SECOND)
+      LIMIT 1`,
+    [userId, PASSWORD_RESET_COOLDOWN_SECONDS],
+  );
+  return rows.length > 0;
+};
+
+/**
  * Validate a password reset token
  * Returns user info if valid, null if invalid/expired/used
  */
@@ -153,6 +169,7 @@ module.exports = {
   generateSecureToken,
   hashToken,
   createPasswordResetToken,
+  hasRecentPasswordResetRequest,
   validatePasswordResetToken,
   markTokenAsUsed,
   claimPasswordResetToken,

@@ -47,6 +47,7 @@ const {
 } = require("../validation/authSchemas");
 const {
   sendPasswordResetEmail,
+  sendPasswordChangedEmail,
   sendVerificationCodeEmail,
 } = require("../utils/emailService");
 const { isDisposableEmail, hasDeliverableDomain } = require("../utils/emailValidation");
@@ -61,6 +62,7 @@ const {
 } = require("../utils/emailVerificationCodes");
 const {
   createPasswordResetToken,
+  hasRecentPasswordResetRequest,
   validatePasswordResetToken,
   claimPasswordResetToken,
   invalidateAllUserTokens,
@@ -83,7 +85,6 @@ const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
 );
 const LOCATION_CACHE_TTL_MS = 1000 * 60 * 60 * 6;
 const ipLocationCache = new Map();
-const lastResetSent = new Map();
 const LOGIN_MAX_ATTEMPTS =
   Number.parseInt(process.env.LOGIN_MAX_ATTEMPTS || "5", 10) || 5;
 const LOGIN_LOCK_MINUTES =
@@ -95,11 +96,6 @@ setInterval(() => {
   for (const [key, entry] of ipLocationCache.entries()) {
     if (now - entry.timestamp > LOCATION_CACHE_TTL_MS) {
       ipLocationCache.delete(key);
-    }
-  }
-  for (const [key, time] of lastResetSent.entries()) {
-    if (now - time > 120_000) {
-      lastResetSent.delete(key);
     }
   }
 }, LOCATION_CACHE_TTL_MS);
@@ -338,6 +334,33 @@ const resolveDeviceName = (userAgent = "") => {
                 : "Device";
 
   return `${browser} on ${device}`;
+};
+
+// Who/where an account email was triggered from, shown in reset and
+// password-changed emails so the owner can spot activity that wasn't theirs.
+const buildEmailRequestContext = async (req) => {
+  const ip = getRequestIp(req);
+  const location = await resolveRequestLocation(req, ip).catch(() => null);
+  return {
+    ip,
+    device: resolveDeviceName(req.headers["user-agent"] || ""),
+    location: location && location !== "Unknown" ? location : null,
+  };
+};
+
+// Fire-and-forget: a notification failure must never fail the password change itself.
+const notifyPasswordChanged = (req, { email, name }) => {
+  void (async () => {
+    try {
+      await sendPasswordChangedEmail({
+        email,
+        userName: name,
+        requestContext: await buildEmailRequestContext(req),
+      });
+    } catch (notifyError) {
+      console.error("[auth] password-changed email failed:", notifyError?.message);
+    }
+  })();
 };
 
 const recordLoginHistorySafely = async ({
@@ -1314,6 +1337,8 @@ router.put(
       }
       await connection.commit();
 
+      notifyPasswordChanged(req, { email: req.user.email, name: req.user.name });
+
       return res.json({ message: "Password changed successfully" });
     } catch (error) {
       if (connection) {
@@ -1818,16 +1843,6 @@ router.post("/forgot-password", async (req, res) => {
       success: true,
     };
 
-    // Per-email cooldown to prevent flooding a single inbox.
-    const COOLDOWN_MS = 90_000; // 90 seconds
-
-    if (lastResetSent.has(normalizedEmail)) {
-      const elapsed = Date.now() - lastResetSent.get(normalizedEmail);
-      if (elapsed < COOLDOWN_MS) {
-        return res.json(successResponse);
-      }
-    }
-
     // Find user by email
     const [users] = await db
       .promise()
@@ -1851,12 +1866,28 @@ router.post("/forgot-password", async (req, res) => {
       return res.json(successResponse);
     }
 
+    // Per-account cooldown (persisted in the tokens table) to prevent flooding an inbox.
+    if (await hasRecentPasswordResetRequest(db.promise(), user.id)) {
+      return res.json(successResponse);
+    }
+
     // Create password reset token
     const tokenData = await createPasswordResetToken(db.promise(), user.id, user.email);
 
     // Fire-and-forget email send to avoid timing oracle
-    void sendPasswordResetEmail(user.email, user.name, tokenData.token);
-    lastResetSent.set(normalizedEmail, Date.now());
+    void (async () => {
+      try {
+        await sendPasswordResetEmail(
+          user.email,
+          user.name,
+          tokenData.token,
+          false,
+          await buildEmailRequestContext(req),
+        );
+      } catch (sendError) {
+        console.error("[auth] password reset email failed:", sendError?.message);
+      }
+    })();
 
     return res.json(successResponse);
   } catch (error) {
@@ -1998,6 +2029,7 @@ router.post("/reset-password", async (req, res) => {
     );
     clearRefreshCookie(res, req);
 
+    notifyPasswordChanged(req, { email: tokenValidation.email, name: tokenValidation.userName });
 
     return res.json({
       message: "Password reset successfully. You can now log in with your new password.",

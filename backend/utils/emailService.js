@@ -1,16 +1,24 @@
 /**
  * Email Service for Naturanza Food
- * Uses Nodemailer with Gmail SMTP for sending transactional emails
- * 
- * Configuration:
- * - Uses Gmail App Password for authentication (more secure than regular password)
- * - Configured with proper headers to avoid spam filters
+ * Uses Nodemailer with SMTP for sending transactional emails.
+ *
+ * Every template is built on utils/emailLayout.js, which owns the shared
+ * header (logo), preheader, email-client-safe buttons and the contact footer.
  */
 
 const nodemailer = require("nodemailer");
 const path = require("path");
 const dotenv = require("dotenv");
 const { escapeHtml } = require("./htmlEscape");
+const {
+  BRAND,
+  renderEmailLayout,
+  renderButton,
+  renderLinkFallback,
+  renderNotice,
+  renderRequestDetails,
+  requestDetailsToText,
+} = require("./emailLayout");
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
@@ -23,13 +31,18 @@ const EMAIL_CONFIG = {
     user: process.env.SMTP_USER || process.env.EMAIL_USER,
     pass: process.env.SMTP_PASS || process.env.EMAIL_PASS,
   },
-  // Proper sender name to avoid spam
   fromName: process.env.EMAIL_FROM_NAME || "Naturanza Food",
   fromEmail: process.env.EMAIL_FROM || process.env.SMTP_USER || process.env.EMAIL_USER,
+  replyTo: process.env.EMAIL_REPLY_TO || "",
 };
 
 // Frontend URL for reset links
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+
+const PASSWORD_RESET_MINUTES = Math.max(
+  5,
+  Number.parseInt(process.env.PASSWORD_RESET_TOKEN_MINUTES || "30", 10) || 30,
+);
 
 // Create reusable transporter object using SMTP transport
 let transporter = null;
@@ -54,7 +67,6 @@ const getTransporter = () => {
       user: EMAIL_CONFIG.auth.user,
       pass: EMAIL_CONFIG.auth.pass,
     },
-    // Additional settings to improve deliverability
     tls: {
       rejectUnauthorized: true, // Verify the SMTP server's TLS certificate (prevents MITM)
     },
@@ -85,7 +97,9 @@ const verifyEmailConfig = async () => {
 };
 
 /**
- * Send email with proper headers to avoid spam filters
+ * Send an email. Transactional mail carries no priority or unsubscribe headers:
+ * "high priority" flags are a spam signal, and List-Unsubscribe belongs only on
+ * subscription mail (pass `unsubscribeUrl` for those).
  */
 const sendEmail = async ({ to, subject, html, text, unsubscribeUrl }) => {
   const transport = getTransporter();
@@ -94,17 +108,10 @@ const sendEmail = async ({ to, subject, html, text, unsubscribeUrl }) => {
     return { success: false, error: "Email service not configured" };
   }
 
-  const headers = {
-    "X-Priority": "1",
-    "X-MSMail-Priority": "High",
-    "Importance": "high",
-    "X-Mailer": "Naturanza Food Mailer",
-    "List-Unsubscribe": unsubscribeUrl
-      ? `<${unsubscribeUrl}>, <mailto:${EMAIL_CONFIG.fromEmail}?subject=unsubscribe>`
-      : `<mailto:${EMAIL_CONFIG.fromEmail}?subject=unsubscribe>`,
-  };
+  const headers = { "X-Mailer": "Naturanza Food Mailer" };
 
   if (unsubscribeUrl) {
+    headers["List-Unsubscribe"] = `<${unsubscribeUrl}>, <mailto:${EMAIL_CONFIG.fromEmail}?subject=unsubscribe>`;
     headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click";
   }
 
@@ -121,6 +128,10 @@ const sendEmail = async ({ to, subject, html, text, unsubscribeUrl }) => {
     messageId: `<${Date.now()}.${Math.random().toString(36).substring(2)}@${(process.env.PUBLIC_SITE_URL || "naturanzafood.com").replace(/^https?:\/\//, "").replace(/\/.*$/, "")}>`,
   };
 
+  if (EMAIL_CONFIG.replyTo) {
+    mailOptions.replyTo = EMAIL_CONFIG.replyTo;
+  }
+
   try {
     const info = await transport.sendMail(mailOptions);
     return { success: true, messageId: info.messageId };
@@ -129,119 +140,46 @@ const sendEmail = async ({ to, subject, html, text, unsubscribeUrl }) => {
   }
 };
 
+const greetingHtml = (userName) =>
+  `<p style="margin: 0 0 20px; color: #475569; font-size: 16px;">Hi${userName ? ` <strong style="color: #1e293b;">${escapeHtml(userName)}</strong>` : ""},</p>`;
+
+const greetingText = (userName) => `Hi${userName ? ` ${String(userName).trim()}` : ""},`;
+
+const contactLineText = () =>
+  `Need help? ${BRAND.supportEmail} · WhatsApp +${BRAND.whatsappNumber}`;
+
 /**
  * Generate password reset email HTML
+ * @param {object|null} requestContext - { device, ip, location } of the request, shown so the
+ *   recipient can spot a reset they did not ask for. Omit for admin-initiated resets.
  */
-const generatePasswordResetEmail = (userName, resetLink, expiryMinutes = 60) => {
-  const currentYear = new Date().getFullYear();
-  const safeUserName = userName ? escapeHtml(userName) : "";
-  
-  return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>Reset Your Password - Naturanza Food</title>
-  <!--[if mso]>
-  <noscript>
-    <xml>
-      <o:OfficeDocumentSettings>
-        <o:PixelsPerInch>96</o:PixelsPerInch>
-      </o:OfficeDocumentSettings>
-    </xml>
-  </noscript>
-  <![endif]-->
-</head>
-<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0fdf4; -webkit-font-smoothing: antialiased;">
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f0fdf4;">
-    <tr>
-      <td align="center" style="padding: 40px 20px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08); overflow: hidden;">
-          
-          <!-- Header with Logo -->
-          <tr>
-            <td style="background: linear-gradient(135deg, #16a34a 0%, #059669 100%); padding: 32px 40px; text-align: center;">
-              <img src="https://raw.githubusercontent.com/mehar99197/Naturanza_Frontend_Backend/main/frontend/public/images/logo.png" alt="Naturanza Food" style="max-width: 200px; height: auto; margin-bottom: 12px;" />
-              <p style="margin: 0; color: rgba(255, 255, 255, 0.9); font-size: 14px;">
-                Pure. Natural. Healthy.
-              </p>
-            </td>
-          </tr>
-          
-          <!-- Content -->
-          <tr>
-            <td style="padding: 40px;">
-              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">
-                Reset Your Password
-              </h2>
-              
+const generatePasswordResetEmail = ({ userName, resetLink, expiryMinutes, accountLabel, requestContext }) => {
+  const contentHtml = `
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">Reset your password</h2>
+              ${greetingHtml(userName)}
               <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
-                Hi${safeUserName ? ` <strong>${safeUserName}</strong>` : ""},
+                We received a request to reset the password for your ${escapeHtml(accountLabel)} account. Click the button below to choose a new password.
               </p>
-              
-              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
-                We received a request to reset your password for your Naturanza Food account. Click the button below to create a new password:
-              </p>
-              
-              <!-- CTA Button -->
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
-                <tr>
-                  <td align="center" style="padding: 8px 0 32px;">
-                    <a href="${escapeHtml(resetLink)}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #16a34a 0%, #059669 100%); color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 12px; font-size: 16px; font-weight: 600; box-shadow: 0 4px 14px rgba(22, 163, 74, 0.4);">
-                      Reset Password
-                    </a>
-                  </td>
-                </tr>
-              </table>
-              
-              <!-- Link fallback -->
+${renderButton({ href: resetLink, label: "Reset Password" })}
+${renderNotice({
+    title: `This link expires in ${expiryMinutes} minutes.`,
+    body: "For your security, it can only be used once.",
+  })}
+${requestContext ? `
+              <p style="margin: 0 0 8px; color: #1e293b; font-size: 14px; font-weight: 600;">Request details</p>
+${renderRequestDetails(requestContext)}` : ""}
               <p style="margin: 0 0 24px; color: #64748b; font-size: 14px; line-height: 1.6;">
-                If the button doesn't work, copy and paste this link into your browser:
+                Didn't request this? You can safely ignore this email &mdash; your password will not change.
+                If you keep getting these emails, please contact us.
               </p>
-              <p style="margin: 0 0 24px; padding: 12px 16px; background-color: #f1f5f9; border-radius: 8px; word-break: break-all;">
-                <a href="${escapeHtml(resetLink)}" style="color: #16a34a; text-decoration: none; font-size: 13px;">${escapeHtml(resetLink)}</a>
-              </p>
-              
-              <!-- Warning -->
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #fef3c7; border-radius: 12px; margin-bottom: 24px;">
-                <tr>
-                  <td style="padding: 16px 20px;">
-                    <p style="margin: 0; color: #92400e; font-size: 14px; line-height: 1.5;">
-                      ⏰ <strong>This link expires in ${expiryMinutes} minutes.</strong><br>
-                      For security reasons, this link can only be used once.
-                    </p>
-                  </td>
-                </tr>
-              </table>
-              
-              <!-- Security notice -->
-              <p style="margin: 0; color: #64748b; font-size: 14px; line-height: 1.6;">
-                If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.
-              </p>
-            </td>
-          </tr>
-          
-          <!-- Footer -->
-          <tr>
-            <td style="background-color: #f8fafc; padding: 24px 40px; border-top: 1px solid #e2e8f0;">
-              <p style="margin: 0 0 8px; color: #64748b; font-size: 13px; text-align: center;">
-                This is an automated message from Naturanza Food.
-              </p>
-              <p style="margin: 0; color: #94a3b8; font-size: 12px; text-align: center;">
-                © ${currentYear} Naturanza Food. All rights reserved.
-              </p>
-            </td>
-          </tr>
-          
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-`;
+${renderLinkFallback(resetLink)}`;
+
+  return renderEmailLayout({
+    title: "Reset your password - Naturanza Food",
+    preheader: `Your password reset link expires in ${expiryMinutes} minutes.`,
+    contentHtml,
+    footerNote: "You received this because a password reset was requested for this email address.",
+  });
 };
 
 /**
@@ -250,36 +188,95 @@ const generatePasswordResetEmail = (userName, resetLink, expiryMinutes = 60) => 
  * @param {string} userName - User's name
  * @param {string} resetToken - Password reset token
  * @param {boolean} isAdmin - Whether this is for admin panel (uses different URL)
+ * @param {object|null} requestContext - { device, ip, location } of the request that asked for it
  */
-const sendPasswordResetEmail = async (email, userName, resetToken, isAdmin = false) => {
-  // Use different paths for admin and regular users
+const sendPasswordResetEmail = async (email, userName, resetToken, isAdmin = false, requestContext = null) => {
   const resetPath = isAdmin ? "/admin/reset-password" : "/reset-password";
   const resetLink = `${FRONTEND_URL}${resetPath}?token=${resetToken}`;
-  const expiryMinutes = Math.max(
-    5,
-    Number.parseInt(process.env.PASSWORD_RESET_TOKEN_MINUTES || "30", 10) || 30,
-  );
+  const accountLabel = isAdmin ? "Naturanza Food admin" : "Naturanza Food";
 
-  const accountType = isAdmin ? "Admin" : "Naturanza Food";
-  const html = generatePasswordResetEmail(userName, resetLink, expiryMinutes);
-  const text = `
-Hi${userName ? ` ${userName}` : ""},
+  const html = generatePasswordResetEmail({
+    userName,
+    resetLink,
+    expiryMinutes: PASSWORD_RESET_MINUTES,
+    accountLabel,
+    requestContext,
+  });
+  const text = `${greetingText(userName)}
 
-We received a request to reset your password for your ${accountType} account.
+We received a request to reset the password for your ${accountLabel} account.
 
-Click the link below to create a new password:
+Choose a new password here:
 ${resetLink}
 
-This link expires in ${expiryMinutes} minutes and can only be used once.
+This link expires in ${PASSWORD_RESET_MINUTES} minutes and can only be used once.
+${requestContext ? `\nRequest details:\n${requestDetailsToText(requestContext)}\n` : ""}
+Didn't request this? Ignore this email - your password will not change.
 
-If you didn't request a password reset, you can safely ignore this email.
-
+${contactLineText()}
 - Naturanza Food Team
 `;
 
   return sendEmail({
     to: email,
-    subject: isAdmin ? "Reset Your Admin Password - Naturanza Food" : "Reset Your Password - Naturanza Food",
+    subject: isAdmin ? "Reset your admin password - Naturanza Food" : "Reset your password - Naturanza Food",
+    html,
+    text,
+  });
+};
+
+/**
+ * Security notice sent after any successful password change or reset, so the
+ * owner learns about a change they did not make.
+ */
+const sendPasswordChangedEmail = async ({ email, userName, isAdmin = false, requestContext = null }) => {
+  if (!email) return { success: false, error: "No recipient email" };
+
+  const recoverLink = `${FRONTEND_URL}${isAdmin ? "/admin/forgot-password" : "/forgot-password"}`;
+  const accountLabel = isAdmin ? "Naturanza Food admin" : "Naturanza Food";
+
+  const contentHtml = `
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">Your password was changed</h2>
+              ${greetingHtml(userName)}
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                The password for your ${escapeHtml(accountLabel)} account was just changed. For your security, other devices have been signed out.
+              </p>
+${renderRequestDetails(requestContext || {})}
+              <p style="margin: 0 0 24px; color: #475569; font-size: 15px; line-height: 1.6;">
+                If this was you, there's nothing else to do.
+              </p>
+${renderNotice({
+    tone: "danger",
+    title: "Didn't change your password?",
+    body: "Someone else may have access to your account. Reset your password right away and contact our support team.",
+  })}
+${renderButton({ href: recoverLink, label: "Secure My Account", accent: "red" })}`;
+
+  const html = renderEmailLayout({
+    title: "Your password was changed - Naturanza Food",
+    preheader: "Your Naturanza Food password was just changed. Not you? Secure your account now.",
+    contentHtml,
+    footerNote: "This is a security notification and is sent for every password change.",
+  });
+
+  const text = `${greetingText(userName)}
+
+The password for your ${accountLabel} account was just changed. Other devices have been signed out.
+
+${requestDetailsToText(requestContext || {})}
+
+If this was you, there's nothing else to do.
+
+Didn't change your password? Someone else may have access to your account.
+Reset it right away: ${recoverLink}
+
+${contactLineText()}
+- Naturanza Food Team
+`;
+
+  return sendEmail({
+    to: email,
+    subject: "Your password was changed - Naturanza Food",
     html,
     text,
   });
@@ -296,6 +293,9 @@ const formatPromoDiscount = (coupon) => {
   return `${value % 1 === 0 ? value.toFixed(0) : value}% off`;
 };
 
+const unsubscribeFooterNote = (unsubscribeUrl, reason) =>
+  `${escapeHtml(reason)} <a href="${escapeHtml(unsubscribeUrl)}" style="color: #64748b; text-decoration: underline;">Unsubscribe</a>`;
+
 const generateNewsletterWelcomeEmail = ({
   storeName,
   promoCode,
@@ -303,96 +303,54 @@ const generateNewsletterWelcomeEmail = ({
   unsubscribeUrl,
   siteUrl,
 }) => {
-  const currentYear = new Date().getFullYear();
   const discountLabel = formatPromoDiscount(promoCoupon);
   const safeStoreName = escapeHtml(storeName || "Naturanza Food");
   const safePromoCode = promoCode ? escapeHtml(promoCode) : "";
-  const safeDiscountLabel = escapeHtml(discountLabel);
   const promoBlock = safePromoCode
     ? `
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border: 2px dashed #16a34a; border-radius: 12px; margin: 24px 0;">
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin: 0 0 24px;">
                 <tr>
-                  <td style="padding: 24px; text-align: center;">
+                  <td align="center" bgcolor="#f0fdf4" style="background-color: #f0fdf4; border: 2px dashed #16a34a; border-radius: 12px; padding: 24px;">
                     <p style="margin: 0 0 8px; color: #065f46; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">
-                      Welcome Gift — ${safeDiscountLabel}
+                      Welcome Gift &mdash; ${escapeHtml(discountLabel)}
                     </p>
                     <p style="margin: 0 0 12px; color: #047857; font-size: 14px;">
                       Use this code at checkout on your first order:
                     </p>
-                    <p style="margin: 0; padding: 12px 24px; display: inline-block; background-color: #16a34a; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: 3px; border-radius: 8px; font-family: 'Courier New', monospace;">
-                      ${safePromoCode}
-                    </p>
+                    <table role="presentation" cellpadding="0" cellspacing="0" align="center">
+                      <tr>
+                        <td bgcolor="#16a34a" style="background-color: #16a34a; border-radius: 8px; padding: 12px 24px; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: 3px; font-family: 'Courier New', monospace;">
+                          ${safePromoCode}
+                        </td>
+                      </tr>
+                    </table>
                   </td>
                 </tr>
-              </table>
-              `
+              </table>`
     : "";
 
-  return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Welcome to ${safeStoreName}</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0fdf4;">
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f0fdf4;">
-    <tr>
-      <td align="center" style="padding: 40px 20px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08); overflow: hidden;">
-          <tr>
-            <td style="background: linear-gradient(135deg, #16a34a 0%, #059669 100%); padding: 36px 40px; text-align: center;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">
-                Welcome to the Family! 🌿
-              </h1>
-              <p style="margin: 12px 0 0; color: rgba(255, 255, 255, 0.9); font-size: 15px;">
-                Pure. Natural. Healthy.
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 40px;">
+  const contentHtml = `
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">Welcome to the family!</h2>
               <p style="margin: 0 0 20px; color: #1e293b; font-size: 16px; line-height: 1.6;">
                 Thank you for subscribing to <strong>${safeStoreName}</strong>! You're now part of our community of people who care about pure, natural, and healthy food.
               </p>
-              <p style="margin: 0 0 16px; color: #475569; font-size: 15px; line-height: 1.6;">
-                Here's what you can expect from us:
-              </p>
+              <p style="margin: 0 0 12px; color: #475569; font-size: 15px; line-height: 1.6;">Here's what you can expect from us:</p>
               <ul style="margin: 0 0 24px; padding-left: 20px; color: #475569; font-size: 15px; line-height: 1.8;">
                 <li>Exclusive offers and early access to new products</li>
                 <li>Wellness tips and natural-food recipes</li>
                 <li>Updates on sales and seasonal collections</li>
               </ul>
-              ${promoBlock}
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
-                <tr>
-                  <td align="center" style="padding: 8px 0 24px;">
-                    <a href="${escapeHtml(siteUrl)}/shop" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #16a34a 0%, #059669 100%); color: #ffffff; text-decoration: none; padding: 14px 36px; border-radius: 12px; font-size: 16px; font-weight: 600;">
-                      Start Shopping
-                    </a>
-                  </td>
-                </tr>
-              </table>
-              <p style="margin: 0; color: #64748b; font-size: 13px; line-height: 1.6; text-align: center;">
-                Didn't subscribe? You can <a href="${escapeHtml(unsubscribeUrl)}" style="color: #16a34a;">unsubscribe here</a>.
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="background-color: #f8fafc; padding: 20px 40px; border-top: 1px solid #e2e8f0;">
-              <p style="margin: 0; color: #94a3b8; font-size: 12px; text-align: center;">
-                © ${currentYear} ${safeStoreName}. All rights reserved.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-`;
+${promoBlock}
+${renderButton({ href: `${siteUrl}/shop`, label: "Start Shopping" })}`;
+
+  return renderEmailLayout({
+    title: `Welcome to ${storeName || "Naturanza Food"}`,
+    preheader: promoCode
+      ? `Thanks for subscribing! Here's ${discountLabel} on your first order.`
+      : "Thanks for subscribing! Offers, recipes and wellness tips are on the way.",
+    contentHtml,
+    footerNote: unsubscribeFooterNote(unsubscribeUrl, `You're receiving this because you subscribed to ${storeName || "Naturanza Food"}.`),
+  });
 };
 
 const sendNewsletterWelcomeEmail = async ({
@@ -423,6 +381,7 @@ and updates on new products.
 ${promoLine}
 Start shopping: ${FRONTEND_URL}/shop
 
+${contactLineText()}
 Didn't subscribe? Unsubscribe: ${unsubscribeUrl}
 `;
 
@@ -438,53 +397,16 @@ Didn't subscribe? Unsubscribe: ${unsubscribeUrl}
 /**
  * Build a generic broadcast email (admin update / promo / announcement)
  */
-const generateNewsletterBroadcastEmail = ({ storeName, subject, bodyHtml, unsubscribeUrl }) => {
-  const currentYear = new Date().getFullYear();
-  const safeStoreName = escapeHtml(storeName || "Naturanza Food");
-  return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(subject)}</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0fdf4;">
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f0fdf4;">
-    <tr>
-      <td align="center" style="padding: 40px 20px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08); overflow: hidden;">
-          <tr>
-            <td style="background: linear-gradient(135deg, #16a34a 0%, #059669 100%); padding: 28px 40px; text-align: center;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 700;">
-                ${safeStoreName}
-              </h1>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 36px 40px; color: #1f2937; font-size: 16px; line-height: 1.7;">
-              ${bodyHtml}
-            </td>
-          </tr>
-          <tr>
-            <td style="background-color: #f8fafc; padding: 20px 40px; border-top: 1px solid #e2e8f0; text-align: center;">
-              <p style="margin: 0 0 6px; color: #64748b; font-size: 12px;">
-                You are receiving this because you subscribed to ${safeStoreName} updates.
-              </p>
-              <p style="margin: 0; color: #94a3b8; font-size: 12px;">
-                <a href="${escapeHtml(unsubscribeUrl)}" style="color: #94a3b8; text-decoration: underline;">Unsubscribe</a>
-                &nbsp;·&nbsp; © ${currentYear} ${safeStoreName}
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-`;
-};
+const generateNewsletterBroadcastEmail = ({ storeName, subject, preheader, bodyHtml, unsubscribeUrl }) =>
+  renderEmailLayout({
+    title: subject,
+    preheader,
+    contentHtml: `
+              <div style="color: #1f2937; font-size: 16px; line-height: 1.7;">
+                ${bodyHtml}
+              </div>`,
+    footerNote: unsubscribeFooterNote(unsubscribeUrl, `You're receiving this because you subscribed to ${storeName} updates.`),
+  });
 
 const messageBodyToHtml = (message) =>
   escapeHtml(message)
@@ -499,14 +421,16 @@ const sendNewsletterBroadcastEmail = async ({
   message,
   unsubscribeUrl,
 }) => {
+  const resolvedStoreName = storeName || "Naturanza Food";
   const html = generateNewsletterBroadcastEmail({
-    storeName: storeName || "Naturanza Food",
+    storeName: resolvedStoreName,
     subject,
+    preheader: String(message || "").replace(/\s+/g, " ").trim().slice(0, 120),
     bodyHtml: messageBodyToHtml(message),
     unsubscribeUrl,
   });
 
-  const text = `${message}\n\n— ${storeName || "Naturanza Food"}\nUnsubscribe: ${unsubscribeUrl}`;
+  const text = `${message}\n\n— ${resolvedStoreName}\n${contactLineText()}\nUnsubscribe: ${unsubscribeUrl}`;
 
   return sendEmail({
     to: email,
@@ -519,10 +443,8 @@ const sendNewsletterBroadcastEmail = async ({
 
 /**
  * Build a payment-status email (approved / rejected) for the customer.
- * Same shell as the welcome email — branded header, content body, footer.
  */
 const generatePaymentStatusEmail = ({
-  storeName,
   customerName,
   orderId,
   amount,
@@ -532,126 +454,62 @@ const generatePaymentStatusEmail = ({
   rejectionReason,
   siteUrl,
 }) => {
-  const currentYear = new Date().getFullYear();
   const accentColor = isApproved ? "#16a34a" : "#dc2626";
-  const accentGradient = isApproved
-    ? "linear-gradient(135deg, #16a34a 0%, #059669 100%)"
-    : "linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)";
   const statusLabel = isApproved ? "Approved" : "Rejected";
   const heading = isApproved ? "Payment Approved" : "Payment Could Not Be Verified";
   const formattedAmount = `${currency || "Rs"} ${Number(amount || 0).toLocaleString("en-PK")}`;
   const safeCustomerName = escapeHtml(customerName || "Customer");
-  const safeStoreName = escapeHtml(storeName || "Naturanza Food");
   const safeOrderId = String(orderId).replace(/[^0-9a-zA-Z_-]/g, "");
   const safeStageLabel = escapeHtml(stageLabel || "Payment");
-  const safeRejectionReason = rejectionReason ? escapeHtml(rejectionReason) : "";
   const safeFormattedAmount = escapeHtml(formattedAmount);
 
   const reasonBlock =
-    !isApproved && safeRejectionReason
-      ? `
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #fef2f2; border-left: 4px solid #dc2626; border-radius: 8px; margin: 20px 0;">
-                <tr>
-                  <td style="padding: 14px 18px;">
-                    <p style="margin: 0 0 4px; color: #991b1b; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">
-                      Reason
-                    </p>
-                    <p style="margin: 0; color: #7f1d1d; font-size: 14px; line-height: 1.55;">
-                      ${safeRejectionReason}
-                    </p>
-                  </td>
-                </tr>
-              </table>
-              `
+    !isApproved && rejectionReason
+      ? renderNotice({ tone: "danger", title: "Reason", body: rejectionReason })
       : "";
 
-  const ctaText = isApproved ? "Track Your Order" : "View Order & Retry Payment";
   const bodyIntro = isApproved
-    ? `Great news — we've received and verified your <strong>${safeStageLabel}</strong> payment of <strong>${safeFormattedAmount}</strong> for Order <strong>#${safeOrderId}</strong>. Your order is now moving forward.`
+    ? `Great news &mdash; we've received and verified your <strong>${safeStageLabel}</strong> payment of <strong>${safeFormattedAmount}</strong> for Order <strong>#${safeOrderId}</strong>. Your order is now moving forward.`
     : `Unfortunately, we could not verify your <strong>${safeStageLabel}</strong> payment of <strong>${safeFormattedAmount}</strong> for Order <strong>#${safeOrderId}</strong>. Please review the reason below and resubmit, or contact support so we can help.`;
 
-  return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${heading} — Order #${safeOrderId}</title>
-</head>
-<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background-color:#f0fdf4;">
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color:#f0fdf4;">
-    <tr>
-      <td align="center" style="padding:40px 20px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,0.08);overflow:hidden;">
-          <tr>
-            <td style="background:${accentGradient};padding:32px 40px;text-align:center;">
-              <h1 style="margin:0;color:#fff;font-size:24px;font-weight:700;">${heading}</h1>
-              <p style="margin:8px 0 0;color:rgba(255,255,255,0.92);font-size:13px;letter-spacing:0.5px;text-transform:uppercase;">
-                Order #${safeOrderId} · ${statusLabel}
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:36px 40px;color:#1f2937;font-size:15px;line-height:1.7;">
-              <p style="margin:0 0 16px;">Assalam o Alaikum <strong>${safeCustomerName}</strong>,</p>
-              <p style="margin:0 0 20px;">${bodyIntro}</p>
-              ${reasonBlock}
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f8fafc;border-radius:10px;margin:8px 0 24px;">
+  const summaryRow = (label, value, color = "#0f172a") => `
+                      <tr>
+                        <td style="color: #64748b; font-size: 13px; padding: 4px 0;">${label}</td>
+                        <td style="text-align: right; color: ${color}; font-size: 13px; font-weight: 700; padding: 4px 0;">${value}</td>
+                      </tr>`;
+
+  const contentHtml = `
+              <p style="margin: 0 0 16px; color: #1f2937; font-size: 15px;">Assalam o Alaikum <strong>${safeCustomerName}</strong>,</p>
+              <p style="margin: 0 0 20px; color: #1f2937; font-size: 15px; line-height: 1.7;">${bodyIntro}</p>
+${reasonBlock}
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin: 0 0 24px;">
                 <tr>
-                  <td style="padding:14px 18px;">
-                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
-                      <tr>
-                        <td style="color:#64748b;font-size:13px;padding:4px 0;">Order</td>
-                        <td style="text-align:right;color:#0f172a;font-size:13px;font-weight:600;padding:4px 0;">#${safeOrderId}</td>
-                      </tr>
-                      <tr>
-                        <td style="color:#64748b;font-size:13px;padding:4px 0;">Stage</td>
-                        <td style="text-align:right;color:#0f172a;font-size:13px;font-weight:600;padding:4px 0;">${safeStageLabel}</td>
-                      </tr>
-                      <tr>
-                        <td style="color:#64748b;font-size:13px;padding:4px 0;">Amount</td>
-                        <td style="text-align:right;color:${accentColor};font-size:13px;font-weight:700;padding:4px 0;">${safeFormattedAmount}</td>
-                      </tr>
-                      <tr>
-                        <td style="color:#64748b;font-size:13px;padding:4px 0;">Status</td>
-                        <td style="text-align:right;color:${accentColor};font-size:13px;font-weight:700;padding:4px 0;">${statusLabel}</td>
-                      </tr>
+                  <td bgcolor="#f8fafc" style="background-color: #f8fafc; border-radius: 10px; padding: 14px 18px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%">${summaryRow("Order", `#${safeOrderId}`)}${summaryRow("Stage", safeStageLabel)}${summaryRow("Amount", safeFormattedAmount, accentColor)}${summaryRow("Status", statusLabel, accentColor)}
                     </table>
                   </td>
                 </tr>
               </table>
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
-                <tr>
-                  <td align="center" style="padding:6px 0 12px;">
-                    <a href="${escapeHtml(siteUrl)}/orders" target="_blank" style="display:inline-block;background:${accentGradient};color:#fff;text-decoration:none;padding:13px 28px;border-radius:10px;font-size:15px;font-weight:600;">
-                      ${ctaText}
-                    </a>
-                  </td>
-                </tr>
-              </table>
-              <p style="margin:18px 0 0;color:#64748b;font-size:13px;line-height:1.6;">
-                Need help? Reply to this email or contact us on WhatsApp.
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="background:#f8fafc;padding:18px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-              <p style="margin:0;color:#94a3b8;font-size:12px;">
-                © ${currentYear} ${safeStoreName}. All rights reserved.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`;
+${renderButton({
+    href: `${siteUrl}/orders`,
+    label: isApproved ? "Track Your Order" : "View Order & Retry Payment",
+    accent: isApproved ? "green" : "red",
+  })}`;
+
+  return renderEmailLayout({
+    title: `${heading} - Order #${safeOrderId}`,
+    preheader: isApproved
+      ? `Your ${stageLabel || "payment"} of ${formattedAmount} for Order #${safeOrderId} is confirmed.`
+      : `We couldn't verify your payment for Order #${safeOrderId}. Here's what to do next.`,
+    heading,
+    subheading: `Order #${safeOrderId} · ${statusLabel}`,
+    accent: isApproved ? "green" : "red",
+    contentHtml,
+  });
 };
 
 const sendPaymentStatusEmail = async ({
   email,
-  storeName,
   customerName,
   orderId,
   amount,
@@ -663,7 +521,6 @@ const sendPaymentStatusEmail = async ({
   if (!email) return { success: false, error: "No customer email" };
 
   const html = generatePaymentStatusEmail({
-    storeName: storeName || "Naturanza Food",
     customerName,
     orderId,
     amount,
@@ -680,10 +537,10 @@ const sendPaymentStatusEmail = async ({
     : `Payment Could Not Be Verified — Order #${orderId}`;
 
   const text = isApproved
-    ? `Your ${stageLabel} payment of ${currency || "Rs"} ${amount} for Order #${orderId} has been ${statusLabel}.\n\nTrack your order: ${FRONTEND_URL}/orders`
+    ? `Your ${stageLabel} payment of ${currency || "Rs"} ${amount} for Order #${orderId} has been ${statusLabel}.\n\nTrack your order: ${FRONTEND_URL}/orders\n\n${contactLineText()}`
     : `Your ${stageLabel} payment of ${currency || "Rs"} ${amount} for Order #${orderId} could not be verified.${
         rejectionReason ? `\n\nReason: ${rejectionReason}` : ""
-      }\n\nView order: ${FRONTEND_URL}/orders`;
+      }\n\nView order: ${FRONTEND_URL}/orders\n\n${contactLineText()}`;
 
   return sendEmail({ to: email, subject, html, text });
 };
@@ -692,47 +549,42 @@ const sendPaymentStatusEmail = async ({
  * Send a 6-digit email verification code for new self-signup accounts.
  */
 const sendVerificationCodeEmail = async (email, userName, code, expiryMinutes = 15) => {
-  const safeGreetingName = userName ? ` ${escapeHtml(userName)}` : "";
-  const plainGreetingName = userName ? ` ${String(userName).trim()}` : "";
-  const html = `
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f7f4;padding:32px 0;font-family:Arial,Helvetica,sans-serif;">
-    <tr><td align="center">
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:520px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,0.06);">
-        <tr><td style="background:linear-gradient(135deg,#15803d,#047857);padding:24px 28px;">
-          <h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:700;">Naturanza Food</h1>
-        </td></tr>
-        <tr><td style="padding:28px;">
-          <p style="margin:0 0 12px;color:#1f2937;font-size:15px;">Hi${safeGreetingName},</p>
-          <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">
-            Use the verification code below to confirm your email and activate your Naturanza Food account.
-          </p>
-          <div style="text-align:center;margin:24px 0;">
-            <div style="display:inline-block;background:#f0fdf4;border:2px dashed #16a34a;border-radius:12px;padding:18px 32px;">
-              <span style="font-size:34px;font-weight:800;letter-spacing:10px;color:#065f46;">${code}</span>
-            </div>
-          </div>
-          <p style="margin:0 0 6px;color:#6b7280;font-size:13px;text-align:center;">
-            This code expires in ${expiryMinutes} minutes.
-          </p>
-          <p style="margin:18px 0 0;color:#9ca3af;font-size:12px;line-height:1.6;">
-            If you didn't try to create a Naturanza Food account, you can safely ignore this email.
-          </p>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 28px;text-align:center;color:#9ca3af;font-size:11px;">
-          &copy; ${new Date().getFullYear()} Naturanza Food. Pure Nature. Pure Health.
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>`;
+  const safeCode = escapeHtml(code);
+  const contentHtml = `
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">Verify your email</h2>
+              ${greetingHtml(userName)}
+              <p style="margin: 0 0 20px; color: #475569; font-size: 15px; line-height: 1.6;">
+                Use the verification code below to confirm your email and activate your Naturanza Food account.
+              </p>
+              <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin: 8px auto 16px;">
+                <tr>
+                  <td align="center" bgcolor="#f0fdf4" style="background-color: #f0fdf4; border: 2px dashed #16a34a; border-radius: 12px; padding: 18px 32px; font-size: 34px; font-weight: 800; letter-spacing: 10px; color: #065f46; font-family: 'Courier New', monospace;">
+                    ${safeCode}
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0 0 24px; color: #64748b; font-size: 13px; text-align: center;">
+                This code expires in ${expiryMinutes} minutes. Never share it with anyone &mdash; our team will never ask for it.
+              </p>
+              <p style="margin: 0; color: #94a3b8; font-size: 13px; line-height: 1.6;">
+                If you didn't try to create a Naturanza Food account, you can safely ignore this email.
+              </p>`;
 
-  const text = `Hi${plainGreetingName},
+  const html = renderEmailLayout({
+    title: "Verify your email - Naturanza Food",
+    preheader: `Your verification code is ${code}. It expires in ${expiryMinutes} minutes.`,
+    contentHtml,
+  });
+
+  const text = `${greetingText(userName)}
 
 Your Naturanza Food verification code is: ${code}
 
-This code expires in ${expiryMinutes} minutes.
+This code expires in ${expiryMinutes} minutes. Never share it with anyone.
 
 If you didn't try to create an account, you can ignore this email.
 
+${contactLineText()}
 - Naturanza Food Team`;
 
   return sendEmail({
@@ -748,70 +600,24 @@ const generateNewsletterVerificationEmail = ({
   storeName,
   verificationUrl,
   unsubscribeUrl,
-  siteUrl,
 }) => {
-  const currentYear = new Date().getFullYear();
-  const safeStoreName = escapeHtml(storeName || "Naturanza Food");
-  return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Confirm your subscription</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0fdf4;">
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f0fdf4;">
-    <tr>
-      <td align="center" style="padding: 40px 20px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08); overflow: hidden;">
-          <tr>
-            <td style="background: linear-gradient(135deg, #16a34a 0%, #059669 100%); padding: 36px 40px; text-align: center;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">
-                Confirm Your Subscription
-              </h1>
-              <p style="margin: 12px 0 0; color: rgba(255, 255, 255, 0.9); font-size: 15px;">
-                Pure. Natural. Healthy.
+  const contentHtml = `
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">Confirm your subscription</h2>
+              <p style="margin: 0 0 24px; color: #1e293b; font-size: 16px; line-height: 1.6;">
+                Thanks for subscribing to <strong>${escapeHtml(storeName)}</strong>. Please confirm your email address to join our newsletter.
               </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 40px;">
-              <p style="margin: 0 0 20px; color: #1e293b; font-size: 16px; line-height: 1.6;">
-                Thanks for subscribing to <strong>${safeStoreName}</strong>. Please confirm your email address to join our newsletter.
+${renderButton({ href: verificationUrl, label: "Confirm Subscription" })}
+              <p style="margin: 0 0 24px; color: #64748b; font-size: 14px; line-height: 1.6;">
+                This link expires in 24 hours. Didn't subscribe? Just ignore this email &mdash; you won't be added.
               </p>
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
-                <tr>
-                  <td align="center" style="padding: 8px 0 24px;">
-                    <a href="${escapeHtml(verificationUrl)}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #16a34a 0%, #059669 100%); color: #ffffff; text-decoration: none; padding: 14px 36px; border-radius: 12px; font-size: 16px; font-weight: 600;">
-                      Confirm Subscription
-                    </a>
-                  </td>
-                </tr>
-              </table>
-              <p style="margin: 0 0 16px; color: #64748b; font-size: 13px; line-height: 1.6; text-align: center;">
-                This link expires in 24 hours. If you didn't subscribe, you can <a href="${escapeHtml(unsubscribeUrl)}" style="color: #16a34a;">ignore this email</a> or <a href="${escapeHtml(unsubscribeUrl)}" style="color: #16a34a;">unsubscribe here</a>.
-              </p>
-              <p style="margin: 0; color: #94a3b8; font-size: 12px; text-align: center; word-break: break-all;">
-                If the button doesn't work, paste this link into your browser:<br>
-                <a href="${escapeHtml(verificationUrl)}" style="color: #16a34a;">${escapeHtml(verificationUrl)}</a>
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="background-color: #f8fafc; padding: 20px 40px; border-top: 1px solid #e2e8f0;">
-              <p style="margin: 0; color: #94a3b8; font-size: 12px; text-align: center;">
-                © ${currentYear} ${safeStoreName}. All rights reserved.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-`;
+${renderLinkFallback(verificationUrl)}`;
+
+  return renderEmailLayout({
+    title: "Confirm your subscription - Naturanza Food",
+    preheader: "One click to confirm your Naturanza Food newsletter subscription.",
+    contentHtml,
+    footerNote: unsubscribeFooterNote(unsubscribeUrl, "You received this because this address was entered on our newsletter form."),
+  });
 };
 
 const sendNewsletterVerificationEmail = async ({
@@ -824,7 +630,6 @@ const sendNewsletterVerificationEmail = async ({
     storeName: storeName || "Naturanza Food",
     verificationUrl,
     unsubscribeUrl,
-    siteUrl: FRONTEND_URL,
   });
 
   const text = `
@@ -850,6 +655,7 @@ Didn't subscribe? Unsubscribe: ${unsubscribeUrl}
 module.exports = {
   sendEmail,
   sendPasswordResetEmail,
+  sendPasswordChangedEmail,
   sendVerificationCodeEmail,
   sendNewsletterVerificationEmail,
   sendNewsletterWelcomeEmail,

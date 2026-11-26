@@ -4,6 +4,8 @@ const { hashToken } = require("../utils/sessionManager");
 const { revokeRefreshTokensBySessionId } = require("../utils/tokenStore");
 const { clearRefreshCookie } = require("../utils/jwtTokens");
 const { addPasswordToHistory, hasReusedPassword } = require("../utils/passwordHistory");
+const { sendPasswordChangedEmail } = require("../utils/emailService");
+const { getClientIp } = require("../utils/clientIp");
 
 const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
   process.env.IP_LOOKUP_TIMEOUT_MS || "2000",
@@ -397,6 +399,17 @@ const changePassword = async (req, res) => {
       "password_change",
     );
   }
+
+  void sendPasswordChangedEmail({
+    email: req.user.email,
+    userName: req.user.name,
+    requestContext: {
+      ip: getClientIp(req),
+      device: resolveDeviceName(req.headers["user-agent"] || ""),
+    },
+  }).catch((notifyError) => {
+    console.error("[profile] password-changed email failed:", notifyError?.message);
+  });
 
   return res.json({
     message: isFirstTimePasswordSetup

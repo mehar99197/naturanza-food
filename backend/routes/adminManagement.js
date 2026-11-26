@@ -8,7 +8,9 @@ const requireSuperAdmin = require('../middleware/requireSuperAdmin');
 const { uploadProfileImage } = require('../middleware/upload');
 const { generateSecurePassword, logAdminAction, getClientIP } = require('../utils/adminHelpers');
 const { createPasswordResetToken } = require('../utils/passwordResetTokens');
-const { sendPasswordResetEmail } = require('../utils/emailService');
+const { sendPasswordResetEmail, sendPasswordChangedEmail } = require('../utils/emailService');
+const { getClientIp } = require('../utils/clientIp');
+const { resolveDeviceName } = require('../utils/adminSecurity');
 const { revokeSessionsByUserId, touchSessionByToken } = require('../utils/sessionManager');
 const { revokeRefreshTokensByUserId } = require('../utils/tokenStore');
 const { syncDefaultAdminPassword } = require('../utils/envSync');
@@ -564,6 +566,18 @@ router.patch('/admins/:id/change-password', authenticateToken, isAdmin, restrict
     await revokeRefreshTokensByUserId(db.promise(), id, 'password_change');
 
     await logAdminAction(req.user.id, `Changed own password`, getClientIP(req));
+
+    void sendPasswordChangedEmail({
+      email: user[0].email,
+      userName: req.user.name,
+      isAdmin: true,
+      requestContext: {
+        ip: getClientIp(req),
+        device: resolveDeviceName(req.headers['user-agent'] || ''),
+      },
+    }).catch((notifyError) => {
+      console.error('[admin-management] password-changed email failed:', notifyError?.message);
+    });
 
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
