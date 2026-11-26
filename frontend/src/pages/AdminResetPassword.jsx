@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useResetToken } from "@/lib/resetToken";
 import { AlertCircle, CheckCircle2, Eye, EyeOff, Lock } from "lucide-react";
 import { useForm, useWatch } from "react-hook-form";
 import { adminAPI } from "@/services/api";
 
 const AdminResetPassword = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get("token");
+  const token = useResetToken();
 
   const [generalError, setGeneralError] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);

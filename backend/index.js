@@ -102,6 +102,28 @@ if (TRUST_PROXY_ENABLED) {
   app.set("trust proxy", 1);
 }
 
+// MTA-STS policy (RFC 8461): tells other mail servers to deliver mail for this
+// domain to our MX hosts over TLS only. Sending servers fetch it from
+// https://mta-sts.<domain>/.well-known/mta-sts.txt and must not follow
+// redirects, so this is registered before the canonical-host redirect.
+// Start in "testing" (report only); switch MTA_STS_MODE to "enforce" once the
+// TLS-RPT reports are clean.
+const MTA_STS_POLICY = [
+  "version: STSv1",
+  `mode: ${process.env.MTA_STS_MODE === "enforce" ? "enforce" : "testing"}`,
+  "mx: mx1.hostinger.com",
+  "mx: mx2.hostinger.com",
+  "max_age: 604800",
+  "",
+].join("\r\n");
+
+app.get("/.well-known/mta-sts.txt", (req, res, next) => {
+  if (!String(req.hostname || "").toLowerCase().startsWith("mta-sts.")) {
+    return next();
+  }
+  res.type("text/plain").set("Cache-Control", "public, max-age=3600").send(MTA_STS_POLICY);
+});
+
 const CANONICAL_PUBLIC_HOST = (() => {
   try {
     const raw = String(process.env.PUBLIC_SITE_URL || "https://naturanzafood.com").trim();

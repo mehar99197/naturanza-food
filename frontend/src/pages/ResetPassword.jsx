@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useResetToken } from "@/lib/resetToken";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -52,8 +53,7 @@ const inputClassName =
 
 const ResetPassword = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get("token") || "";
+  const token = useResetToken();
   const { resetPassword } = useAuth();
 
   const {

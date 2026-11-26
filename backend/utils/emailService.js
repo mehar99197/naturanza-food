@@ -192,7 +192,9 @@ ${renderLinkFallback(resetLink)}`;
  */
 const sendPasswordResetEmail = async (email, userName, resetToken, isAdmin = false, requestContext = null) => {
   const resetPath = isAdmin ? "/admin/reset-password" : "/reset-password";
-  const resetLink = `${FRONTEND_URL}${resetPath}?token=${resetToken}`;
+  // Token goes in the fragment: browsers never send it to the server, so it stays
+  // out of access logs and Referer headers (see frontend/src/lib/resetToken.js).
+  const resetLink = `${FRONTEND_URL}${resetPath}#token=${encodeURIComponent(resetToken)}`;
   const accountLabel = isAdmin ? "Naturanza Food admin" : "Naturanza Food";
 
   const html = generatePasswordResetEmail({
@@ -277,6 +279,66 @@ ${contactLineText()}
   return sendEmail({
     to: email,
     subject: "Your password was changed - Naturanza Food",
+    html,
+    text,
+  });
+};
+
+/**
+ * Security notice sent when a customer signs in from a device we have not seen
+ * on their account before.
+ */
+const sendNewDeviceLoginEmail = async ({ email, userName, provider = "password", requestContext = null }) => {
+  if (!email) return { success: false, error: "No recipient email" };
+
+  const methodLabel = provider === "google" ? "Google sign-in" : "email and password";
+  const recoverLink = `${FRONTEND_URL}/forgot-password`;
+  const sessionsLink = `${FRONTEND_URL}/profile`;
+
+  const contentHtml = `
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">New sign-in to your account</h2>
+              ${greetingHtml(userName)}
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Your Naturanza Food account was just signed in to from a device we haven't seen before, using ${escapeHtml(methodLabel)}.
+              </p>
+${renderRequestDetails(requestContext || {})}
+              <p style="margin: 0 0 24px; color: #475569; font-size: 15px; line-height: 1.6;">
+                If this was you, you can ignore this email.
+              </p>
+${renderNotice({
+    tone: "danger",
+    title: "Don't recognise this sign-in?",
+    body: "Change your password now. Changing it signs out every other device.",
+  })}
+${renderButton({ href: recoverLink, label: "Secure My Account", accent: "red" })}
+              <p style="margin: 0; color: #64748b; font-size: 13px; line-height: 1.6; text-align: center;">
+                You can review active sessions in your <a href="${escapeHtml(sessionsLink)}" style="color: #16a34a;">profile</a>.
+              </p>`;
+
+  const html = renderEmailLayout({
+    title: "New sign-in to your account - Naturanza Food",
+    preheader: "We noticed a sign-in from a new device. Not you? Secure your account.",
+    contentHtml,
+    footerNote: "This is a security notification sent when your account is used on a new device.",
+  });
+
+  const text = `${greetingText(userName)}
+
+Your Naturanza Food account was just signed in to from a new device, using ${methodLabel}.
+
+${requestDetailsToText(requestContext || {})}
+
+If this was you, you can ignore this email.
+
+Don't recognise this sign-in? Change your password now: ${recoverLink}
+
+${contactLineText()}
+- Naturanza Food Team
+`;
+
+  return sendEmail({
+    to: email,
+    subject: "New sign-in to your Naturanza Food account",
     html,
     text,
   });
@@ -656,6 +718,7 @@ module.exports = {
   sendEmail,
   sendPasswordResetEmail,
   sendPasswordChangedEmail,
+  sendNewDeviceLoginEmail,
   sendVerificationCodeEmail,
   sendNewsletterVerificationEmail,
   sendNewsletterWelcomeEmail,

@@ -48,6 +48,7 @@ const {
 const {
   sendPasswordResetEmail,
   sendPasswordChangedEmail,
+  sendNewDeviceLoginEmail,
   sendVerificationCodeEmail,
 } = require("../utils/emailService");
 const { isDisposableEmail, hasDeliverableDomain } = require("../utils/emailValidation");
@@ -375,6 +376,13 @@ const recordLoginHistorySafely = async ({
     const normalizedStatus = status === "success" ? "success" : "failed";
     const ipAddress = getRequestIp(req);
     const locationLabel = await resolveRequestLocation(req, ipAddress);
+    const deviceName = resolveDeviceName(req.headers["user-agent"] || "");
+
+    // Must run before this login is inserted, or it would always match itself.
+    const isNewDevice =
+      normalizedStatus === "success" && userId
+        ? await isUnrecognizedDevice(userId, deviceName)
+        : false;
 
     await db.promise().query(
       `INSERT INTO user_login_history
@@ -386,15 +394,61 @@ const recordLoginHistorySafely = async ({
         provider,
         ipAddress,
         req.headers["user-agent"] || null,
-        resolveDeviceName(req.headers["user-agent"] || ""),
+        deviceName,
         locationLabel,
         normalizedStatus,
         normalizedStatus === "failed" ? failureReason || "Authentication failed" : null,
       ],
     );
+
+    if (isNewDevice) {
+      await notifyNewDeviceLogin({
+        userId,
+        provider,
+        requestContext: {
+          ip: getClientIp(req),
+          device: deviceName,
+          location: locationLabel && locationLabel !== "Unknown" ? locationLabel : null,
+        },
+      });
+    }
   } catch (error) {
-    // Keep authentication deterministic even if history logging fails.
+    // Keep authentication deterministic even if history logging or alerting fails.
   }
+};
+
+// A device counts as new when the account has signed in successfully before,
+// but never from this browser + OS within the lookback window. The very first
+// sign-in (right after signup) is not "new" — there is nothing to compare to.
+const NEW_DEVICE_LOOKBACK_DAYS = 180;
+
+const isUnrecognizedDevice = async (userId, deviceName) => {
+  const [[row]] = await db.promise().query(
+    `SELECT
+        COUNT(*) AS previous_logins,
+        SUM(device_name = ?) AS same_device_logins
+       FROM user_login_history
+      WHERE user_id = ?
+        AND status = 'success'
+        AND created_at > (NOW() - INTERVAL ? DAY)`,
+    [deviceName, userId, NEW_DEVICE_LOOKBACK_DAYS],
+  );
+  return Number(row?.previous_logins || 0) > 0 && Number(row?.same_device_logins || 0) === 0;
+};
+
+const notifyNewDeviceLogin = async ({ userId, provider, requestContext }) => {
+  const [[user]] = await db
+    .promise()
+    .query("SELECT email, name FROM users WHERE id = ? LIMIT 1", [userId]);
+  if (!user?.email) {
+    return;
+  }
+  await sendNewDeviceLoginEmail({
+    email: user.email,
+    userName: user.name,
+    provider,
+    requestContext,
+  });
 };
 
 const createSessionSafely = async (
