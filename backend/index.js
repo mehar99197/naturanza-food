@@ -117,11 +117,17 @@ const MTA_STS_POLICY = [
   "",
 ].join("\r\n");
 
-app.get("/.well-known/mta-sts.txt", (req, res, next) => {
-  if (!String(req.hostname || "").toLowerCase().startsWith("mta-sts.")) {
+// The mta-sts host is a parked alias of this site, so it serves only the
+// policy; every other path goes to the canonical site (no duplicate content).
+app.use((req, res, next) => {
+  const host = String(req.hostname || "").toLowerCase();
+  if (!host.startsWith("mta-sts.")) {
     return next();
   }
-  res.type("text/plain").set("Cache-Control", "public, max-age=3600").send(MTA_STS_POLICY);
+  if (req.path === "/.well-known/mta-sts.txt") {
+    return res.type("text/plain").set("Cache-Control", "public, max-age=3600").send(MTA_STS_POLICY);
+  }
+  return res.redirect(301, `https://${host.slice("mta-sts.".length)}${req.originalUrl}`);
 });
 
 const CANONICAL_PUBLIC_HOST = (() => {
