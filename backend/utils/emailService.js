@@ -136,6 +136,9 @@ const sendEmail = async ({ to, subject, html, text, unsubscribeUrl }) => {
     const info = await transport.sendMail(mailOptions);
     return { success: true, messageId: info.messageId };
   } catch (error) {
+    // Logged so SMTP problems (bad credentials, blocked port) show up in the
+    // runtime logs; the recipient address and message body are not logged.
+    console.error(`[email] send failed (${EMAIL_CONFIG.host}): ${error.code || ""} ${error.message}`);
     return { success: false, error: error.message };
   }
 };
