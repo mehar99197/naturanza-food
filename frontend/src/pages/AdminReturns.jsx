@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminLayout } from "@/components/AdminLayout";
 import { adminAPI } from "@/services/api";
 import { AlertCircle, RefreshCw } from "lucide-react";
-import { useSWRCache, invalidateSWRKey } from "@/hooks/useSWRCache";
+import { useSWRCache, invalidateSWRCachePrefix } from "@/hooks/useSWRCache";
 
 const STATUS_OPTIONS = ["requested", "approved", "rejected", "received", "refunded"];
 const MOBILE_INITIAL_RETURNS = 5;
@@ -36,7 +36,7 @@ export function AdminReturns() {
     adminAPI.getReturns(statusFilter === "all" ? {} : { status: statusFilter }),
   );
 
-  const returns = Array.isArray(data) ? data : [];
+  const returns = useMemo(() => (Array.isArray(data) ? data : []), [data]);
   const fetchError = swrError
     ? swrError?.response?.data?.error || swrError?.message || "Failed to load returns"
     : "";
@@ -44,7 +44,7 @@ export function AdminReturns() {
   const setError = setMutationError;
 
   const loadReturns = async () => {
-    invalidateSWRKey(cacheKey);
+    invalidateSWRCachePrefix("admin:returns:");
     await refresh();
   };
 
@@ -52,15 +52,17 @@ export function AdminReturns() {
     setShowAllMobileRows(false);
   }, [statusFilter]);
 
-  const updateDraft = (returnId, changes) => {
+  const updateDraft = (requestRecord, changes) => {
+    const returnId = requestRecord.id;
     setDrafts((prev) => ({
       ...prev,
       [returnId]: {
-        status: prev[returnId]?.status || "approved",
-        note: prev[returnId]?.note || "",
-        refund_amount: prev[returnId]?.refund_amount || "",
-        method: prev[returnId]?.method || "manual",
-        reference_number: prev[returnId]?.reference_number || "",
+        status: prev[returnId]?.status ?? requestRecord.status ?? "requested",
+        note: prev[returnId]?.note ?? "",
+        refund_amount:
+          prev[returnId]?.refund_amount ?? requestRecord.requested_amount ?? "",
+        method: prev[returnId]?.method ?? "manual",
+        reference_number: prev[returnId]?.reference_number ?? "",
         ...changes,
       },
     }));
@@ -313,7 +315,7 @@ export function AdminReturns() {
                         <td className="space-y-2 px-4 py-3">
                           <select
                             value={draft.status}
-                            onChange={(e) => updateDraft(requestRecord.id, { status: e.target.value })}
+                            onChange={(e) => updateDraft(requestRecord, { status: e.target.value })}
                             className="w-full rounded border border-gray-300 px-2 py-1"
                           >
                             {STATUS_OPTIONS.map((status) => (
@@ -324,7 +326,7 @@ export function AdminReturns() {
                           </select>
                           <input
                             value={draft.note}
-                            onChange={(e) => updateDraft(requestRecord.id, { note: e.target.value })}
+                            onChange={(e) => updateDraft(requestRecord, { note: e.target.value })}
                             placeholder="Admin note"
                             className="w-full rounded border border-gray-300 px-2 py-1"
                           />
@@ -334,19 +336,19 @@ export function AdminReturns() {
                               <input
                                 type="number"
                                 value={draft.refund_amount}
-                                onChange={(e) => updateDraft(requestRecord.id, { refund_amount: e.target.value })}
+                                onChange={(e) => updateDraft(requestRecord, { refund_amount: e.target.value })}
                                 placeholder="Refund amount"
                                 className="w-full rounded border border-gray-300 px-2 py-1"
                               />
                               <input
                                 value={draft.method}
-                                onChange={(e) => updateDraft(requestRecord.id, { method: e.target.value })}
+                                onChange={(e) => updateDraft(requestRecord, { method: e.target.value })}
                                 placeholder="Refund method"
                                 className="w-full rounded border border-gray-300 px-2 py-1"
                               />
                               <input
                                 value={draft.reference_number}
-                                onChange={(e) => updateDraft(requestRecord.id, { reference_number: e.target.value })}
+                                onChange={(e) => updateDraft(requestRecord, { reference_number: e.target.value })}
                                 placeholder="Reference number"
                                 className="w-full rounded border border-gray-300 px-2 py-1"
                               />
@@ -394,7 +396,7 @@ export function AdminReturns() {
 
                 <select
                   value={selectedDraft.status}
-                  onChange={(e) => updateDraft(selectedReturn.id, { status: e.target.value })}
+                  onChange={(e) => updateDraft(selectedReturn, { status: e.target.value })}
                   className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
                 >
                   {STATUS_OPTIONS.map((status) => (
@@ -406,7 +408,7 @@ export function AdminReturns() {
 
                 <input
                   value={selectedDraft.note}
-                  onChange={(e) => updateDraft(selectedReturn.id, { note: e.target.value })}
+                  onChange={(e) => updateDraft(selectedReturn, { note: e.target.value })}
                   placeholder="Admin note"
                   className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
                 />
@@ -416,19 +418,19 @@ export function AdminReturns() {
                     <input
                       type="number"
                       value={selectedDraft.refund_amount}
-                      onChange={(e) => updateDraft(selectedReturn.id, { refund_amount: e.target.value })}
+                      onChange={(e) => updateDraft(selectedReturn, { refund_amount: e.target.value })}
                       placeholder="Refund amount"
                       className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
                     />
                     <input
                       value={selectedDraft.method}
-                      onChange={(e) => updateDraft(selectedReturn.id, { method: e.target.value })}
+                      onChange={(e) => updateDraft(selectedReturn, { method: e.target.value })}
                       placeholder="Refund method"
                       className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
                     />
                     <input
                       value={selectedDraft.reference_number}
-                      onChange={(e) => updateDraft(selectedReturn.id, { reference_number: e.target.value })}
+                      onChange={(e) => updateDraft(selectedReturn, { reference_number: e.target.value })}
                       placeholder="Reference number"
                       className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
                     />

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Pencil,
@@ -10,7 +10,6 @@ import {
   X,
   XCircle,
   Upload,
-  Image as ImageIcon,
 } from 'lucide-react';
 import { AdminLayout } from '@/components/AdminLayout';
 import { categoryAPI } from '@/services/api';
@@ -136,17 +135,30 @@ export default function AdminCategories() {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const newPreviewUrlRef = useRef('');
+  const editPreviewUrlRef = useRef('');
+
+  const revokeBlobUrl = (ref) => {
+    if (ref.current && ref.current.startsWith('blob:')) {
+      URL.revokeObjectURL(ref.current);
+    }
+    ref.current = '';
+  };
+
+  useEffect(() => () => {
+    revokeBlobUrl(newPreviewUrlRef);
+    revokeBlobUrl(editPreviewUrlRef);
+  }, []);
 
   // SWR caches the categories list so re-visits to this section show
   // instantly while a background refresh keeps the data fresh.
   const {
     data: cachedCategoriesData,
     loading: swrLoading,
-    revalidating,
     error: swrError,
     refresh: swrRefresh,
   } = useSWRCache(CATEGORIES_CACHE_KEY, () =>
-    categoryAPI.getAll({ include_inactive: true }),
+    categoryAPI.getAll({ include_inactive: true }, { bypassCache: true }),
   );
 
   // Sync SWR state into the existing local state so the rest of the page
@@ -177,6 +189,7 @@ export default function AdminCategories() {
   }, []);
 
   const startEditing = (category) => {
+    revokeBlobUrl(editPreviewUrlRef);
     setEditingId(category.id);
     setEditingName(category.name || '');
     setEditingDescription(category.description || '');
@@ -187,6 +200,7 @@ export default function AdminCategories() {
   };
 
   const cancelEditing = () => {
+    revokeBlobUrl(editPreviewUrlRef);
     setEditingId(null);
     setEditingName('');
     setEditingDescription('');
@@ -223,6 +237,7 @@ export default function AdminCategories() {
 
       setNewCategory('');
       setNewDescription('');
+      revokeBlobUrl(newPreviewUrlRef);
       setNewImageFile(null);
       setNewImagePreview('');
       setNewCategoryType('both');
@@ -567,8 +582,11 @@ export default function AdminCategories() {
                   onChange={(event) => {
                     const file = event.target.files[0];
                     if (file) {
+                      revokeBlobUrl(newPreviewUrlRef);
+                      const blobUrl = URL.createObjectURL(file);
+                      newPreviewUrlRef.current = blobUrl;
                       setNewImageFile(file);
-                      setNewImagePreview(URL.createObjectURL(file));
+                      setNewImagePreview(blobUrl);
                     }
                   }}
                 />
@@ -578,7 +596,11 @@ export default function AdminCategories() {
                   <img src={newImagePreview} alt="Preview" className="h-full w-full object-cover" />
                   <button
                     type="button"
-                    onClick={() => { setNewImageFile(null); setNewImagePreview(''); }}
+                    onClick={() => {
+                      revokeBlobUrl(newPreviewUrlRef);
+                      setNewImageFile(null);
+                      setNewImagePreview('');
+                    }}
                     className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow-sm"
                   >
                     <X className="h-3 w-3" />
@@ -729,8 +751,11 @@ export default function AdminCategories() {
                                       onChange={(event) => {
                                         const file = event.target.files[0];
                                         if (file) {
+                                          revokeBlobUrl(editPreviewUrlRef);
+                                          const blobUrl = URL.createObjectURL(file);
+                                          editPreviewUrlRef.current = blobUrl;
                                           setEditImageFile(file);
-                                          setEditImagePreview(URL.createObjectURL(file));
+                                          setEditImagePreview(blobUrl);
                                         }
                                       }}
                                     />
@@ -740,7 +765,12 @@ export default function AdminCategories() {
                                       <img src={editImagePreview} alt="Preview" className="h-full w-full object-cover" />
                                       <button
                                         type="button"
-                                        onClick={() => { setEditImageFile(null); setEditImagePreview(''); setEditingImageUrl(''); }}
+                                        onClick={() => {
+                                          revokeBlobUrl(editPreviewUrlRef);
+                                          setEditImageFile(null);
+                                          setEditImagePreview('');
+                                          setEditingImageUrl('');
+                                        }}
                                         className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white shadow-sm"
                                       >
                                         <X className="h-2.5 w-2.5" />

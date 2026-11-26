@@ -70,11 +70,11 @@ export function AdminStaffLogin() {
   };
 
   return (
-    <div className="auth-premium-font relative h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-[#f8fbf8] to-[#eef7ef] px-4 sm:px-6">
+    <div className="auth-premium-font relative min-h-screen py-6 bg-gradient-to-br from-slate-50 via-[#f8fbf8] to-[#eef7ef] px-4 sm:px-6">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_16%_18%,rgba(16,185,129,0.09),transparent_42%),radial-gradient(circle_at_84%_82%,rgba(22,163,74,0.07),transparent_42%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(22,101,52,0.28)_1px,transparent_1px),linear-gradient(90deg,rgba(22,101,52,0.2)_1px,transparent_1px)] [background-size:48px_48px]" />
 
-      <div className="relative z-10 mx-auto flex h-full w-full max-w-[30rem] flex-col items-center justify-center">
+      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[30rem] flex-col items-center justify-center">
         <div className="mb-3 text-center sm:mb-4">
           <img
             src="/images/logo.png"
@@ -141,13 +141,12 @@ export function AdminStaffLogin() {
                   <span className="mb-1.5 block text-sm font-semibold text-slate-700">Authenticator code</span>
                   <input
                     type="text"
-                    inputMode="numeric"
                     autoComplete="one-time-code"
-                    maxLength={6}
+                    maxLength={20}
                     value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9A-Za-z-]/g, ""))}
                     className="w-full rounded-2xl border border-green-100 bg-white px-4 py-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-green-600 focus:ring-4 focus:ring-green-100"
-                    placeholder="6-digit code"
+                    placeholder="6-digit code or recovery code"
                     disabled={loading}
                   />
                   <span className="mt-1 block text-xs text-slate-500">Enter your authenticator code or a recovery code.</span>

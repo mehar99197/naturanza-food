@@ -6,7 +6,6 @@ import {
  Store,
  Bell,
  CreditCard,
- Truck,
  Save,
  AlertCircle,
  CheckCircle,
@@ -23,17 +22,14 @@ import {
 } from 'lucide-react';
 
 const DEFAULT_SETTINGS = {
-  storeName: 'Naturanza',
+  storeName: 'Naturanza Food',
   storeEmail: 'support@naturanzafood.com',
   storePhone: '+92340 9502646',
   currency: 'PKR',
-  taxRate: '18',
-  shippingFlat: '250',
-  shippingFree: '5000',
   emailNotifications: true,
   orderNotifications: true,
   lowStockAlerts: true,
-  address: 'Pakistan',
+  address: 'Nizam Pura, Chunian, District Kasur, Punjab, Pakistan',
   supportHours: 'Available 24/7',
   facebookUrl: '',
   instagramUrl: '',
@@ -42,9 +38,9 @@ const DEFAULT_SETTINGS = {
   youtubeUrl: '',
   whatsappNumber: '',
   whatsappEnabled: true,
-  mapLatitude: 31.5204,
-  mapLongitude: 74.3587,
-  mapLocationLabel: 'Pakistan, Lahore',
+  mapLatitude: 30.9716931,
+  mapLongitude: 73.8896874,
+  mapLocationLabel: 'Nizam Pura, Chunian, District Kasur, Punjab, Pakistan',
   storeDiscountActive: false,
   storeDiscountPercentage: 0,
   storeDiscountLabel: 'Store Sale'
@@ -100,7 +96,7 @@ export function AdminSettings() {
  setHasUnsavedChanges(isDifferent);
  }, [settings, originalSettings]);
 
- const validateField = (field, value) => {
+ const validateField = (field, value, nextSettings = settings) => {
  const newErrors = { ...errors };
 
  switch (field) {
@@ -133,13 +129,26 @@ export function AdminSettings() {
  delete newErrors[field];
  }
  break;
- case 'storeDiscountPercentage':
- if (parseFloat(value) < 0 || parseFloat(value) > 90) {
+ case 'storeDiscountActive': {
+ const pct = Number(nextSettings.storeDiscountPercentage) || 0;
+ if (value && pct <= 0) {
+ newErrors.storeDiscountPercentage = 'Discount must be greater than 0% while sale is active';
+ } else if (!value || (pct > 0 && pct <= 90)) {
+ delete newErrors.storeDiscountPercentage;
+ }
+ break;
+ }
+ case 'storeDiscountPercentage': {
+ const pct = parseFloat(value);
+ if (!Number.isFinite(pct) || pct < 0 || pct > 90) {
  newErrors.storeDiscountPercentage = 'Discount must be between 0 and 90';
+ } else if (nextSettings.storeDiscountActive && pct <= 0) {
+ newErrors.storeDiscountPercentage = 'Discount must be greater than 0% while sale is active';
  } else {
  delete newErrors.storeDiscountPercentage;
  }
  break;
+ }
  case 'facebookUrl':
  case 'instagramUrl':
   case 'tiktokUrl':
@@ -182,11 +191,19 @@ export function AdminSettings() {
  };
 
  const handleChange = (field, value) => {
- setSettings(prev => ({ ...prev, [field]: value }));
- validateField(field, value);
+ const nextSettings = { ...settings, [field]: value };
+ setSettings(nextSettings);
+ validateField(field, value, nextSettings);
  };
 
  const handleSave = async () => {
+ if (settings.storeDiscountActive && (Number(settings.storeDiscountPercentage) || 0) <= 0) {
+ setErrors((prev) => ({
+ ...prev,
+ storeDiscountPercentage: 'Discount must be greater than 0% while sale is active',
+ }));
+ return;
+ }
  if (Object.keys(errors).length > 0) {
  return;
  }
@@ -198,18 +215,14 @@ export function AdminSettings() {
  storeEmail: settings.storeEmail,
  storePhone: settings.storePhone,
  currency: settings.currency,
- taxRate: Number(settings.taxRate) || 0,
- shippingFlat: Number(settings.shippingFlat) || 0,
- shippingFree: Number(settings.shippingFree) || 0,
  emailNotifications: settings.emailNotifications,
  orderNotifications: settings.orderNotifications,
  lowStockAlerts: settings.lowStockAlerts,
- lowStockThreshold: Number(settings.lowStockThreshold) || 0,
  address: settings.address || '',
  supportHours: settings.supportHours || '',
  facebookUrl: settings.facebookUrl || '',
  instagramUrl: settings.instagramUrl || '',
-  tiktokUrl: settings.tiktokUrl || '',
+ tiktokUrl: settings.tiktokUrl || '',
  twitterUrl: settings.twitterUrl || '',
  youtubeUrl: settings.youtubeUrl || '',
  whatsappNumber: settings.whatsappNumber || '',
@@ -544,7 +557,7 @@ export function AdminSettings() {
  type="text"
  value={settings.address || ''}
  onChange={(e) => handleChange('address', e.target.value)}
- placeholder="e.g. Lahore, Pakistan"
+ placeholder="Nizam Pura, Chunian, District Kasur, Punjab, Pakistan"
  className="w-full rounded-xl border border-emerald-100 bg-white px-4 py-2.5 text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
  />
  </div>
@@ -654,7 +667,7 @@ export function AdminSettings() {
  step="0.0000001"
  value={settings.mapLatitude ?? ''}
  onChange={(e) => handleChange('mapLatitude', e.target.value)}
- placeholder="31.5204"
+ placeholder="30.9716931"
  className={`w-full px-4 py-2.5 border-2 rounded-xl focus:outline-none focus:ring-4 ${
  errors.mapLatitude
  ? 'border-red-500 focus:border-red-500 focus:ring-red-100'
@@ -675,7 +688,7 @@ export function AdminSettings() {
  step="0.0000001"
  value={settings.mapLongitude ?? ''}
  onChange={(e) => handleChange('mapLongitude', e.target.value)}
- placeholder="74.3587"
+ placeholder="73.8896874"
  className={`w-full px-4 py-2.5 border-2 rounded-xl focus:outline-none focus:ring-4 ${
  errors.mapLongitude
  ? 'border-red-500 focus:border-red-500 focus:ring-red-100'
@@ -695,7 +708,7 @@ export function AdminSettings() {
  type="text"
  value={settings.mapLocationLabel || ''}
  onChange={(e) => handleChange('mapLocationLabel', e.target.value)}
- placeholder="Pakistan, Lahore"
+ placeholder="Nizam Pura, Chunian, District Kasur, Punjab, Pakistan"
  className="w-full rounded-xl border border-emerald-100 bg-white px-4 py-2.5 text-slate-700 outline-none transition-all duration-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
  />
  </div>
@@ -760,7 +773,7 @@ export function AdminSettings() {
  >
  {isSaving ? (
  <>
- <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
+ <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
  Saving...
  </>
  ) : (

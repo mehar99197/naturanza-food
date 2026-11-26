@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { authenticateToken, isAdmin, isAdminUser } = require('../middleware/auth');
 const requirePermission = require('../middleware/requirePermission');
 const { restrictBody } = require('../middleware/security');
 const { db } = require('../config/db');
 
 const requireReturnsPermissionForAdmins = (req, res, next) => {
-  if (String(req.user?.role || '').toLowerCase() !== 'admin') {
+  if (!isAdminUser(req.user)) {
     return next();
   }
   return requirePermission('manage_returns')(req, res, next);
@@ -73,14 +73,14 @@ router.post('/request', authenticateToken, restrictBody('order_id', 'reason', 'd
 
     const [existingRows] = await connection.query(
       `SELECT id FROM returns_requests
-       WHERE order_id = ? AND user_id = ? AND status IN ('requested', 'approved', 'received')
+       WHERE order_id = ? AND user_id = ? AND status IN ('requested', 'approved', 'received', 'refunded')
        LIMIT 1`,
       [orderId, req.user.id],
     );
 
     if (existingRows.length > 0) {
       await connection.rollback();
-      return res.status(409).json({ error: 'A return request for this order is already in progress' });
+      return res.status(409).json({ error: 'A return request for this order already exists or has been refunded' });
     }
 
     const [insertResult] = await connection.query(
@@ -161,7 +161,7 @@ router.get('/my', authenticateToken, async (req, res) => {
 // Admin list (mirrors /admin/returns for direct route usage)
 router.get('/admin/all', authenticateToken, isAdmin, requirePermission('manage_returns'), async (req, res) => {
   const status = req.query.status ? String(req.query.status).trim() : null;
-  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
 
   if (status && !ALLOWED_RETURN_STATUSES.has(status)) {
     return res.status(400).json({ error: 'Invalid return status filter' });
@@ -214,7 +214,7 @@ router.get('/:id', authenticateToken, requireReturnsPermissionForAdmins, async (
     }
 
     const record = rows[0];
-    if (req.user.role !== 'admin' && record.user_id !== req.user.id) {
+    if (!isAdminUser(req.user) && record.user_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
 

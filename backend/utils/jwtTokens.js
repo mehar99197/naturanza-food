@@ -200,8 +200,21 @@ const getCookieDomainOption = (req) => {
   return domain ? { domain } : {};
 };
 
+const SESSION_HINT_COOKIE_NAME =
+  String(process.env.SESSION_HINT_COOKIE_NAME || "naturanza_session").trim() ||
+  "naturanza_session";
+
 const getRefreshCookieOptions = (req) => ({
   httpOnly: true,
+  secure: shouldUseSecureCookies(),
+  sameSite: resolveSameSite(),
+  maxAge: REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
+  path: "/",
+  ...getCookieDomainOption(req),
+});
+
+const getSessionHintCookieOptions = (req) => ({
+  httpOnly: false,
   secure: shouldUseSecureCookies(),
   sameSite: resolveSameSite(),
   maxAge: REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
@@ -225,6 +238,19 @@ const clearRefreshCookie = (res, req) => {
   if (domain) {
     res.clearCookie(REFRESH_COOKIE_NAME, { ...options, maxAge: 0 });
   }
+
+  const hintOptions = getSessionHintCookieOptions(req);
+  const { domain: hintDomain, ...hintHostOptions } = hintOptions;
+  res.clearCookie(SESSION_HINT_COOKIE_NAME, { ...hintHostOptions, maxAge: 0 });
+  if (hintDomain) {
+    res.clearCookie(SESSION_HINT_COOKIE_NAME, { ...hintOptions, maxAge: 0 });
+  }
+};
+
+const setRefreshSessionCookies = (res, req, refreshToken) => {
+  clearRefreshCookie(res, req);
+  res.cookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions(req));
+  res.cookie(SESSION_HINT_COOKIE_NAME, "1", getSessionHintCookieOptions(req));
 };
 
 const clearAccessCookie = (res, req) => {
@@ -252,8 +278,13 @@ module.exports = {
   verifyAccessToken,
   verifyRefreshToken,
   toExpiryDate,
+  shouldUseSecureCookies,
+  resolveSameSite,
   getCookieDomain,
   getRefreshCookieOptions,
+  getSessionHintCookieOptions,
+  setRefreshSessionCookies,
+  SESSION_HINT_COOKIE_NAME,
   getAccessCookieOptions,
   clearRefreshCookie,
   clearAccessCookie,

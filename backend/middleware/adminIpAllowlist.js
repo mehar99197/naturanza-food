@@ -6,10 +6,11 @@ const { isSuperAdminIpAllowed } = require("../utils/adminSecurity");
 // at login. This closes an existing-session bypass after the allowlist changes
 // or when a device moves to a different network.
 const enforceSuperAdminIpAllowlist = async (req, res, next) => {
-  if (String(req.user?.role || "").toLowerCase() !== "admin") {
+  if (String(req.user?.admin_role || "").toLowerCase() !== "super_admin") {
     return next();
   }
-  if (String(req.user?.admin_role || "").toLowerCase() !== "super_admin") {
+
+  if (req._superAdminIpChecked) {
     return next();
   }
 
@@ -20,6 +21,7 @@ const enforceSuperAdminIpAllowlist = async (req, res, next) => {
       database: db.promise(),
     });
     if (allowed) {
+      req._superAdminIpChecked = true;
       return next();
     }
   } catch {

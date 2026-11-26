@@ -45,12 +45,13 @@ export function Contact() {
   const phoneLink = normalizePhoneLink(supportPhone);
   const address = settings.address || BUSINESS_INFO.officeAddress;
   const supportHours = settings.supportHours || BUSINESS_INFO.supportHours;
-  const mapLocationLabel = settings.mapLocationLabel || "Pakistan, Lahore";
+  const mapLocationLabel =
+    settings.mapLocationLabel || settings.address || BUSINESS_INFO.officeAddress;
 
   const lat = Number(settings.mapLatitude);
   const lng = Number(settings.mapLongitude);
-  const safeLat = Number.isFinite(lat) ? lat : 31.5204;
-  const safeLng = Number.isFinite(lng) ? lng : 74.3587;
+  const safeLat = Number.isFinite(lat) ? lat : 30.9716931;
+  const safeLng = Number.isFinite(lng) ? lng : 73.8896874;
   const bboxLeft = (safeLng - 0.055).toFixed(4);
   const bboxRight = (safeLng + 0.055).toFixed(4);
   const bboxBottom = (safeLat - 0.06).toFixed(4);
@@ -163,9 +164,12 @@ export function Contact() {
             ref={infoRef}
           >
             <div className="bg-white rounded-2xl shadow-lg hover:shadow-2xl p-5 sm:p-6 border border-gray-100 md:sticky md:top-28">
-              <h2 className="font-display text-lg font-bold text-[#2d3a2d] mb-5">
+              <h2 className="font-display text-lg font-bold text-[#2d3a2d] mb-1">
                 Contact Information
               </h2>
+              <p className="text-xs text-[#6b7a6b] mb-5">
+                {BUSINESS_INFO.brandName} (Legal Name: {BUSINESS_INFO.legalName})
+              </p>
               <div className="space-y-5">
                 {contactInfo.map((item) => (
                   <div key={item.title} className="flex items-start gap-3">

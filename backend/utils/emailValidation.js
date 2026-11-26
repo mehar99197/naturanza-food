@@ -54,6 +54,7 @@ const CURATED_DISPOSABLE = new Set([
 const apiCache = new Map(); // domain -> { disposable, ts }
 const API_TTL_MS = 24 * 60 * 60 * 1000;
 const API_TIMEOUT_MS = 4000;
+const MAX_API_CACHE_ENTRIES = 5000;
 
 const getEmailDomain = (email) => {
   const parts = String(email || "").trim().toLowerCase().split("@");
@@ -83,6 +84,10 @@ const isDisposableViaApi = async (domain) => {
     }
     const data = await res.json();
     const disposable = data && data.disposable === true;
+    if (apiCache.size >= MAX_API_CACHE_ENTRIES) {
+      const oldestKey = apiCache.keys().next().value;
+      if (oldestKey !== undefined) apiCache.delete(oldestKey);
+    }
     apiCache.set(domain, { disposable, ts: Date.now() });
     return disposable;
   } catch {
@@ -115,11 +120,15 @@ const isDisposableEmail = async (email) => {
   return isDisposableViaApi(domain);
 };
 
-const withTimeout = (promise, ms) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("DNS_TIMEOUT")), ms)),
-  ]);
+const withTimeout = (promise, ms) => {
+  let timerId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timerId = setTimeout(() => reject(new Error("DNS_TIMEOUT")), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timerId);
+  });
+};
 
 /**
  * Returns true if the domain looks deliverable (has MX, or A/AAAA fallback).

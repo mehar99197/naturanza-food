@@ -75,11 +75,37 @@ const makeMarkdownComponents = () => ({
   li: ({ children }) => <li className="leading-7">{children}</li>,
   strong: ({ children }) => <strong className="font-bold text-gray-900">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
-  a: ({ href, children }) => (
-    <Link to={href || '#'} className="text-green-700 font-semibold underline underline-offset-2 hover:text-green-800">
-      {children}
-    </Link>
-  ),
+  a: ({ href, children }) => {
+    const url = String(href || '#').trim();
+    if (/^(https?:|mailto:|tel:)/i.test(url)) {
+      const isHttp = /^https?:/i.test(url);
+      return (
+        <a
+          href={url}
+          target={isHttp ? '_blank' : undefined}
+          rel={isHttp ? 'noopener noreferrer' : undefined}
+          className="text-green-700 font-semibold underline underline-offset-2 hover:text-green-800"
+        >
+          {children}
+        </a>
+      );
+    }
+    if (url.startsWith('#')) {
+      return (
+        <a
+          href={url}
+          className="text-green-700 font-semibold underline underline-offset-2 hover:text-green-800"
+        >
+          {children}
+        </a>
+      );
+    }
+    return (
+      <Link to={url} className="text-green-700 font-semibold underline underline-offset-2 hover:text-green-800">
+        {children}
+      </Link>
+    );
+  },
   blockquote: ({ children }) => (
     <blockquote className="border-l-4 border-green-400 bg-green-50/60 px-4 py-2 my-4 rounded-r-lg text-gray-700 italic">
       {children}
@@ -335,7 +361,7 @@ export function BlogPost() {
         description={post.excerpt}
         keywords={post.keywords}
         url={articleUrl}
-        image={post.image || undefined}
+        image={coverImage || undefined}
         type="article"
       />
       <ArticleStructuredData
@@ -344,7 +370,7 @@ export function BlogPost() {
         url={articleUrl}
         author={post.author}
         datePublished={post.date}
-        image={post.image}
+        image={coverImage || undefined}
       />
 
       {/* Reading progress bar */}

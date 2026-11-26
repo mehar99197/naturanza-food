@@ -21,6 +21,7 @@ const getWishlistItems = async (userId) => {
                 p.image_url,
                 p.description,
                 p.stock_quantity,
+                p.reserved_stock,
                 p.is_active,
                 p.discount_percentage,
                 c.name AS category_name,
@@ -30,7 +31,7 @@ const getWishlistItems = async (userId) => {
                 COALESCE(rs.average_rating, 0) AS rating,
                 COALESCE(rs.review_count, 0) AS reviews,
                 CASE
-                    WHEN p.stock_quantity > 0 AND p.is_active = 1 THEN 1
+                    WHEN (p.stock_quantity - COALESCE(p.reserved_stock, 0)) > 0 AND p.is_active = 1 THEN 1
                     ELSE 0
                 END AS in_stock
          FROM user_wishlist w
@@ -46,6 +47,8 @@ const getWishlistItems = async (userId) => {
             GROUP BY product_id
          ) rs ON rs.product_id = p.id
          WHERE w.user_id = ?
+           AND p.is_active = TRUE
+           AND p.deleted_at IS NULL
          ORDER BY w.added_at DESC`,
         [userId],
     );
@@ -77,7 +80,7 @@ router.post("/add", authenticateToken, restrictBody('product_id'), async (req, r
 
         const [products] = await db
             .promise()
-            .query("SELECT id FROM products WHERE id = ? LIMIT 1", [productId]);
+            .query("SELECT id FROM products WHERE id = ? AND is_active = TRUE AND deleted_at IS NULL LIMIT 1", [productId]);
 
         if (!products.length) {
             return res.status(404).json({ error: "Product not found" });

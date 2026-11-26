@@ -2,6 +2,7 @@ const bcrypt = require("bcryptjs");
 const { db } = require("../config/db");
 const { hashToken } = require("../utils/sessionManager");
 const { revokeRefreshTokensBySessionId } = require("../utils/tokenStore");
+const { clearRefreshCookie } = require("../utils/jwtTokens");
 const { addPasswordToHistory, hasReusedPassword } = require("../utils/passwordHistory");
 
 const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
@@ -589,7 +590,7 @@ const deleteAccount = async (req, res) => {
   const [users] = await db
     .promise()
     .query(
-      "SELECT id, email, password, role, password_set_by_user FROM users WHERE id = ? LIMIT 1",
+      "SELECT id, email, password, role, admin_role, password_set_by_user FROM users WHERE id = ? LIMIT 1",
       [req.user.id],
     );
 
@@ -599,21 +600,22 @@ const deleteAccount = async (req, res) => {
 
   const userRecord = users[0];
   const role = String(userRecord.role || "").trim().toLowerCase();
-  if (role === "admin") {
+  if (role === "admin" || Boolean(String(userRecord.admin_role || "").trim())) {
     return res.status(403).json({
       error: "Admin accounts cannot be deleted from this screen.",
+    });
+  }
+
+  const hasUserPassword = Boolean(Number(userRecord.password_set_by_user)) && Boolean(userRecord.password);
+  if (!hasUserPassword) {
+    return res.status(400).json({
+      error: "Please set an account password in Security settings before deleting your account.",
     });
   }
 
   if (!currentPassword) {
     return res.status(400).json({
       error: "Current password is required to delete your account.",
-    });
-  }
-
-  if (!userRecord.password) {
-    return res.status(400).json({
-      error: "Current password is required. Please set your password first and try again.",
     });
   }
 
@@ -649,6 +651,8 @@ const deleteAccount = async (req, res) => {
   } finally {
     connection.release();
   }
+
+  clearRefreshCookie(res, req);
 
   return res.json({
     message: "Your account has been permanently deleted.",

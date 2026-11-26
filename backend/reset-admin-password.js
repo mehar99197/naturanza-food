@@ -15,13 +15,21 @@ const DEFAULT_ADMIN_EMAIL = String(process.env.DEFAULT_ADMIN_EMAIL || '')
 const DEFAULT_ADMIN_PASSWORD = String(process.env.DEFAULT_ADMIN_PASSWORD || '');
 
 async function resetAdminPassword() {
+  let conn;
   try {
     if (!DEFAULT_ADMIN_EMAIL || !DEFAULT_ADMIN_PASSWORD) {
       console.error('Missing DEFAULT_ADMIN_EMAIL or DEFAULT_ADMIN_PASSWORD in .env');
+      process.exitCode = 1;
       return;
     }
 
-    const conn = await mysql.createConnection({
+    if (DEFAULT_ADMIN_PASSWORD.length < 12) {
+      console.error('DEFAULT_ADMIN_PASSWORD must be at least 12 characters');
+      process.exitCode = 1;
+      return;
+    }
+
+    conn = await mysql.createConnection({
       host: DB_HOST,
       port: DB_PORT,
       user: DB_USER,
@@ -29,31 +37,41 @@ async function resetAdminPassword() {
       database: DB_NAME
     });
 
-    console.log('\n🔐 Resetting Admin Password...\n');
-    
-    const newPassword = DEFAULT_ADMIN_PASSWORD;
-    const hashedPassword = await bcrypt.hash(newPassword, 12);
-    
-    await conn.query(
-      "UPDATE users SET password = ?, role = 'admin', admin_role = 'super_admin', is_active = TRUE WHERE email = ?",
+    console.log('\nResetting Admin Password...\n');
+
+    const hashedPassword = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 12);
+
+    const [result] = await conn.query(
+      `UPDATE users
+          SET password = ?, role = 'admin', admin_role = 'super_admin', is_active = TRUE,
+              failed_login_attempts = 0, locked_until = NULL,
+              user_failed_login_attempts = 0, user_locked_until = NULL,
+              admin_failed_login_attempts = 0, admin_locked_until = NULL
+        WHERE email = ?`,
       [hashedPassword, DEFAULT_ADMIN_EMAIL]
     );
-    
-    console.log('✅ Password reset successfully!\n');
-    console.log('═══════════════════════════════════════');
-    console.log('   ADMIN LOGIN CREDENTIALS');
-    console.log('═══════════════════════════════════════');
-    console.log('');
-    console.log(`   📧 Email:    ${DEFAULT_ADMIN_EMAIL}`);
-    console.log('   🔑 Password: (from DEFAULT_ADMIN_PASSWORD in .env)');
-    console.log('');
-    console.log('   🌐 Login URL: http://localhost:5173/admin/login');
-    console.log('');
-    console.log('═══════════════════════════════════════\n');
 
-    await conn.end();
+    if (result.affectedRows === 0) {
+      console.error(`Admin account not found for email: ${DEFAULT_ADMIN_EMAIL}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const [[adminRow]] = await conn.query('SELECT id FROM users WHERE email = ? LIMIT 1', [DEFAULT_ADMIN_EMAIL]);
+    if (adminRow?.id) {
+      await conn.query('UPDATE user_sessions SET is_active = FALSE, revoked_at = NOW() WHERE user_id = ? AND is_active = TRUE', [adminRow.id]).catch(() => {});
+      await conn.query("UPDATE refresh_tokens SET revoked_at = NOW(), revoked_reason = 'admin_password_reset' WHERE user_id = ? AND revoked_at IS NULL", [adminRow.id]).catch(() => {});
+    }
+
+    console.log('Password reset successfully and existing sessions revoked.');
+    console.log(`Email: ${DEFAULT_ADMIN_EMAIL}`);
   } catch (error) {
-    console.error('❌ Error:', error.message);
+    console.error('Error:', error.message);
+    process.exitCode = 1;
+  } finally {
+    if (conn) {
+      await conn.end();
+    }
   }
 }
 

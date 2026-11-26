@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { AlertCircle, RefreshCw, Star, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AlertCircle, CheckCircle2, Clock, RefreshCw, Star, Trash2, XCircle } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
 import { adminAPI } from "@/services/api";
 import { useSWRCache, invalidateSWRKey } from "@/hooks/useSWRCache";
@@ -30,6 +30,7 @@ const CACHE_KEY = "admin:reviews";
 
 export function AdminReviews() {
   const [savingIds, setSavingIds] = useState(new Set());
+  const [statusFilter, setStatusFilter] = useState("all");
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
   const [mutationError, setMutationError] = useState("");
 
@@ -42,7 +43,25 @@ export function AdminReviews() {
     refresh,
   } = useSWRCache(CACHE_KEY, () => adminAPI.getReviews({}));
 
-  const reviews = Array.isArray(data) ? data : [];
+  const reviews = useMemo(() => (Array.isArray(data) ? data : []), [data]);
+  const pendingCount = useMemo(
+    () => reviews.filter((item) => !item.is_approved).length,
+    [reviews],
+  );
+  const approvedCount = useMemo(
+    () => reviews.filter((item) => Boolean(item.is_approved)).length,
+    [reviews],
+  );
+  const filteredReviews = useMemo(() => {
+    if (statusFilter === "pending") {
+      return reviews.filter((item) => !item.is_approved);
+    }
+    if (statusFilter === "approved") {
+      return reviews.filter((item) => Boolean(item.is_approved));
+    }
+    return reviews;
+  }, [reviews, statusFilter]);
+
   const fetchError = swrError
     ? swrError?.response?.data?.error || swrError?.message || "Failed to load product reviews"
     : "";
@@ -52,6 +71,32 @@ export function AdminReviews() {
   const loadReviews = async () => {
     invalidateSWRKey(CACHE_KEY);
     await refresh();
+  };
+
+  const toggleReviewApproval = async (review) => {
+    const nextApproved = !review.is_approved;
+    try {
+      setError("");
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        next.add(review.id);
+        return next;
+      });
+
+      await adminAPI.updateReviewApproval(review.id, nextApproved);
+      await loadReviews();
+    } catch (requestError) {
+      setError(
+        requestError?.response?.data?.error ||
+          `Failed to ${nextApproved ? "approve" : "unapprove"} review`,
+      );
+    } finally {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(review.id);
+        return next;
+      });
+    }
   };
 
   const deleteReview = async (reviewId) => {
@@ -106,23 +151,57 @@ export function AdminReviews() {
           </div>
         ) : null}
 
-        {/* Stats Card */}
-        <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Reviews</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{reviews.length}</p>
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Reviews</p>
+            <p className="mt-2 text-3xl font-bold text-slate-900">{reviews.length}</p>
+          </div>
+          <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">Pending Approval</p>
+            <p className="mt-2 text-3xl font-bold text-amber-700">{pendingCount}</p>
+          </div>
+          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Approved</p>
+            <p className="mt-2 text-3xl font-bold text-emerald-700">{approvedCount}</p>
+          </div>
         </div>
 
         {/* Reviews List */}
         <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6">
-          <div className="mb-4">
-            <p className="text-lg font-bold text-slate-900">All Product Reviews</p>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-lg font-bold text-slate-900">Product Reviews</p>
+            <div className="inline-flex rounded-xl border border-emerald-100 bg-slate-50 p-1">
+              {[
+                { key: "all", label: `All (${reviews.length})` },
+                { key: "pending", label: `Pending (${pendingCount})` },
+                { key: "approved", label: `Approved (${approvedCount})` },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => {
+                    setStatusFilter(tab.key);
+                    setShowAllMobileRows(false);
+                  }}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    statusFilter === tab.key
+                      ? "bg-emerald-700 text-white shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="space-y-3">
-            {reviews.length > 0 ? (
+            {filteredReviews.length > 0 ? (
               <>
-                {reviews.map((item, index) => {
+                {filteredReviews.map((item, index) => {
                   const isSaving = savingIds.has(item.id);
+                  const isApproved = Boolean(item.is_approved);
 
                   return (
                     <article
@@ -131,9 +210,30 @@ export function AdminReviews() {
                     >
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="flex-1">
-                          <p className="text-base font-semibold text-slate-900">
-                            {item.product_name || "Unknown Product"}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-base font-semibold text-slate-900">
+                              {item.product_name || "Unknown Product"}
+                            </p>
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                                isApproved
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : "bg-amber-100 text-amber-800"
+                              }`}
+                            >
+                              {isApproved ? (
+                                <>
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Approved
+                                </>
+                              ) : (
+                                <>
+                                  <Clock className="h-3 w-3" />
+                                  Pending
+                                </>
+                              )}
+                            </span>
+                          </div>
                           <p className="text-sm text-slate-500">
                             by {item.customer_name || "Anonymous"} ({item.customer_email || "no-email"})
                           </p>
@@ -141,15 +241,39 @@ export function AdminReviews() {
                         </div>
                         <div className="flex flex-col items-end gap-2">
                           <span className="text-xs text-slate-500">{formatDate(item.created_at)}</span>
-                          <button
-                            type="button"
-                            disabled={isSaving}
-                            onClick={() => void deleteReview(item.id)}
-                            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            Delete
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={isSaving}
+                              onClick={() => void toggleReviewApproval(item)}
+                              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 ${
+                                isApproved
+                                  ? "bg-amber-600 hover:bg-amber-700"
+                                  : "bg-emerald-600 hover:bg-emerald-700"
+                              }`}
+                            >
+                              {isApproved ? (
+                                <>
+                                  <XCircle className="h-4 w-4" />
+                                  Unapprove
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="h-4 w-4" />
+                                  Approve
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isSaving}
+                              onClick={() => void deleteReview(item.id)}
+                              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       </div>
 
@@ -162,7 +286,7 @@ export function AdminReviews() {
                   );
                 })}
 
-                {reviews.length > 5 ? (
+                {filteredReviews.length > 5 ? (
                   <button
                     type="button"
                     onClick={() => setShowAllMobileRows((prev) => !prev)}
@@ -170,12 +294,16 @@ export function AdminReviews() {
                   >
                     {showAllMobileRows
                       ? "Show fewer reviews"
-                      : `Show all ${reviews.length} reviews`}
+                      : `Show all ${filteredReviews.length} reviews`}
                   </button>
                 ) : null}
               </>
             ) : (
-              <p className="py-8 text-center text-sm text-slate-500">No reviews found.</p>
+              <p className="py-8 text-center text-sm text-slate-500">
+                {statusFilter === "all"
+                  ? "No reviews found."
+                  : `No ${statusFilter} reviews found.`}
+              </p>
             )}
           </div>
         </div>

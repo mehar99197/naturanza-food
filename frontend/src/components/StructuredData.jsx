@@ -1,7 +1,8 @@
 import { Helmet } from 'react-helmet-async';
 import { useSettings } from '@/context/SettingsContext';
-import { BUSINESS_INFO } from '@/config/legal';
+import { BUSINESS_INFO, SHIPPING_POLICY, RETURNS_POLICY } from '@/config/legal';
 import { convertFromPkr, hasExchangeRate } from '@/lib/exchangeRates';
+import { getConfiguredSocialUrls } from '@/lib/socialLinks';
 import { SITE_URL } from '@/config/site';
 
 const normalizePhone = (value) => String(value || '').replace(/[^\d+]/g, '');
@@ -13,12 +14,16 @@ export function OrganizationStructuredData() {
   const supportPhone = normalizePhone(supportPhoneRaw);
   const currency = String(settings.currency || 'PKR').toUpperCase();
   const displayCurrency = hasExchangeRate(currency) ? currency : 'PKR';
-  const whatsappNumber = supportPhone.replace(/^\+/, '') || '923409502646';
+  const sameAs = getConfiguredSocialUrls(settings, {
+    includeWhatsapp: true,
+    fallbackWhatsapp: supportPhone || '923409502646',
+  });
   const data = {
     "@context": "https://schema.org",
     "@type": "Organization",
-    "name": "Naturanza Food",
-    "description": "Pakistan's trusted online store for premium organic honey, herbal teas, natural supplements, and wellness products. 100% natural and sustainably sourced.",
+    "name": BUSINESS_INFO.brandName,
+    "legalName": BUSINESS_INFO.legalName,
+    "description": "Pakistan's trusted online store for pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural and sustainably sourced.",
     "url": SITE_URL,
     "logo": `${SITE_URL}/images/logo.png`,
     "image": `${SITE_URL}/images/logo.png`,
@@ -26,8 +31,10 @@ export function OrganizationStructuredData() {
     "email": supportEmail,
     "address": {
       "@type": "PostalAddress",
-      "addressCountry": "PK",
-      "addressRegion": "Pakistan"
+      "streetAddress": BUSINESS_INFO.addressComponents.streetAddress,
+      "addressLocality": BUSINESS_INFO.addressComponents.addressLocality,
+      "addressRegion": BUSINESS_INFO.addressComponents.addressRegion,
+      "addressCountry": BUSINESS_INFO.addressComponents.addressCountry
     },
     "contactPoint": {
       "@type": "ContactPoint",
@@ -42,19 +49,14 @@ export function OrganizationStructuredData() {
         "closes": "23:59"
       }
     },
-    "sameAs": [
-      "https://www.facebook.com/naturanzafood",
-      "https://www.instagram.com/naturanzafood",
-      "https://www.twitter.com/naturanzafood",
-      `https://wa.me/${whatsappNumber}`
-    ],
+    "sameAs": sameAs,
     "areaServed": {
       "@type": "Country",
       "name": "Pakistan"
     },
     "priceRange": displayCurrency,
     "currenciesAccepted": displayCurrency,
-    "paymentAccepted": "Cash on Delivery, Credit Card, Bank Transfer"
+    "paymentAccepted": "SafePay (Visa, Mastercard, Raast, Mobile Wallets), Cash on Delivery"
   };
 
   return (
@@ -74,7 +76,8 @@ export function LocalBusinessStructuredData() {
   const data = {
     "@context": "https://schema.org",
     "@type": "LocalBusiness",
-    "name": "Naturanza Food",
+    "name": BUSINESS_INFO.brandName,
+    "legalName": BUSINESS_INFO.legalName,
     "description": "Online organic food store delivering premium natural products across Pakistan",
     "url": SITE_URL,
     "image": `${SITE_URL}/images/logo.png`,
@@ -82,11 +85,15 @@ export function LocalBusinessStructuredData() {
     "email": supportEmail,
     "address": {
       "@type": "PostalAddress",
-      "addressCountry": "PK"
+      "streetAddress": BUSINESS_INFO.addressComponents.streetAddress,
+      "addressLocality": BUSINESS_INFO.addressComponents.addressLocality,
+      "addressRegion": BUSINESS_INFO.addressComponents.addressRegion,
+      "addressCountry": BUSINESS_INFO.addressComponents.addressCountry
     },
     "geo": {
-      "@type": "Geo",
-      "addressCountry": "Pakistan"
+      "@type": "GeoCoordinates",
+      "latitude": Number.isFinite(Number(settings.mapLatitude)) ? Number(settings.mapLatitude) : 30.9716931,
+      "longitude": Number.isFinite(Number(settings.mapLongitude)) ? Number(settings.mapLongitude) : 73.8896874
     },
     "openingHoursSpecification": {
       "@type": "OpeningHoursSpecification",
@@ -94,10 +101,7 @@ export function LocalBusinessStructuredData() {
       "opens": "00:00",
       "closes": "23:59"
     },
-    "sameAs": [
-      "https://www.facebook.com/naturanzafood",
-      "https://www.instagram.com/naturanzafood"
-    ]
+    "sameAs": getConfiguredSocialUrls(settings)
   };
 
   return (
@@ -114,7 +118,7 @@ export function BlogStructuredData({ posts }) {
     "@context": "https://schema.org",
     "@type": "Blog",
     "name": "Naturanza Food Blog",
-    "description": "Expert articles on organic honey, herbal teas, natural supplements, and health tips from Pakistan's trusted organic store.",
+    "description": "Expert articles on organic honey, ispaghol husk, organic spices, and natural wellness tips from Pakistan's trusted organic store.",
     "url": `${SITE_URL}/blog`,
     "blogPost": posts.map(post => ({
       "@type": "BlogPosting",
@@ -126,7 +130,11 @@ export function BlogStructuredData({ posts }) {
         "name": "Naturanza Food"
       },
       "datePublished": post.date,
-      "image": post.image ? `${SITE_URL}${post.image}` : undefined,
+      "image": post.image
+        ? (/^https?:\/\//i.test(post.image)
+            ? post.image
+            : `${SITE_URL}${post.image.startsWith('/') ? '' : '/'}${post.image}`)
+        : undefined,
       "articleSection": post.category
     }))
   };
@@ -168,7 +176,7 @@ export function WebsiteStructuredData() {
     "@context": "https://schema.org",
     "@type": "WebSite",
     "name": "Naturanza Food",
-    "description": "Premium Organic & Natural Products in Pakistan - Shop online for organic honey, herbal teas, supplements and more",
+    "description": "Premium Organic & Natural Products in Pakistan - Shop online for organic honey, ispaghol husk, organic spices and more",
     "url": SITE_URL,
     "inLanguage": "en-PK",
     "publisher": {
@@ -227,12 +235,20 @@ export function ShippingPolicyStructuredData() {
   const currency = String(settings.currency || 'PKR').toUpperCase();
   const hasRate = hasExchangeRate(currency);
   const displayCurrency = hasRate ? currency : 'PKR';
-  const shippingFlat = Number.isFinite(Number(settings.shippingFlat))
-    ? Number(settings.shippingFlat)
-    : 250;
-  const shippingFree = Number.isFinite(Number(settings.shippingFree))
-    ? Number(settings.shippingFree)
-    : 2000;
+  const hasShippingFlat =
+    settings.shippingFlat !== '' &&
+    settings.shippingFlat !== null &&
+    settings.shippingFlat !== undefined;
+  const parsedShippingFlat = Number(settings.shippingFlat);
+  const shippingFlat =
+    hasShippingFlat && Number.isFinite(parsedShippingFlat) && parsedShippingFlat >= 0
+      ? parsedShippingFlat
+      : SHIPPING_POLICY.defaultShippingFlatAmount;
+  const parsedShippingFree = Number(settings.shippingFree);
+  const shippingFree =
+    Number.isFinite(parsedShippingFree) && parsedShippingFree > 0
+      ? parsedShippingFree
+      : SHIPPING_POLICY.freeShippingThresholdAmount;
   const toDisplayCurrencyValue = (value) => {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) {
@@ -275,20 +291,17 @@ export function ShippingPolicyStructuredData() {
           "unitCode": "DAY"
         },
         "transitTime": {
-          "@type": "ShippingDeliveryTimeSpecification",
-          "handlingTime": {
-            "@type": "QuantitativeValue",
-            "minValue": 2,
-            "maxValue": 5,
-            "unitCode": "BUSINESS_DAY"
-          }
+          "@type": "QuantitativeValue",
+          "minValue": 3,
+          "maxValue": 5,
+          "unitCode": "DAY"
         }
       }
     },
     "hasMerchantReturnPolicy": {
       "@type": "MerchantReturnPolicy",
       "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
-      "merchantReturnDays": 7,
+      "merchantReturnDays": RETURNS_POLICY.returnWindowDays,
       "returnMethod": "https://schema.org/ReturnByMail",
       "returnFees": "https://schema.org/FreeReturn"
     }
@@ -310,10 +323,10 @@ export function ReturnPolicyStructuredData() {
     "name": "Returns and Refunds Policy - Naturanza Food",
     "url": `${SITE_URL}/returns`,
     "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
-    "merchantReturnDays": 7,
+    "merchantReturnDays": RETURNS_POLICY.returnWindowDays,
     "returnMethod": "https://schema.org/ReturnByMail",
     "returnFees": "https://schema.org/FreeReturn",
-    "description": "Items must be unused, sealed, and in original packaging. Refunds processed within 5-10 business days after quality check.",
+    "description": `Returns accepted within ${RETURNS_POLICY.returnWindow} of delivery for damaged, defective, or incorrect items in original sealed packaging. Approved refunds processed within ${RETURNS_POLICY.refundWindow}.`,
     "applicableCountry": "PK"
   };
 
@@ -381,6 +394,8 @@ export function ReviewStructuredData({ review, product }) {
 export function CollectionPageStructuredData({ category, productCount }) {
   const categoryNames = {
     honey: 'Organic Honey',
+    ispaghol: 'Ispaghol Husk',
+    spices: 'Organic Spices',
     'herbal-teas': 'Herbal Teas',
     supplements: 'Natural Supplements',
     oils: 'Natural Oils',
@@ -418,6 +433,11 @@ export function CollectionPageStructuredData({ category, productCount }) {
 }
 
 export function ArticleStructuredData({ title, description, url, author, datePublished, image }) {
+  const resolvedImage = image
+    ? (/^https?:\/\//i.test(image)
+        ? image
+        : `${SITE_URL}${image.startsWith('/') ? '' : '/'}${image}`)
+    : `${SITE_URL}/images/logo.png`;
   const data = {
     "@context": "https://schema.org",
     "@type": "Article",
@@ -425,8 +445,8 @@ export function ArticleStructuredData({ title, description, url, author, datePub
     "description": description,
     "url": url || SITE_URL,
     "author": {
-      "@type": "Organization",
-      "name": "Naturanza Food"
+      "@type": author ? "Person" : "Organization",
+      "name": author || "Naturanza Food"
     },
     "publisher": {
       "@type": "Organization",
@@ -438,7 +458,7 @@ export function ArticleStructuredData({ title, description, url, author, datePub
     },
     "datePublished": datePublished || new Date().toISOString(),
     "dateModified": new Date().toISOString(),
-    "image": image || `${SITE_URL}/images/logo.png`,
+    "image": resolvedImage,
     "mainEntityOfPage": {
       "@type": "WebPage",
       "@id": url || SITE_URL

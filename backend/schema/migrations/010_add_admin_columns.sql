@@ -13,10 +13,10 @@ ADD COLUMN IF NOT EXISTS admin_permissions JSON DEFAULT NULL AFTER admin_role;
 ALTER TABLE users
 MODIFY COLUMN admin_role ENUM('super_admin', 'staff_admin', 'admin', 'moderator') DEFAULT NULL;
 
--- Update existing admin users to have super_admin role
+-- Update legacy admin users that do not yet have an explicit admin_role
 UPDATE users 
 SET admin_role = 'super_admin' 
-WHERE role = 'admin';
+WHERE role = 'admin' AND admin_role IS NULL;
 
 -- Verify the changes
 -- SELECT id, name, email, role, admin_role, admin_permissions FROM users;

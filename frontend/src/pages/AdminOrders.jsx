@@ -71,6 +71,7 @@ export function AdminOrders() {
     deleteOrder,
     getOrderStats,
     totalOrders,
+    statusCounts,
     orderQuery,
     setOrderFilters,
     adminPageSize,
@@ -80,7 +81,7 @@ export function AdminOrders() {
   // Local mirror so typing stays responsive; the server request is debounced
   // below. statusFilter/searchQuery now select rows on the SERVER — filtering in
   // the browser only worked while the browser held every order ever placed.
-  const [searchQuery, setSearchQuery] = useState(orderQuery.search);
+  const [searchQuery, setSearchQuery] = useState("");
   const statusFilter = orderQuery.status;
   const setStatusFilter = (value) => setOrderFilters({ status: value });
   const [selectedOrderId, setSelectedOrderId] = useState(null);
@@ -122,7 +123,13 @@ export function AdminOrders() {
   }, [searchQuery, orderQuery.search, setOrderFilters]);
 
   const selectedOrder = orderRows.find((order) => order.id === selectedOrderId) || null;
-  const orderStats = getOrderStats();
+  const pageOrderStats = getOrderStats();
+  const orderStats = {
+    total: Number(statusCounts?.total ?? totalOrders ?? pageOrderStats.total),
+    pending: Number(statusCounts?.pending ?? pageOrderStats.pending),
+    shipped: Number(statusCounts?.shipped ?? pageOrderStats.shipped),
+    delivered: Number(statusCounts?.delivered ?? pageOrderStats.delivered),
+  };
 
   const quickSummaryItems = [
     { key: "total", label: "Orders", value: orderStats.total },
@@ -162,7 +169,12 @@ export function AdminOrders() {
       setError("");
       await fetchOrders();
     } catch (requestError) {
-      setError(requestError?.response?.data?.error || "Failed to refresh orders");
+      setError(
+        requestError?.response?.data?.error ||
+          requestError?.customMessage ||
+          requestError?.message ||
+          "Failed to refresh orders",
+      );
     }
   };
 
@@ -186,7 +198,12 @@ export function AdminOrders() {
       await fetchOrders();
       setStatusForm((prev) => ({ ...prev, note: "" }));
     } catch (requestError) {
-      setError(requestError?.response?.data?.error || "Failed to update order status");
+      setError(
+        requestError?.response?.data?.error ||
+          requestError?.customMessage ||
+          requestError?.message ||
+          "Failed to update order status",
+      );
     } finally {
       setSaving(false);
     }
@@ -206,7 +223,12 @@ export function AdminOrders() {
       await deleteOrder(selectedOrder.id);
       await fetchOrders();
     } catch (requestError) {
-      setError(requestError?.response?.data?.error || "Failed to delete order");
+      setError(
+        requestError?.response?.data?.error ||
+          requestError?.customMessage ||
+          requestError?.message ||
+          "Failed to delete order",
+      );
     }
   };
 

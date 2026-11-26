@@ -65,30 +65,53 @@ const rotateRefreshTokenRecord = async (
     userAgent = null,
   },
 ) => {
-  const [result] = await db.query(
-    `UPDATE refresh_tokens
-     SET revoked_at = NOW(),
-         revoked_reason = 'rotated',
-         replaced_by_jti = ?
-     WHERE jti = ? AND revoked_at IS NULL`,
-    [newRefreshTokenJti, oldRefreshTokenJti],
-  );
+  const isPool = typeof db.getConnection === "function" && typeof db.beginTransaction !== "function";
+  const conn = isPool ? await db.getConnection() : db;
+  const managesTxn = isPool && typeof conn.beginTransaction === "function";
 
-  if (result.affectedRows !== 1) {
-    const error = new Error("Refresh token was already rotated");
-    error.code = "REFRESH_TOKEN_ALREADY_ROTATED";
+  try {
+    if (managesTxn) {
+      await conn.beginTransaction();
+    }
+
+    const [result] = await conn.query(
+      `UPDATE refresh_tokens
+       SET revoked_at = NOW(),
+           revoked_reason = 'rotated',
+           replaced_by_jti = ?
+       WHERE jti = ? AND revoked_at IS NULL`,
+      [newRefreshTokenJti, oldRefreshTokenJti],
+    );
+
+    if (result.affectedRows !== 1) {
+      const error = new Error("Refresh token was already rotated");
+      error.code = "REFRESH_TOKEN_ALREADY_ROTATED";
+      throw error;
+    }
+
+    await createRefreshTokenRecord(conn, {
+      userId,
+      sessionId,
+      refreshToken: newRefreshToken,
+      refreshTokenJti: newRefreshTokenJti,
+      expiresAt,
+      ipAddress,
+      userAgent,
+    });
+
+    if (managesTxn) {
+      await conn.commit();
+    }
+  } catch (error) {
+    if (managesTxn) {
+      try { await conn.rollback(); } catch {}
+    }
     throw error;
+  } finally {
+    if (isPool && typeof conn.release === "function") {
+      conn.release();
+    }
   }
-
-  await createRefreshTokenRecord(db, {
-    userId,
-    sessionId,
-    refreshToken: newRefreshToken,
-    refreshTokenJti: newRefreshTokenJti,
-    expiresAt,
-    ipAddress,
-    userAgent,
-  });
 };
 
 const revokeRefreshTokenByJti = async (db, refreshTokenJti, reason = "revoked") => {
@@ -195,7 +218,11 @@ const startBlacklistCleanup = (db, intervalMs = 60 * 60 * 1000) => {
     );
   };
   cleanup();
-  return setInterval(cleanup, intervalMs);
+  const handle = setInterval(cleanup, intervalMs);
+  if (typeof handle.unref === "function") {
+    handle.unref();
+  }
+  return handle;
 };
 
 module.exports = {

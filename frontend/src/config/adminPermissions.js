@@ -73,6 +73,7 @@ export const FEATURE_PERMISSIONS = {
   blog:              "manage_blog",
   team:              "manage_team",
   admins:            null,
+  about:             null,
   settings:          null,
   operations:        null,
 };

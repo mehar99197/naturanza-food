@@ -46,7 +46,7 @@ export const AdminDataProvider = ({ children }) => {
 
   const fetchCategoriesOnly = useCallback(async () => {
     try {
-      const categoriesData = await categoryAPI.getAll();
+      const categoriesData = await categoryAPI.getAll({ include_inactive: true }, { bypassCache: true });
       setCategories(extractList(categoriesData));
     } catch (err) {
       setError(err.message || "Failed to load categories");
@@ -83,10 +83,12 @@ export const AdminDataProvider = ({ children }) => {
         : [];
       const canLoad = (permission) => isSuperAdmin || permissions.includes(permission);
       const results = await Promise.allSettled([
-        canLoad("manage_products") ? productAPI.getAll() : Promise.resolve([]),
+        canLoad("manage_products") ? productAPI.getAll(true) : Promise.resolve([]),
         canLoad("manage_customers") ? adminAPI.getCustomers() : Promise.resolve([]),
         canLoad("manage_coupons") ? adminAPI.getCoupons() : Promise.resolve([]),
-        canLoad("manage_categories") ? categoryAPI.getAll() : Promise.resolve([]),
+        canLoad("manage_categories") || canLoad("manage_products")
+          ? categoryAPI.getAll({ include_inactive: true })
+          : Promise.resolve([]),
       ]);
       const valueAt = (index) =>
         results[index]?.status === "fulfilled" ? results[index].value : [];
@@ -139,20 +141,20 @@ export const AdminDataProvider = ({ children }) => {
   const addProduct = async (productData) => {
     const response = await productAPI.create(productData);
     const newProduct = response.product || response.data || response;
-    setProducts([...products, newProduct]);
+    setProducts((prev) => [...prev, newProduct]);
     return newProduct;
   };
 
   const updateProduct = async (productId, updates) => {
     await productAPI.update(productId, updates);
-    setProducts(
-      products.map((p) => (p.id === productId ? { ...p, ...updates } : p)),
+    setProducts((prev) =>
+      prev.map((p) => (p.id === productId ? { ...p, ...updates } : p)),
     );
   };
 
   const deleteProduct = async (productId) => {
     await productAPI.delete(productId);
-    setProducts(products.filter((p) => p.id !== productId));
+    setProducts((prev) => prev.filter((p) => p.id !== productId));
   };
 
   // ===== CUSTOMERS CRUD =====
@@ -237,26 +239,26 @@ export const AdminDataProvider = ({ children }) => {
   const addCoupon = async (couponData) => {
     const response = await adminAPI.createCoupon(couponData);
     const newCoupon = response.coupon || response.data || response;
-    setCoupons([...coupons, newCoupon]);
+    setCoupons((prev) => [...prev, newCoupon]);
     return newCoupon;
   };
 
   const updateCoupon = async (couponId, couponData) => {
     await adminAPI.updateCoupon(couponId, couponData);
-    setCoupons(
-      coupons.map((c) => (c.id === couponId ? { ...c, ...couponData } : c)),
+    setCoupons((prev) =>
+      prev.map((c) => (c.id === couponId ? { ...c, ...couponData } : c)),
     );
   };
 
   const deleteCoupon = async (couponId) => {
     await adminAPI.deleteCoupon(couponId);
-    setCoupons(coupons.filter((c) => c.id !== couponId));
+    setCoupons((prev) => prev.filter((c) => c.id !== couponId));
   };
 
   const toggleCouponStatus = async (couponId) => {
     await adminAPI.toggleCouponStatus(couponId);
-    setCoupons(
-      coupons.map((coupon) =>
+    setCoupons((prev) =>
+      prev.map((coupon) =>
         coupon.id === couponId
           ? { ...coupon, is_active: !coupon.is_active }
           : coupon,

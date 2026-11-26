@@ -84,15 +84,19 @@ export function ProductReviews({
  };
 
  try {
+ let submitted = true;
  if (typeof onSubmitReview === 'function') {
- await onSubmitReview(newReview);
+ const result = await onSubmitReview(newReview);
+ submitted = result !== false;
  } else {
  setLocalReviews((prev) => [newReview, ...prev]);
  }
 
+ if (submitted) {
  setRating(0);
  setHoverRating(0);
  setComment('');
+ }
  } finally {
  setIsSubmitting(false);
  }
@@ -218,7 +222,7 @@ export function ProductReviews({
  </div>
 
  {displayedReviews.length > 3 && (
- <div className="mt-4 md:hidden">
+ <div className="mt-4">
  <button
  type="button"
  onClick={() => setShowAllReviews((prev) => !prev)}

@@ -6,9 +6,11 @@ import { formatPrice } from '@/lib/utils';
 
 export function Features() {
  const { settings } = useSettings();
- const shippingFree = Number.isFinite(Number(settings.shippingFree))
-  ? Number(settings.shippingFree)
-  : 2000;
+ const parsedShippingFree = Number(settings.shippingFree);
+ const shippingFree =
+  Number.isFinite(parsedShippingFree) && parsedShippingFree > 0
+   ? parsedShippingFree
+   : 5000;
  const features = [
  {
  icon: Leaf,
@@ -23,7 +25,7 @@ export function Features() {
  {
  icon: Truck,
  title: 'Fast Delivery',
- description: `Free shipping on orders over ${formatPrice(shippingFree, settings.currency)} with quick and reliable delivery to your doorstep across Pakistan.`,
+ description: `3–5 working days delivery across Pakistan, with free shipping on prepaid online orders over ${formatPrice(shippingFree, settings.currency)}.`,
  },
  {
  icon: Award,

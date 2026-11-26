@@ -6,22 +6,22 @@
 
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://accounts.google.com https://apis.google.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https://www.google-analytics.com https://accounts.google.com https://apis.google.com; media-src 'self'; frame-src 'self' https://accounts.google.com https://www.openstreetmap.org; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://accounts.google.com https://apis.google.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://accounts.google.com https://apis.google.com; media-src 'self'; frame-src 'self' https://accounts.google.com https://www.openstreetmap.org; worker-src 'self' blob:; manifest-src 'self'"
     />
 
     <!-- Primary Meta Tags -->
     <title>Naturanza Food - Premium Organic & Natural Products | Buy Online in Pakistan</title>
-    <meta name="title" content="Naturanza Food - Premium Organic & Natural Products | Buy Online in Pakistan" />
-    <meta name="description" content="Shop premium organic honey, herbal teas, natural supplements, and wellness products. 100% natural, sustainably sourced. Free shipping on orders over Rs. 5,000 across Pakistan." />
-    <meta name="keywords" content="organic food Pakistan, natural products, organic honey, herbal tea, natural supplements, wellness products, buy organic online, pure honey, raw honey, green tea, detox tea, cold pressed oil, organic seeds, natural food store Karachi Lahore Islamabad" />
-    <meta name="author" content="Naturanza Food" />
-    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
-    <meta name="googlebot" content="index, follow, max-image-preview:large" />
-    <meta name="language" content="English" />
-    <meta name="revisit-after" content="7 days" />
-    <meta name="geo.region" content="PK" />
-    <meta name="geo.placename" content="Pakistan" />
-    <meta name="theme-color" content="#22c55e" />
+    <meta name="title" content="Naturanza Food - Premium Organic & Natural Products | Buy Online in Pakistan" data-rh="true" />
+    <meta name="description" content="Shop pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural, sustainably sourced. Free shipping on prepaid online orders over Rs. 5,000 across Pakistan." data-rh="true" />
+    <meta name="keywords" content="organic food Pakistan, natural products, organic honey, ispaghol husk, organic spices, pure haldi, red chili powder, lal mirch, almond honey, sandal honey, wellness products, buy organic online Pakistan, Karachi Lahore Islamabad" data-rh="true" />
+    <meta name="author" content="Naturanza Food" data-rh="true" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" data-rh="true" />
+    <meta name="googlebot" content="index, follow, max-image-preview:large" data-rh="true" />
+    <meta name="language" content="English" data-rh="true" />
+    <meta name="revisit-after" content="7 days" data-rh="true" />
+    <meta name="geo.region" content="PK-PB" data-rh="true" />
+    <meta name="geo.placename" content="Nizam Pura, Chunian, District Kasur, Punjab, Pakistan" data-rh="true" />
+    <meta name="theme-color" content="#22c55e" data-rh="true" />
 
     <!-- Favicon (square icons only — the wide logo.png was being stretched by Google/browsers) -->
     <link rel="icon" href="/favicon.ico" sizes="any" />
@@ -30,18 +30,18 @@
     <link rel="apple-touch-icon" sizes="192x192" href="/images/icon-192.png" />
     <link rel="manifest" href="/manifest.json" />
 
-    <!-- Canonical (replaced per-route by the server-side meta renderer) -->
-    <link rel="canonical" href="https://naturanzafood.com/" />
+    <!-- Canonical (replaced per-route by the server-side meta renderer and react-helmet-async) -->
+    <link rel="canonical" href="https://naturanzafood.com/" data-rh="true" />
 
     <!-- Hreflang for Internationalization -->
-    <link rel="alternate" hreflang="en-pk" href="https://naturanzafood.com/" />
-    <link rel="alternate" hreflang="x-default" href="https://naturanzafood.com/" />
+    <link rel="alternate" hreflang="en-pk" href="https://naturanzafood.com/" data-rh="true" />
+    <link rel="alternate" hreflang="x-default" href="https://naturanzafood.com/" data-rh="true" />
 
     <!-- Open Graph / Facebook -->
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://naturanzafood.com/" />
-    <meta property="og:title" content="Naturanza Food - Premium Organic & Natural Products in Pakistan" />
-    <meta property="og:description" content="Shop premium organic honey, herbal teas, natural supplements, and wellness products. 100% natural, sustainably sourced. Free shipping on Rs. 5,000+." />
+    <meta property="og:type" content="website" data-rh="true" />
+    <meta property="og:url" content="https://naturanzafood.com/" data-rh="true" />
+    <meta property="og:title" content="Naturanza Food - Premium Organic & Natural Products in Pakistan" data-rh="true" />
+    <meta property="og:description" content="Shop pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural, sustainably sourced. Free shipping on prepaid online orders over Rs. 5,000 across Pakistan." data-rh="true" />
     <!--
       No og:image:width/height here. They are static, but og:image is swapped
       per-route by the server meta renderer, so the declared 1200x630 was a lie
@@ -49,21 +49,19 @@
       real dimensions off the file when the hint is absent; a wrong hint they
       trust and crop against.
     -->
-    <meta property="og:image" content="https://naturanzafood.com/images/og-image.jpg" />
-    <meta property="og:image:alt" content="Naturanza Food - Premium Organic & Natural Products" />
-    <meta property="og:site_name" content="Naturanza Food" />
-    <meta property="og:locale" content="en_PK" />
-    <meta property="og:locale:alternate" content="ur_PK" />
+    <meta property="og:image" content="https://naturanzafood.com/images/og-image.jpg" data-rh="true" />
+    <meta property="og:image:alt" content="Naturanza Food - Premium Organic & Natural Products" data-rh="true" />
+    <meta property="og:site_name" content="Naturanza Food" data-rh="true" />
+    <meta property="og:locale" content="en_PK" data-rh="true" />
+    <meta property="og:locale:alternate" content="ur_PK" data-rh="true" />
 
     <!-- Twitter -->
-    <meta property="twitter:card" content="summary_large_image" />
-    <meta property="twitter:url" content="https://naturanzafood.com/" />
-    <meta property="twitter:title" content="Naturanza Food - Premium Organic & Natural Products" />
-    <meta property="twitter:description" content="Shop premium organic honey, herbal teas, natural supplements, and wellness products. 100% natural, sustainably sourced." />
-    <meta property="twitter:image" content="https://naturanzafood.com/images/og-image.jpg" />
-    <meta property="twitter:image:alt" content="Naturanza Food - Premium Organic & Natural Products" />
-    <meta property="twitter:site" content="@naturanzafood" />
-    <meta property="twitter:creator" content="@naturanzafood" />
+    <meta property="twitter:card" content="summary_large_image" data-rh="true" />
+    <meta property="twitter:url" content="https://naturanzafood.com/" data-rh="true" />
+    <meta property="twitter:title" content="Naturanza Food - Premium Organic & Natural Products" data-rh="true" />
+    <meta property="twitter:description" content="Shop pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural, sustainably sourced." data-rh="true" />
+    <meta property="twitter:image" content="https://naturanzafood.com/images/og-image.jpg" data-rh="true" />
+    <meta property="twitter:image:alt" content="Naturanza Food - Premium Organic & Natural Products" data-rh="true" />
 
     <!-- DNS Prefetch for external resources -->
     <link rel="dns-prefetch" href="https://www.google-analytics.com" />
@@ -84,15 +82,23 @@
       "@context": "https://schema.org",
       "@type": "Organization",
       "name": "Naturanza Food",
+      "legalName": "Naturanza Foods",
       "url": "https://naturanzafood.com",
       "logo": "https://naturanzafood.com/images/logo.png",
-      "description": "Pakistan's trusted online store for premium organic honey, herbal teas, natural supplements, and wellness products. 100% natural and sustainably sourced.",
+      "description": "Pakistan's trusted online store for pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural and sustainably sourced.",
       "telephone": "+923409502646",
       "email": "support@naturanzafood.com",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "Nizam Pura",
+        "addressLocality": "Chunian, District Kasur",
+        "addressRegion": "Punjab",
+        "addressCountry": "PK"
+      },
       "sameAs": [
-        "https://www.facebook.com/naturanzafood",
+        "https://www.facebook.com/share/18x8ZMDq2H/",
         "https://www.instagram.com/naturanzafood",
-        "https://twitter.com/naturanzafood"
+        "https://www.tiktok.com/@naturanza.food"
       ],
       "areaServed": {
         "@type": "Country",

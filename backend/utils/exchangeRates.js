@@ -120,26 +120,24 @@ const getOpenExchangeRates = async () => {
         cachedRates = data;
         return data;
       })
-      .catch((error) => {
-        // If fetch fails, return fallback rates
-        if (error.code === "EXCHANGE_FETCH_FAILED" || error.code === "EXCHANGE_FALLBACK_FAILED") {
-          const fallbackData = {
-            base: "USD",
-            rates: {},
-            fetchedAt: Date.now(),
-            updatedAt: new Date().toISOString(),
-          };
-          Object.entries(FALLBACK_RATES).forEach(([code, rate]) => {
-            if (code !== "PKR") {
-              fallbackData.rates[code] = rate / FALLBACK_RATES.USD;
-            }
-          });
-          fallbackData.rates.PKR = 1 / FALLBACK_RATES.USD;
-          fallbackData.rates.USD = 1;
-          cachedRates = fallbackData;
-          return fallbackData;
-        }
-        throw error;
+      .catch(() => {
+        // Fall back to approximate offline rates on any upstream HTTP, DNS, or
+        // timeout failure so /api/settings/rates never returns HTTP 500.
+        const fallbackData = {
+          base: "USD",
+          rates: {},
+          fetchedAt: Date.now(),
+          updatedAt: new Date().toISOString(),
+        };
+        Object.entries(FALLBACK_RATES).forEach(([code, rate]) => {
+          if (code !== "PKR") {
+            fallbackData.rates[code] = rate / FALLBACK_RATES.USD;
+          }
+        });
+        fallbackData.rates.PKR = 1 / FALLBACK_RATES.USD;
+        fallbackData.rates.USD = 1;
+        cachedRates = fallbackData;
+        return fallbackData;
       })
       .finally(() => {
         inFlightPromise = null;

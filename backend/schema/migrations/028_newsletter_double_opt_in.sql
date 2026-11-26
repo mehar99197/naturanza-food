@@ -9,8 +9,8 @@ ALTER TABLE newsletter_subscribers
   ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP NULL DEFAULT NULL,
   ADD INDEX IF NOT EXISTS idx_newsletter_verification_token (verification_token);
 
--- Grandfather existing active/unsubscribed rows so the deploy does not reset them.
+-- Backfill verified_at for existing active/unsubscribed rows without altering
+-- their status (never re-activate unsubscribed users).
 UPDATE newsletter_subscribers
-SET status = 'active',
-    verified_at = COALESCE(verified_at, subscribed_at)
-WHERE status = 'active' OR status = 'unsubscribed';
+SET verified_at = COALESCE(verified_at, subscribed_at)
+WHERE status IN ('active', 'unsubscribed') AND verified_at IS NULL;

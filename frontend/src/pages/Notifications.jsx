@@ -142,6 +142,7 @@ export function Notifications() {
     );
     try {
       await userAPI.markNotificationRead(id);
+      window.dispatchEvent(new Event("notificationsUpdated"));
     } catch (err) {
       console.warn("[notifications] mark-read failed:", err?.message);
     }
@@ -155,6 +156,7 @@ export function Notifications() {
       setNotifications((prev) =>
         prev.map((n) => ({ ...n, is_read: true, read_at: n.read_at || new Date().toISOString() })),
       );
+      window.dispatchEvent(new Event("notificationsUpdated"));
     } catch (err) {
       setError(err?.response?.data?.error || "Failed to mark all read");
     } finally {
@@ -167,6 +169,7 @@ export function Notifications() {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
     try {
       await userAPI.deleteNotification(id);
+      window.dispatchEvent(new Event("notificationsUpdated"));
     } catch (err) {
       setNotifications(previous); // revert on failure
       setError(err?.response?.data?.error || "Failed to delete notification");
@@ -181,6 +184,7 @@ export function Notifications() {
     setNotifications([]);
     try {
       await userAPI.clearNotifications();
+      window.dispatchEvent(new Event("notificationsUpdated"));
     } catch (err) {
       setNotifications(previous);
       setError(err?.response?.data?.error || "Failed to clear notifications");

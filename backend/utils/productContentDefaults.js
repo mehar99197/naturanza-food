@@ -43,7 +43,7 @@ const PRODUCT_CONTENT_DEFAULTS = [
     matchers: {
       slugs: ["organic-coconut-oil", "coconut-oil", "coconut-oil-1"],
       names: ["organic coconut oil", "coconut oil"],
-      keywords: ["coconut", "oil"],
+      keywords: ["coconut oil", "virgin coconut"],
     },
     description:
       "Cold-pressed virgin coconut oil for cooking, skincare, and hair care with clean, versatile everyday use.",
@@ -57,6 +57,46 @@ const PRODUCT_CONTENT_DEFAULTS = [
       "Use in cooking, baking, or light sauteing.",
       "Apply a small amount to skin or hair as needed.",
       "Store in a cool, dry place with the lid tightly closed.",
+    ],
+  },
+  {
+    matchers: {
+      slugs: ["red-chili", "red-chili-lal-mirch", "red-chili-lal-marach", "lal-mirch"],
+      names: ["red chili", "lal mirch", "lal marach"],
+      keywords: ["red chili", "lal mirch", "lal marach"],
+    },
+    description:
+      "100% pure, sun-dried red chili powder freshly ground without artificial color or preservatives for rich aroma and authentic heat.",
+    ingredients: ["100% Pure Organic Red Chili (Lal Mirch)"],
+    benefits: [
+      "Adds vibrant natural color and authentic flavor to everyday dishes",
+      "Free from artificial dyes, fillers, and chemical preservatives",
+      "Hygienically cleaned and freshly ground for lasting aroma",
+    ],
+    usage: [
+      "Use to season curries, lentils, marinades, and traditional recipes.",
+      "Adjust quantity to your preferred level of spice.",
+      "Store in an airtight container in a cool, dry place.",
+    ],
+  },
+  {
+    matchers: {
+      slugs: ["turmeric", "turmeric-pure-organic-haldi", "organic-haldi", "haldi"],
+      names: ["turmeric", "haldi"],
+      keywords: ["turmeric", "haldi"],
+    },
+    description:
+      "100% pure organic turmeric (haldi) powder naturally rich in curcumin, freshly ground for authentic flavor and daily wellness.",
+    ingredients: ["100% Pure Organic Turmeric (Haldi)"],
+    benefits: [
+      "Naturally rich in curcumin and antioxidants",
+      "Free from artificial colors, starch fillers, and chemical additives",
+      "Ideal for everyday cooking, golden milk, and wellness routines",
+    ],
+    usage: [
+      "Add to curries, soups, rice dishes, and marinades for warm flavor and color.",
+      "Stir half a teaspoon into warm milk for traditional golden milk.",
+      "Store in an airtight container away from moisture and direct sunlight.",
     ],
   },
 ];

@@ -65,9 +65,34 @@ const RadarChart = ({
  })),
  };
 
+ const mergedOptions = {
+ ...defaultOptions,
+ ...options,
+ plugins: {
+ ...defaultOptions.plugins,
+ ...options?.plugins,
+ legend: {
+ ...defaultOptions.plugins.legend,
+ ...options?.plugins?.legend,
+ },
+ title: {
+ ...defaultOptions.plugins.title,
+ ...options?.plugins?.title,
+ },
+ },
+ scales: {
+ ...defaultOptions.scales,
+ ...options?.scales,
+ r: {
+ ...defaultOptions.scales.r,
+ ...options?.scales?.r,
+ },
+ },
+ };
+
  return (
  <div style={{ position: 'relative', height: `${height}px`, width: '100%' }}>
- <Radar data={chartData} options={{ ...defaultOptions, ...options }} />
+ <Radar data={chartData} options={mergedOptions} />
  </div>
  );
 };

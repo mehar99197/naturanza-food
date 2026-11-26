@@ -505,12 +505,22 @@ router.delete(
       return res.status(400).json({ error: "Invalid entry id." });
     }
 
-    const [rows] = await db
-      .promise()
-      .query("SELECT id, cidr, label FROM admin_security_ip_allowlist WHERE id = ? LIMIT 1", [id]);
+    const entries = await listAllowlistEntries();
+    const target = entries.find((entry) => Number(entry.id) === id);
 
-    if (!rows.length) {
+    if (!target) {
       return res.status(404).json({ error: "Allowlist entry not found." });
+    }
+
+    const remaining = entries.filter((entry) => Number(entry.id) !== id);
+    const currentIp = getTrustedClientIp(req) || getClientIp(req);
+    if (
+      remaining.length > 0 &&
+      !remaining.some((entry) => ipMatchesCidr(currentIp, entry.cidr))
+    ) {
+      return res.status(400).json({
+        error: `Cannot remove this entry because your current IP (${currentIp || "unknown"}) would be locked out. Add a rule covering your current IP or remove all remaining rules first.`,
+      });
     }
 
     await db
@@ -519,7 +529,7 @@ router.delete(
 
     await audit(
       req,
-      `Removed super-admin IP allowlist entry ${rows[0].cidr} (${rows[0].label})`,
+      `Removed super-admin IP allowlist entry ${target.cidr} (${target.label})`,
       "ip_allowlist",
     );
 

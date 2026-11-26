@@ -75,8 +75,11 @@ router.post(
 
     const image = normalizeText(req.body.image) || null;
     const bio = normalizeText(req.body.bio) || null;
-    const sortOrder =
-      req.body.sort_order !== undefined ? Number(req.body.sort_order) : 0;
+    const parsedSortOrder =
+      req.body.sort_order !== undefined && req.body.sort_order !== "" && req.body.sort_order !== null
+        ? Number(req.body.sort_order)
+        : 0;
+    const sortOrder = Number.isFinite(parsedSortOrder) ? Math.trunc(parsedSortOrder) : 0;
     const isActive =
       req.body.is_active !== undefined ? Boolean(req.body.is_active) : true;
 
@@ -149,8 +152,12 @@ router.put(
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "sort_order")) {
+      const parsedSortOrder = Number(req.body.sort_order);
+      if (!Number.isFinite(parsedSortOrder)) {
+        return res.status(400).json({ error: "sort_order must be a valid number" });
+      }
       updates.push("sort_order = ?");
-      values.push(Number(req.body.sort_order));
+      values.push(Math.trunc(parsedSortOrder));
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "is_active")) {

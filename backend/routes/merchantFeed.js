@@ -12,6 +12,7 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../config/db');
+const { getProductContentDefaults } = require('../utils/productContentDefaults');
 const pool = db.promise();
 
 const BASE_URL = (process.env.PUBLIC_SITE_URL || 'https://naturanzafood.com').replace(/\/+$/, '');
@@ -51,10 +52,21 @@ const isRealGtin = (barcode) => {
   return !(prefix >= rangeStart && prefix <= rangeEnd);
 };
 
+const clampDiscountPercent = (value) =>
+  Math.min(Math.max(Number(value) || 0, 0), 90);
+
+const computeEffectiveFeedPrice = (product, storeDiscountPct = 0) => {
+  const price = Number(product?.price) || 0;
+  const perProductDiscount = clampDiscountPercent(product?.discount_percentage);
+  const storeDiscount = clampDiscountPercent(storeDiscountPct);
+  const effectiveDiscount = Math.max(perProductDiscount, storeDiscount);
+  return price - (price * effectiveDiscount) / 100;
+};
+
 const fetchFeedProducts = async () => {
   const [products] = await pool.query(`
       SELECT id, name, description, image_url, price, discount_percentage,
-             stock_quantity, barcode
+             stock_quantity, reserved_stock, barcode
         FROM products
        WHERE is_active = 1
          AND deleted_at IS NULL
@@ -65,13 +77,31 @@ const fetchFeedProducts = async () => {
   return products;
 };
 
-const buildItemXml = (product) => {
+const fetchActiveStoreDiscountPct = async (dbClient = pool) => {
+  try {
+    const [rows] = await dbClient.query(
+      "SELECT store_discount_active, store_discount_percentage FROM admin_settings WHERE id = 1 LIMIT 1",
+    );
+    const row = rows[0];
+    const isActive =
+      row?.store_discount_active === true ||
+      Number(row?.store_discount_active) === 1;
+    if (!row || !isActive) return 0;
+    return clampDiscountPercent(row.store_discount_percentage);
+  } catch {
+    return 0;
+  }
+};
+
+const buildItemXml = (product, storeDiscountPct = 0) => {
   const link = `${BASE_URL}/product/${product.id}`;
-  const price = Number(product.price) || 0;
-  const discount = Math.min(Math.max(Number(product.discount_percentage) || 0, 0), 90);
-  const finalPrice = (price - (price * discount) / 100).toFixed(2);
-  const description = truncate(product.description) || `${product.name} — premium organic product from ${SITE_NAME}.`;
-  const inStock = Number(product.stock_quantity) > 0;
+  const finalPrice = computeEffectiveFeedPrice(product, storeDiscountPct).toFixed(2);
+  const fallbackDescription = getProductContentDefaults(product)?.description;
+  const description =
+    truncate(product.description) ||
+    truncate(fallbackDescription) ||
+    `${product.name} — premium organic product from ${SITE_NAME}.`;
+  const inStock = Number(product.stock_quantity || 0) - Number(product.reserved_stock || 0) > 0;
   const hasRealGtin = isRealGtin(product.barcode);
 
   let xml = `  <item>
@@ -101,8 +131,13 @@ const buildItemXml = (product) => {
 
 router.get('/merchant-feed.xml', async (req, res) => {
   try {
-    const products = await fetchFeedProducts();
-    const items = products.map(buildItemXml).join('');
+    const [products, storeDiscountPct] = await Promise.all([
+      fetchFeedProducts(),
+      fetchActiveStoreDiscountPct(),
+    ]);
+    const items = products
+      .map((product) => buildItemXml(product, storeDiscountPct))
+      .join('');
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">
@@ -113,11 +148,16 @@ router.get('/merchant-feed.xml', async (req, res) => {
 ${items}</channel>
 </rss>`;
 
-    res.set('Content-Type', 'application/xml');
+    res.set('Content-Type', 'application/xml; charset=utf-8');
     res.send(xml);
   } catch (error) {
     res.status(500).send('Error generating merchant feed');
   }
 });
+
+router.clampDiscountPercent = clampDiscountPercent;
+router.computeEffectiveFeedPrice = computeEffectiveFeedPrice;
+router.fetchActiveStoreDiscountPct = fetchActiveStoreDiscountPct;
+router.buildItemXml = buildItemXml;
 
 module.exports = router;

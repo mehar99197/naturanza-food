@@ -29,6 +29,10 @@ const ROUTE_IMPORTS = {
   "/admin/operations":      () => import("@/pages/AdminOperations"),
   "/admin/coupons":         () => import("@/pages/AdminCoupons"),
   "/admin/announcements":   () => import("@/pages/AdminAnnouncements"),
+  "/admin/blog":            () => import("@/pages/AdminBlog"),
+  "/admin/about":           () => import("@/pages/AdminAbout"),
+  "/admin/subscribers":     () => import("@/pages/AdminSubscribers"),
+  "/admin/security":        () => import("@/pages/AdminSecurity"),
   "/admin/team":            () => import("@/pages/AdminTeam"),
   "/admin/settings":        () => import("@/pages/AdminSettings"),
 };

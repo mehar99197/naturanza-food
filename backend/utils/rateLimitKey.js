@@ -18,10 +18,16 @@
  * Operators can override the trusted header via RATE_LIMIT_TRUSTED_IP_HEADER.
  */
 
+const net = require("net");
 const { ipKeyGenerator } = require("express-rate-limit");
 const { stripToIp } = require("./clientIp");
 
 const normalizeHeaderName = (name) => String(name || "").trim().toLowerCase();
+
+const extractValidIp = (raw) => {
+  const candidate = stripToIp(raw);
+  return candidate && net.isIP(candidate) ? candidate : null;
+};
 
 const getRateLimitKey = (req) => {
   if (!req) return "unknown";
@@ -30,26 +36,27 @@ const getRateLimitKey = (req) => {
     process.env.RATE_LIMIT_TRUSTED_IP_HEADER,
   );
   if (configuredHeader) {
-    const value = stripToIp(req.headers[configuredHeader]);
+    const value = extractValidIp(req.headers?.[configuredHeader]);
     if (value) return ipKeyGenerator(value);
   }
 
   // Common CDN/proxy headers that are overwritten by the edge and not
-  // forwarded from the client.
+  // forwarded from the client. Validate IP syntax so arbitrary header strings
+  // cannot rotate buckets.
   const cdnHeaders = ["cf-connecting-ip", "x-real-ip"];
   for (const header of cdnHeaders) {
-    const value = stripToIp(req.headers[header]);
+    const value = extractValidIp(req.headers?.[header]);
     if (value) return ipKeyGenerator(value);
   }
 
   // Direct connection IP. Behind a reverse proxy this is the proxy's address,
   // which is still better than a spoofable client header.
-  const direct = stripToIp(req.socket?.remoteAddress);
+  const direct = extractValidIp(req.socket?.remoteAddress);
   if (direct) return ipKeyGenerator(direct);
 
   // Last resort: Express's resolved IP. Only reliable when the app is not
   // behind a proxy that trusts XFF.
-  return ipKeyGenerator(stripToIp(req.ip) || "unknown");
+  return ipKeyGenerator(extractValidIp(req.ip) || "unknown");
 };
 
 // Security-sensitive allowlists must not trust the client-spoofable
@@ -62,18 +69,18 @@ const getTrustedClientIp = (req) => {
     process.env.RATE_LIMIT_TRUSTED_IP_HEADER,
   );
   if (configuredHeader) {
-    const value = stripToIp(req.headers?.[configuredHeader]);
+    const value = extractValidIp(req.headers?.[configuredHeader]);
     if (value) return value;
   }
 
   for (const header of ["cf-connecting-ip", "x-real-ip"]) {
-    const value = stripToIp(req.headers?.[header]);
+    const value = extractValidIp(req.headers?.[header]);
     if (value) return value;
   }
 
   return (
-    stripToIp(req.socket?.remoteAddress) ||
-    stripToIp(req.connection?.remoteAddress) ||
+    extractValidIp(req.socket?.remoteAddress) ||
+    extractValidIp(req.connection?.remoteAddress) ||
     null
   );
 };

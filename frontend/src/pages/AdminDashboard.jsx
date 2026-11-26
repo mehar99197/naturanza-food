@@ -43,6 +43,13 @@ const ORDER_THEME = {
     surface: "bg-gray-50 border-gray-200",
     icon: Clock3,
   },
+  confirmed: {
+    label: "Confirmed",
+    color: "#0ea5e9",
+    chip: "bg-sky-50 text-sky-700 border-sky-200",
+    surface: "bg-sky-50 border-sky-200",
+    icon: CheckCircle2,
+  },
   processing: {
     label: "Processing",
     color: "#16a34a",
@@ -330,6 +337,7 @@ export function AdminDashboard() {
   const orderPipeline = useMemo(() => {
     const liveValues = {
       pending: Number(statsData.pendingOrders || 0),
+      confirmed: Number(statsData.confirmedOrders || 0),
       processing: Number(statsData.processingOrders || 0),
       shipped: Number(statsData.shippedOrders || 0),
       delivered: Number(statsData.deliveredOrders || 0),
@@ -396,7 +404,7 @@ export function AdminDashboard() {
             </span>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 sm:gap-3 md:grid-cols-3 2xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 2xl:grid-cols-7">
             {orderPipeline.map((status) => {
               const Icon = status.icon;
               return (

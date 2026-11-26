@@ -217,11 +217,12 @@ router.post('/', authenticateToken, isAdmin, requirePermission('manage_coupons')
                 id: result.insertId,
                 code: code.trim().toUpperCase(),
                 description,
-        discount_type: normalizedDiscountType,
-        discount_value: normalizedDiscountValue,
-        min_order_amount: normalizedMinOrder,
-        max_discount: normalizedMaxDiscount,
-        usage_limit: normalizedUsageLimit,
+                discount_type: normalizedDiscountType,
+                discount_value: normalizedDiscountValue,
+                min_order_amount: normalizedMinOrder,
+                max_discount: normalizedMaxDiscount,
+                usage_limit: normalizedUsageLimit,
+                per_user_limit: normalizedPerUserLimit,
                 expiry_date: expiry_date || null,
                 is_active: true,
                 used_count: 0
@@ -248,6 +249,11 @@ router.put('/:id', authenticateToken, isAdmin, requirePermission('manage_coupons
         WHERE id = ?
     `;
 
+    const normalizedCode = String(code || '').trim().toUpperCase();
+    if (!normalizedCode) {
+        return res.status(400).json({ error: 'Coupon code is required' });
+    }
+
     const normalizedDiscountType = String(discount_type || 'percentage').trim().toLowerCase();
     const normalizedDiscountValue = Number(discount_value);
     const normalizedMinOrder = Number(min_order_amount || 0);
@@ -260,7 +266,7 @@ router.put('/:id', authenticateToken, isAdmin, requirePermission('manage_coupons
     // On update an absent field means "unchanged" (see the CASE above), not
     // "reset to unlimited". Sending null or "" is an explicit "unlimited".
     const perUserLimitUnset = per_user_limit === undefined;
-    const normalizedPerUserLimit = per_user_limit === null || per_user_limit === ''
+    const normalizedPerUserLimit = perUserLimitUnset || per_user_limit === null || per_user_limit === ''
         ? null
         : Number(per_user_limit);
     if (!VALID_DISCOUNT_TYPES.has(normalizedDiscountType) ||
@@ -269,12 +275,12 @@ router.put('/:id', authenticateToken, isAdmin, requirePermission('manage_coupons
         !Number.isFinite(normalizedMinOrder) || normalizedMinOrder < 0 ||
         (normalizedMaxDiscount !== null && (!Number.isFinite(normalizedMaxDiscount) || normalizedMaxDiscount < 0)) ||
         (normalizedUsageLimit !== null && (!Number.isInteger(normalizedUsageLimit) || normalizedUsageLimit < 1)) ||
-        (normalizedPerUserLimit !== null && (!Number.isInteger(normalizedPerUserLimit) || normalizedPerUserLimit < 1))) {
+        (!perUserLimitUnset && normalizedPerUserLimit !== null && (!Number.isInteger(normalizedPerUserLimit) || normalizedPerUserLimit < 1))) {
         return res.status(400).json({ error: 'Coupon values are invalid' });
     }
     
     db.query(query, [
-        code.trim().toUpperCase(), 
+        normalizedCode, 
         description, 
         normalizedDiscountType,
         normalizedDiscountValue,
@@ -283,7 +289,7 @@ router.put('/:id', authenticateToken, isAdmin, requirePermission('manage_coupons
         normalizedUsageLimit,
         perUserLimitUnset ? 1 : 0,
         normalizedPerUserLimit,
-        expiry_date,
+        expiry_date || null,
         is_active !== undefined ? is_active : true,
         req.params.id
     ], (err, result) => {
@@ -318,7 +324,7 @@ router.delete('/:id', authenticateToken, isAdmin, requirePermission('manage_coup
 });
 
 // Toggle coupon status (Admin only)
-router.patch('/:id/toggle', authenticateToken, isAdmin, requirePermission('manage_coupons'), (req, res) => {
+router.patch('/:id/toggle', authenticateToken, isAdmin, requirePermission('manage_coupons'), restrictBody(), (req, res) => {
     db.query('UPDATE coupons SET is_active = NOT is_active WHERE id = ?', 
         [req.params.id], 
         (err, result) => {
@@ -338,7 +344,7 @@ router.patch('/:id/toggle', authenticateToken, isAdmin, requirePermission('manag
 // Increment usage count — Admin only.
 // NOTE: In normal flow, coupon usage is incremented inside the order creation transaction.
 // This endpoint exists only for manual admin correction.
-router.post('/:id/use', authenticateToken, isAdmin, requirePermission('manage_coupons'), (req, res) => {
+router.post('/:id/use', authenticateToken, isAdmin, requirePermission('manage_coupons'), restrictBody(), (req, res) => {
     db.query('UPDATE coupons SET used_count = used_count + 1 WHERE id = ?', 
         [req.params.id], 
         (err, result) => {

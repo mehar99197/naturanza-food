@@ -9,7 +9,7 @@ const DEFAULT_ABOUT_CONTENT = {
     titleTop: "Our Journey Towards",
     titleHighlight: "Natural Wellness",
     subtitle:
-      "Since 2010, we have been on a mission to bring the healing power of nature to every home, one organic product at a time.",
+      "We are on a mission to bring the healing power of nature to every home across Pakistan, one pure organic product at a time.",
   },
   story: {
     heading: "From Farm to Family",
@@ -21,10 +21,10 @@ const DEFAULT_ABOUT_CONTENT = {
     ],
   },
   stats: [
-    { value: 14, suffix: "+", label: "Years Experience" },
-    { value: 50, suffix: "K+", label: "Happy Customers" },
-    { value: 100, suffix: "+", label: "Organic Products" },
-    { value: 25, suffix: "+", label: "Partner Farms" },
+    { value: 3, suffix: "+", label: "Years Experience" },
+    { value: 300, suffix: "+", label: "Happy Customers" },
+    { value: 5, suffix: "+", label: "Organic Products" },
+    { value: 4, suffix: "+", label: "Partner Farms" },
   ],
   values: {
     eyebrow: "Our Values",

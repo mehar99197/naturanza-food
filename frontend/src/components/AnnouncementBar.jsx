@@ -129,7 +129,7 @@ export default function AnnouncementBar() {
   const shouldRender = useMemo(() => {
     if (dismissed) return false;
     if (loading) return false;
-    if (error) return true;
+    if (error) return false;
     return announcements.length > 0;
   }, [announcements.length, dismissed, error, loading]);
 
@@ -178,28 +178,7 @@ export default function AnnouncementBar() {
   }
 
   if (error) {
-    return (
-      <div className="sticky top-0 z-[60]">
-        <div className="container-custom">
-          <div className="flex min-h-[38px] items-center gap-2.5 rounded-b-2xl border border-amber-200/70 bg-amber-50/85 px-3 shadow-[0_8px_18px_rgba(217,119,6,0.12)] backdrop-blur-md md:min-h-[40px]">
-            <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-              <AlertCircle className="h-3.5 w-3.5" />
-            </span>
-            <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-amber-900 sm:text-[13px]">
-              {error}
-            </p>
-            <button
-              type="button"
-              onClick={handleDismiss}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-xl text-amber-800 transition-colors duration-200 hover:bg-amber-100/60"
-              aria-label="Dismiss announcements"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   const currentAnnouncement = announcements[currentIndex];

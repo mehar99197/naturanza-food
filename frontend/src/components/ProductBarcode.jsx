@@ -131,7 +131,7 @@ const printProductLabel = (productName, barcode, format, qrSvgOuterHTML) => {
     drawBarcode(printSvg, barcode, format, {
       width: 3,
       height: 110,
-      fontSize: 22,
+      displayValue: false,
       margin: 12,
     });
     printSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");

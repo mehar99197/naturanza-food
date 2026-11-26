@@ -42,6 +42,11 @@ export function AdminMessages() {
   const [mobileView, setMobileView] = useState("queue");
   const [showAllMobileRows, setShowAllMobileRows] = useState(false);
   const messageRequestIdRef = useRef(0);
+  const selectedMessageIdRef = useRef(selectedMessageId);
+
+  useEffect(() => {
+    selectedMessageIdRef.current = selectedMessageId;
+  }, [selectedMessageId]);
 
   const loadMessages = useCallback(async () => {
     try {
@@ -52,9 +57,12 @@ export function AdminMessages() {
       const rows = Array.isArray(response) ? response : [];
       setMessages(rows);
 
-      if (selectedMessageId) {
-        const refreshedSelection = rows.find((item) => item.id === selectedMessageId);
-        setSelectedMessage(refreshedSelection || null);
+      const currentSelectedId = selectedMessageIdRef.current;
+      if (currentSelectedId) {
+        const refreshedSelection = rows.find((item) => item.id === currentSelectedId);
+        if (refreshedSelection) {
+          setSelectedMessage(refreshedSelection);
+        }
       }
     } catch (requestError) {
       setError(
@@ -65,7 +73,7 @@ export function AdminMessages() {
     } finally {
       setLoading(false);
     }
-  }, [selectedMessageId, statusFilter]);
+  }, [statusFilter]);
 
   useEffect(() => {
     void loadMessages();

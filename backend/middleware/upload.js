@@ -3,8 +3,9 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { optimizeProductImage } = require('../utils/imageOptimizer');
 const { sanitizeObject } = require('./security');
+
+const SHARP_OPTIONS = { limitInputPixels: 25_000_000 };
 
 // Ensure upload directories exist
 const ensureDir = (dir) => {
@@ -91,13 +92,13 @@ const frameContainCenter = async (buffer, { width, height, contentScale }) => {
     // nothing and simply passes through.
     let subject = buffer;
     try {
-        subject = await sharp(buffer).trim({ threshold: 12 }).toBuffer();
+        subject = await sharp(buffer, SHARP_OPTIONS).trim({ threshold: 12 }).toBuffer();
     } catch {
         // An image of a single flat colour trims away to nothing and sharp
         // rejects it; framing the untrimmed original is the sane outcome.
     }
 
-    const scaled = await sharp(subject)
+    const scaled = await sharp(subject, SHARP_OPTIONS)
         .resize(Math.round(width * contentScale), Math.round(height * contentScale), {
             fit: 'inside',
             // Enlargement is wanted here, unlike everywhere else: a subject that
@@ -107,11 +108,11 @@ const frameContainCenter = async (buffer, { width, height, contentScale }) => {
         })
         .toBuffer();
 
-    const { width: scaledWidth = 0, height: scaledHeight = 0 } = await sharp(scaled).metadata();
+    const { width: scaledWidth = 0, height: scaledHeight = 0 } = await sharp(scaled, SHARP_OPTIONS).metadata();
     const left = Math.max(0, Math.round((width - scaledWidth) / 2));
     const top = Math.max(0, Math.round((height - scaledHeight) / 2));
 
-    return sharp(scaled).extend({
+    return sharp(scaled, SHARP_OPTIONS).extend({
         top,
         left,
         bottom: Math.max(0, height - scaledHeight - top),
@@ -135,7 +136,7 @@ const compressImage = async (buffer, options = {}) => {
     try {
         let sharpInstance = frame === 'contain-center'
             ? await frameContainCenter(buffer, { width, height, contentScale })
-            : sharp(buffer)
+            : sharp(buffer, SHARP_OPTIONS)
                 .resize(width, height, {
                     fit: fit,
                     withoutEnlargement: true // Don't enlarge smaller images
@@ -218,11 +219,18 @@ const uploadAndCompress = (fieldName, folder = 'products', options = {}) => {
                 req.file.compressedFilename = filename;
                 req.file.url = `/images/${folder}/${filename}`;
 
+                // If a downstream validator/authz/DB step rejects the request,
+                // unlink the written file so failed uploads never accumulate on disk.
+                res.on('finish', () => {
+                    if (res.statusCode >= 400 && filepath) {
+                        fs.promises.unlink(filepath).catch(() => {});
+                    }
+                });
 
                 next();
             } catch (error) {
-                return res.status(500).json({ 
-                    error: `Failed to process image: ${error.message}` 
+                return res.status(400).json({
+                    error: 'Invalid or unsupported image file. Please upload a valid JPEG, PNG, GIF, or WebP image.'
                 });
             }
         });

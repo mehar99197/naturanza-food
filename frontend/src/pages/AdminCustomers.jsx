@@ -542,6 +542,12 @@ export function AdminCustomers() {
               </div>
 
               <div className="space-y-3">
+                {error ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm font-medium text-red-700">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                ) : null}
                 <input
                   type="text"
                   value={formData.name}

@@ -18,16 +18,18 @@ export function OptimizedImage({
   const [isLoaded, setIsLoaded] = useState(false);
   const [isInView, setIsInView] = useState(!lazy || priority);
   const [hasError, setHasError] = useState(false);
-  const [useWebpSource, setUseWebpSource] = useState(true);
   const [useFallbackSource, setUseFallbackSource] = useState(false);
   const imgRef = useRef(null);
 
+  const safeSrc = typeof src === 'string' ? src.trim() : '';
+  const safeFallback = typeof fallbackSrc === 'string' ? fallbackSrc.trim() : '';
+  const renderedSrc = useFallbackSource ? safeFallback : (safeSrc || safeFallback);
+
   useEffect(() => {
     setIsLoaded(false);
-    setHasError(false);
-    setUseWebpSource(true);
+    setHasError(!safeSrc && !safeFallback);
     setUseFallbackSource(false);
-  }, [src]);
+  }, [safeSrc, safeFallback]);
 
   useEffect(() => {
     if (!lazy || priority) return;
@@ -60,19 +62,8 @@ export function OptimizedImage({
   };
 
   const handleError = () => {
-    const normalizedSrc = String(src || '').trim().toLowerCase();
-    const canFallbackToOriginal =
-      useWebpSource && normalizedSrc && !normalizedSrc.endsWith('.webp');
-
-    if (canFallbackToOriginal) {
-      setUseWebpSource(false);
-      return;
-    }
-
-    const normalizedFallback = String(fallbackSrc || '').trim();
-    if (normalizedFallback && !useFallbackSource && normalizedFallback !== String(src || '').trim()) {
+    if (safeFallback && !useFallbackSource && safeFallback !== safeSrc) {
       setUseFallbackSource(true);
-      setUseWebpSource(false);
       setIsLoaded(false);
       return;
     }
@@ -81,17 +72,10 @@ export function OptimizedImage({
     onError?.();
   };
 
-  const getWebPSrc = (src) => {
-    if (src.includes('.webp')) return src;
-    const baseName = src.replace(/\.[^/.]+$/, '');
-    return `${baseName}.webp`;
-  };
-
   const sizesAttr = width ? `(max-width: ${width}px) 100vw, ${width}px` : undefined;
   const resolvedImgClassName = imgClassName && imgClassName.trim()
     ? imgClassName
     : 'object-cover object-center';
-  const renderedSrc = useFallbackSource ? fallbackSrc : src;
 
   return (
     <div
@@ -107,26 +91,21 @@ export function OptimizedImage({
         </div>
       )}
 
-      {isInView && !hasError && (
-        <picture>
-          {useWebpSource && !String(renderedSrc || '').toLowerCase().endsWith('.webp') && (
-            <source srcSet={getWebPSrc(renderedSrc)} type="image/webp" />
-          )}
-          <img
-            src={renderedSrc}
-            alt={alt}
-            width={width}
-            height={height}
-            sizes={sizesAttr}
-            loading={priority ? 'eager' : 'lazy'}
-            decoding={priority ? 'sync' : 'async'}
-            onLoad={handleLoad}
-            onError={handleError}
-            className={`w-full h-full transition-opacity duration-300 ${
-              isLoaded ? 'opacity-100' : 'opacity-0'
-            } ${resolvedImgClassName}`}
-          />
-        </picture>
+      {isInView && !hasError && renderedSrc && (
+        <img
+          src={renderedSrc}
+          alt={alt}
+          width={width}
+          height={height}
+          sizes={sizesAttr}
+          loading={priority ? 'eager' : 'lazy'}
+          decoding={priority ? 'sync' : 'async'}
+          onLoad={handleLoad}
+          onError={handleError}
+          className={`w-full h-full transition-opacity duration-300 ${
+            isLoaded ? 'opacity-100' : 'opacity-0'
+          } ${resolvedImgClassName}`}
+        />
       )}
 
       {hasError && (

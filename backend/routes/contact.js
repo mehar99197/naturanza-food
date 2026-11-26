@@ -11,7 +11,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 router.post('/', restrictBody('name', 'email', 'phone', 'subject', 'message', 'website'), (req, res) => {
     const name    = String(req.body?.name    || '').trim().slice(0, 100);
     const email   = String(req.body?.email   || '').trim().toLowerCase().slice(0, 200);
-    const phone   = String(req.body?.phone   || '').trim().slice(0, 30)  || null;
+    const phone   = String(req.body?.phone   || '').trim().slice(0, 20)  || null;
     const subject = String(req.body?.subject || '').trim().slice(0, 200) || null;
     const message = String(req.body?.message || '').trim().slice(0, 5000);
 

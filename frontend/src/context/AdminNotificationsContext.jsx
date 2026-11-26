@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { adminAPI } from "@/services/api";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { playNotificationChime, primeNotificationSound } from "@/lib/notificationSound";
@@ -26,6 +27,8 @@ export const useAdminNotifications = () => {
 };
 
 export const AdminNotificationsProvider = ({ children }) => {
+  const location = useLocation();
+  const isAdminRoute = location.pathname.startsWith("/admin");
   const { isAdminAuthenticated, loading: adminLoading } = useAdminAuth();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -40,7 +43,7 @@ export const AdminNotificationsProvider = ({ children }) => {
   const loadNotifications = useCallback(
     async ({ silent = false } = {}) => {
       const requestGeneration = ++requestGenerationRef.current;
-      if (adminLoading || !isAdminAuthenticated) {
+      if (!isAdminRoute || adminLoading || !isAdminAuthenticated) {
         setNotifications([]);
         setIsMuted(false);
         setMutedUntil(null);
@@ -87,7 +90,7 @@ export const AdminNotificationsProvider = ({ children }) => {
         }
       }
     },
-    [adminLoading, isAdminAuthenticated],
+    [adminLoading, isAdminAuthenticated, isAdminRoute],
   );
 
   const refreshNotifications = useCallback(async () => {
@@ -174,7 +177,7 @@ export const AdminNotificationsProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (adminLoading || !isAdminAuthenticated) {
+    if (!isAdminRoute || adminLoading || !isAdminAuthenticated) {
       setNotifications([]);
       setIsMuted(false);
       setMutedUntil(null);
@@ -184,10 +187,10 @@ export const AdminNotificationsProvider = ({ children }) => {
     }
 
     void loadNotifications();
-  }, [adminLoading, isAdminAuthenticated, loadNotifications]);
+  }, [adminLoading, isAdminAuthenticated, isAdminRoute, loadNotifications]);
 
   useEffect(() => {
-    if (adminLoading || !isAdminAuthenticated || typeof window === "undefined") {
+    if (!isAdminRoute || adminLoading || !isAdminAuthenticated || typeof window === "undefined") {
       return undefined;
     }
 
@@ -216,7 +219,7 @@ export const AdminNotificationsProvider = ({ children }) => {
       window.removeEventListener("focus", handleWindowFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [adminLoading, isAdminAuthenticated, loadNotifications]);
+  }, [adminLoading, isAdminAuthenticated, isAdminRoute, loadNotifications]);
 
   const unreadCount = useMemo(
     () => notifications.filter((item) => !item.is_read).length,

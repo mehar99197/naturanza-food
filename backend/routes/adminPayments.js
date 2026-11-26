@@ -1,754 +1,387 @@
 const express = require("express");
 const router = express.Router();
-const path = require("path");
 const { db } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
 const requirePermission = require("../middleware/requirePermission");
-const requireSuperAdmin = require("../middleware/requireSuperAdmin");
 const { restrictBody } = require("../middleware/security");
-const { UPLOADS_IMAGES_DIR } = require("../middleware/upload");
-const { toBoolean, toNullableString } = require("../utils/helpers");
-const {
-  consumeReservationsOnConnection,
-  releaseReservationsOnConnection,
-} = require("../utils/stockReservations");
+const { toNullableString } = require("../utils/helpers");
 const { getAdminSettings } = require("../utils/adminSettings");
 const { sendPaymentStatusEmail } = require("../utils/emailService");
+const { getPublicSafepayStatus } = require("../utils/safepay");
 
-const STAGE_LABELS = {
-  full_payment: "Full Payment",
-  advance_shipping: "Delivery Fee Advance",
-  final_collection: "Cash on Delivery",
-};
-
-const insertCustomerNotification = async (conn, { userId, type, title, message, payload }) => {
-  if (!Number.isInteger(userId)) return;
-  try {
-    await conn.query(
-      `INSERT INTO notifications (user_id, type, title, message, payload)
-       VALUES (?, ?, ?, ?, ?)`,
-      [userId, type, title, message, payload ? JSON.stringify(payload) : null],
-    );
-  } catch (notifyErr) {
-    // Notifications are best-effort — never fail the approve/reject txn over them.
-    console.warn("[adminPayments] customer notification insert failed:", notifyErr.message);
-  }
-};
-
-const insertApprovedPaymentTransaction = async (conn, verification, adminId) => {
-  await conn.query(
-    `INSERT INTO payment_transactions
-       (order_id, user_id, transaction_type, provider, amount, status,
-        gateway_reference, payload, processed_at)
-     SELECT v.order_id, o.user_id, 'payment', v.payment_method,
-            v.amount, 'paid', v.transaction_id, ?, NOW()
-       FROM advance_payment_verifications v
-       LEFT JOIN orders o ON o.id = v.order_id
-      WHERE v.id = ?`,
-    [JSON.stringify({ verification_id: verification.id, stage: verification.verification_stage, approved_by: adminId }), verification.id],
-  );
-};
-
-const ALLOWED_VERIFICATION_STATUSES = new Set([
+const ALLOWED_TX_STATUSES = new Set([
+  "all",
   "pending",
-  "approved",
-  "rejected",
-  "all",
+  "partial",
+  "paid",
+  "failed",
+  "refunded",
+  "cancelled",
 ]);
 
-const ALLOWED_VERIFICATION_STAGES = new Set([
-  "full_payment",
-  "advance_shipping",
-  "final_collection",
-  "all",
-]);
+const ALLOWED_PROVIDERS = new Set(["all", "safepay", "cod"]);
 
-// GET /api/admin/payments/analytics
-// Live revenue rollups for the dashboard cards.
-// Three conditional SUMs in a single round-trip — the planner scans the
-// (status, created_at) index once instead of three times.
-router.get("/analytics", authenticateToken, isAdmin, requirePermission("manage_payments"), async (req, res) => {
-  const conn = await db.promise().getConnection();
-  try {
-    // Pin session TZ so CURDATE() / MONTH(NOW()) align with PKT regardless of server locale.
-    await conn.query("SET time_zone = '+05:00'");
-
-    const [[row]] = await conn.query(`
-      SELECT
-        COALESCE(SUM(CASE WHEN status='approved' THEN amount END), 0) AS total_revenue,
-        COALESCE(SUM(CASE WHEN status='approved' AND verification_stage='full_payment'      THEN amount END), 0) AS prepaid_revenue,
-        COALESCE(SUM(CASE WHEN status='approved' AND verification_stage='advance_shipping'  THEN amount END), 0) AS cod_advance_revenue,
-        COALESCE(SUM(CASE WHEN status='approved' AND verification_stage='final_collection'  THEN amount END), 0) AS cod_final_revenue,
-        COALESCE(SUM(CASE
-            WHEN status='approved'
-             AND YEAR(created_at)  = YEAR(CURDATE())
-             AND MONTH(created_at) = MONTH(CURDATE())
-          THEN amount END), 0) AS month_revenue,
-        COALESCE(SUM(CASE
-            WHEN status='approved'
-             AND created_at >= CURDATE()
-             AND created_at <  CURDATE() + INTERVAL 1 DAY
-          THEN amount END), 0) AS today_revenue,
-        COUNT(CASE WHEN status='approved' THEN 1 END) AS approved_count,
-        COUNT(CASE WHEN status='pending'  THEN 1 END) AS pending_count,
-        COUNT(CASE WHEN status='rejected' THEN 1 END) AS rejected_count,
-        COUNT(CASE WHEN status='pending' AND verification_stage='final_collection' THEN 1 END) AS pending_cod_collections
-      FROM advance_payment_verifications
-    `);
-
-    return res.json({
-      success: true,
-      currency: "PKR",
-      total_revenue: Number(row.total_revenue) || 0,
-      prepaid_revenue: Number(row.prepaid_revenue) || 0,
-      cod_advance_revenue: Number(row.cod_advance_revenue) || 0,
-      cod_final_revenue: Number(row.cod_final_revenue) || 0,
-      month_revenue: Number(row.month_revenue) || 0,
-      today_revenue: Number(row.today_revenue) || 0,
-      approved_count: Number(row.approved_count) || 0,
-      pending_count: Number(row.pending_count) || 0,
-      rejected_count: Number(row.rejected_count) || 0,
-      pending_cod_collections: Number(row.pending_cod_collections) || 0,
-      as_of: new Date().toISOString(),
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: "Failed to compute analytics" });
-  } finally {
-    conn.release();
-  }
-});
-
-// GET /api/admin/payments/accounts
-router.get("/accounts", authenticateToken, isAdmin, requirePermission("manage_payments"), async (req, res) => {
-  try {
-    const [rows] = await db
-      .promise()
-      .query(
-        `SELECT id, type, account_number, account_name, is_active, updated_at
-         FROM payment_accounts
-         ORDER BY FIELD(type, 'jazzcash', 'easypaisa', 'bank'), id`,
-      );
-
-    return res.json(rows);
-  } catch (error) {
-    return res.status(500).json({ error: "Failed to fetch payment accounts" });
-  }
-});
-
-// PUT /api/admin/payments/accounts/:id
-router.put(
-  "/accounts/:id",
+// GET /api/admin/payments/gateway-status
+router.get(
+  "/gateway-status",
   authenticateToken,
   isAdmin,
   requirePermission("manage_payments"),
-  requireSuperAdmin,
-  restrictBody("account_number", "account_name", "is_active"),
+  (req, res) => {
+    return res.json({
+      success: true,
+      gateway: "safepay",
+      ...getPublicSafepayStatus(),
+    });
+  },
+);
+
+// GET /api/admin/payments/analytics
+// Live revenue rollups computed directly from payment_transactions + orders in PKT.
+router.get(
+  "/analytics",
+  authenticateToken,
+  isAdmin,
+  requirePermission("manage_payments"),
   async (req, res) => {
+    const conn = await db.promise().getConnection();
     try {
-      const accountId = Number.parseInt(req.params.id, 10);
-      if (!Number.isInteger(accountId) || accountId <= 0) {
-        return res.status(400).json({ error: "Invalid account id" });
-      }
+      await conn.query("SET time_zone = '+05:00'");
 
-      const accountNumber = toNullableString(req.body.account_number);
-      const accountName = toNullableString(req.body.account_name);
-      const isActive = toBoolean(req.body.is_active, true);
+      const [[txRow]] = await conn.query(`
+        SELECT
+          COALESCE(SUM(CASE WHEN status = 'paid' AND transaction_type = 'payment' THEN amount END), 0) AS total_revenue,
+          COALESCE(SUM(CASE WHEN status = 'paid' AND transaction_type = 'payment' AND provider = 'safepay' AND (payload IS NULL OR payload NOT LIKE '%"advance_shipping"%') THEN amount END), 0) AS safepay_full_revenue,
+          COALESCE(SUM(CASE WHEN status = 'paid' AND transaction_type = 'payment' AND provider = 'safepay' AND payload LIKE '%"advance_shipping"%' THEN amount END), 0) AS cod_advance_revenue,
+          COALESCE(SUM(CASE WHEN status = 'paid' AND transaction_type = 'payment' AND provider = 'cod' THEN amount END), 0) AS cod_final_revenue,
+          COALESCE(SUM(CASE
+            WHEN status = 'paid' AND transaction_type = 'payment'
+             AND YEAR(COALESCE(processed_at, created_at)) = YEAR(CURDATE())
+             AND MONTH(COALESCE(processed_at, created_at)) = MONTH(CURDATE())
+            THEN amount END), 0) AS month_revenue,
+          COALESCE(SUM(CASE
+            WHEN status = 'paid' AND transaction_type = 'payment'
+             AND COALESCE(processed_at, created_at) >= CURDATE()
+             AND COALESCE(processed_at, created_at) < CURDATE() + INTERVAL 1 DAY
+            THEN amount END), 0) AS today_revenue,
+          COUNT(CASE WHEN status = 'paid' AND transaction_type = 'payment' THEN 1 END) AS paid_count,
+          COUNT(CASE WHEN status = 'pending' AND transaction_type = 'payment' THEN 1 END) AS pending_count,
+          COUNT(CASE WHEN status IN ('failed', 'cancelled') AND transaction_type = 'payment' THEN 1 END) AS failed_count
+        FROM payment_transactions
+      `);
 
-      if (!accountNumber || !accountName) {
-        return res
-          .status(400)
-          .json({ error: "Account number and name are required" });
-      }
+      const [[codRow]] = await conn.query(`
+        SELECT
+          COUNT(*) AS pending_cod_collections,
+          COALESCE(SUM(
+            CASE
+              WHEN payment_status = 'partial' THEN GREATEST(0, total_amount - shipping_cost)
+              ELSE total_amount
+            END
+          ), 0) AS pending_cod_amount
+        FROM orders
+        WHERE payment_method = 'cod'
+          AND status <> 'cancelled'
+          AND payment_status IN ('pending', 'partial')
+      `);
 
-      const [result] = await db
-        .promise()
-        .query(
-          `UPDATE payment_accounts
-           SET account_number = ?, account_name = ?, is_active = ?
-           WHERE id = ?`,
-          [accountNumber, accountName, isActive, accountId],
-        );
-
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ error: "Account not found" });
-      }
-
-      const [rows] = await db
-        .promise()
-        .query(
-          `SELECT id, type, account_number, account_name, is_active, updated_at
-           FROM payment_accounts
-           WHERE id = ?`,
-          [accountId],
-        );
-
-      return res.json(rows[0]);
+      return res.json({
+        success: true,
+        currency: "PKR",
+        total_revenue: Number(txRow.total_revenue) || 0,
+        prepaid_revenue: Number(txRow.safepay_full_revenue) || 0,
+        safepay_revenue:
+          (Number(txRow.safepay_full_revenue) || 0) +
+          (Number(txRow.cod_advance_revenue) || 0),
+        cod_advance_revenue: Number(txRow.cod_advance_revenue) || 0,
+        cod_final_revenue: Number(txRow.cod_final_revenue) || 0,
+        month_revenue: Number(txRow.month_revenue) || 0,
+        today_revenue: Number(txRow.today_revenue) || 0,
+        approved_count: Number(txRow.paid_count) || 0,
+        pending_count: Number(txRow.pending_count) || 0,
+        rejected_count: Number(txRow.failed_count) || 0,
+        pending_cod_collections: Number(codRow.pending_cod_collections) || 0,
+        pending_cod_amount: Number(codRow.pending_cod_amount) || 0,
+        as_of: new Date().toISOString(),
+      });
     } catch (error) {
-      return res.status(500).json({ error: "Failed to update payment account" });
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to compute payment analytics" });
+    } finally {
+      await conn.query("SET time_zone = DEFAULT").catch(() => {});
+      conn.release();
     }
   },
 );
 
-// GET /api/admin/payments/verifications
+// GET /api/admin/payments/transactions
 router.get(
-  "/verifications",
+  "/transactions",
   authenticateToken,
   isAdmin,
   requirePermission("manage_payments"),
   async (req, res) => {
     try {
-      const statusParam = String(req.query.status || "pending")
-        .trim()
-        .toLowerCase();
-      const stageParam = String(req.query.stage || "all")
-        .trim()
-        .toLowerCase();
+      const statusParam = String(req.query.status || "all").trim().toLowerCase();
+      const providerParam = String(req.query.provider || "all").trim().toLowerCase();
+      const searchParam = String(req.query.search || "").trim();
+      const limitRaw = Number.parseInt(req.query.limit, 10);
+      const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50;
 
-      if (!ALLOWED_VERIFICATION_STATUSES.has(statusParam)) {
+      if (!ALLOWED_TX_STATUSES.has(statusParam)) {
         return res.status(400).json({ error: "Invalid status filter" });
       }
-
-      if (!ALLOWED_VERIFICATION_STAGES.has(stageParam)) {
-        return res.status(400).json({ error: "Invalid stage filter" });
+      if (!ALLOWED_PROVIDERS.has(providerParam)) {
+        return res.status(400).json({ error: "Invalid provider filter" });
       }
 
       const filters = [];
       const params = [];
 
       if (statusParam !== "all") {
-        filters.push("v.status = ?");
+        filters.push("pt.status = ?");
         params.push(statusParam);
       }
 
-      if (stageParam !== "all") {
-        filters.push("v.verification_stage = ?");
-        params.push(stageParam);
+      if (providerParam !== "all") {
+        filters.push("pt.provider = ?");
+        params.push(providerParam);
+      }
+
+      if (searchParam) {
+        const like = `%${searchParam}%`;
+        filters.push(
+          "(pt.gateway_reference LIKE ? OR o.customer_name LIKE ? OR o.customer_email LIKE ? OR CAST(pt.order_id AS CHAR) LIKE ?)",
+        );
+        params.push(like, like, like, like);
       }
 
       const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
 
-      const [rows] = await db
-        .promise()
-        .query(
-          `SELECT v.id, v.order_id, v.customer_name, v.customer_phone, v.amount,
-                  v.payment_method, v.verification_stage, v.transaction_id,
-                  v.screenshot_url, v.status, v.rejection_reason, v.admin_note,
-                  v.verified_by, v.verified_at, v.created_at,
-                  u.name AS verified_by_name,
-                  o.total_amount AS order_total, o.shipping_cost,
-                  o.payment_method AS order_payment_method
-           FROM advance_payment_verifications v
-           LEFT JOIN users u ON v.verified_by = u.id
-           LEFT JOIN orders o ON v.order_id = o.id
+      const [rows] = await db.promise().query(
+        `SELECT pt.id, pt.order_id, pt.user_id, pt.transaction_type, pt.provider,
+                pt.amount, pt.currency, pt.status, pt.gateway_reference,
+                pt.external_id, pt.payload, pt.processed_at, pt.created_at,
+                o.customer_name, o.customer_email, o.phone AS customer_phone,
+                o.status AS order_status, o.payment_status AS order_payment_status,
+                o.payment_method AS order_payment_method, o.total_amount AS order_total,
+                u.name AS user_name
+           FROM payment_transactions pt
+           LEFT JOIN orders o ON o.id = pt.order_id
+           LEFT JOIN users u ON u.id = pt.user_id
            ${whereClause}
-           ORDER BY v.created_at DESC`,
-          params,
-        );
-
-      return res.json(rows);
-    } catch (error) {
-      return res
-        .status(500)
-        .json({ error: "Failed to fetch payment verifications" });
-    }
-  },
-);
-
-// Payment screenshots are private customer documents. The list endpoint only
-// returns metadata; the image itself requires an authenticated admin session.
-router.get(
-  "/verifications/:id/screenshot",
-  authenticateToken,
-  isAdmin,
-  requirePermission("manage_payments"),
-  async (req, res) => {
-    const verificationId = Number.parseInt(req.params.id, 10);
-    if (!Number.isInteger(verificationId) || verificationId <= 0) {
-      return res.status(400).json({ error: "Invalid verification id" });
-    }
-
-    try {
-      const [[verification]] = await db.promise().query(
-        "SELECT screenshot_url FROM advance_payment_verifications WHERE id = ? LIMIT 1",
-        [verificationId],
+          ORDER BY pt.created_at DESC
+          LIMIT ?`,
+        [...params, limit],
       );
 
-      const screenshotUrl = String(verification?.screenshot_url || "");
-      const prefix = "/images/payment-verifications/";
-      const filename = screenshotUrl.startsWith(prefix)
-        ? screenshotUrl.slice(prefix.length)
-        : "";
-
-      if (!filename || filename !== path.basename(filename)) {
-        return res.status(404).json({ error: "Payment screenshot not found" });
-      }
-
-      res.setHeader("Cache-Control", "private, no-store");
-      return res.sendFile(
-        path.join(UPLOADS_IMAGES_DIR, "payment-verifications", filename),
-        (error) => {
-          if (error && !res.headersSent) {
-            res.status(error.statusCode === 404 ? 404 : 500).json({
-              error: error.statusCode === 404
-                ? "Payment screenshot not found"
-                : "Failed to load payment screenshot",
-            });
+      const formatted = rows.map((row) => {
+        let parsedPayload = null;
+        if (row.payload) {
+          if (typeof row.payload === "object") {
+            parsedPayload = row.payload;
+          } else {
+            try {
+              parsedPayload = JSON.parse(row.payload);
+            } catch {
+              parsedPayload = null;
+            }
           }
-        },
-      );
+        }
+        return {
+          ...row,
+          payload: parsedPayload,
+          stage: parsedPayload?.stage || null,
+        };
+      });
+
+      return res.json(formatted);
     } catch (error) {
-      return res.status(500).json({ error: "Failed to load payment screenshot" });
+      return res.status(500).json({ error: "Failed to fetch payment transactions" });
     }
   },
 );
 
-// PUT /api/admin/payments/verifications/:id/approve
-router.put(
-  "/verifications/:id/approve",
+// GET /api/admin/payments/pending-cod
+router.get(
+  "/pending-cod",
   authenticateToken,
   isAdmin,
   requirePermission("manage_payments"),
-  restrictBody("admin_note"),
   async (req, res) => {
-    const verificationId = Number.parseInt(req.params.id, 10);
-    if (!Number.isInteger(verificationId) || verificationId <= 0) {
-      return res.status(400).json({ error: "Invalid verification id" });
+    try {
+      const [rows] = await db.promise().query(
+        `SELECT id, customer_name, customer_email, phone, city, status,
+                payment_method, payment_status, total_amount, shipping_cost,
+                transaction_id, created_at
+           FROM orders
+          WHERE payment_method = 'cod'
+            AND status <> 'cancelled'
+            AND payment_status IN ('pending', 'partial')
+          ORDER BY created_at DESC
+          LIMIT 100`,
+      );
+
+      const formatted = rows.map((order) => {
+        const total = Number(order.total_amount) || 0;
+        const shipping = Number(order.shipping_cost) || 0;
+        const advancePaid =
+          String(order.payment_status).toLowerCase() === "partial" ? shipping : 0;
+        const remainingCash = Math.max(0, total - advancePaid);
+        return {
+          ...order,
+          advance_paid: advancePaid,
+          remaining_cash: remainingCash,
+        };
+      });
+
+      return res.json(formatted);
+    } catch (error) {
+      return res.status(500).json({ error: "Failed to fetch pending COD orders" });
+    }
+  },
+);
+
+// POST /api/admin/payments/orders/:id/mark-cod-collected
+router.post(
+  "/orders/:id/mark-cod-collected",
+  authenticateToken,
+  isAdmin,
+  requirePermission("manage_payments"),
+  restrictBody("note"),
+  async (req, res) => {
+    const orderId = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return res.status(400).json({ error: "Invalid order id" });
     }
 
-    const adminNote = toNullableString(req.body.admin_note);
-
+    const note = toNullableString(req.body?.note);
     const conn = await db.promise().getConnection();
+    let emailCtx = null;
+
     try {
       await conn.beginTransaction();
 
-      // Lock + load the verification row first so the rest of the txn can
-      // branch on verification_stage.
-      const [[existing]] = await conn.query(
-        `SELECT v.id, v.order_id AS order_id,
-                 v.verification_stage, v.status, v.amount, v.payment_method,
-                 v.transaction_id, o.user_id, o.status AS order_status
-           FROM advance_payment_verifications v
-           LEFT JOIN orders o ON o.id = v.order_id
-          WHERE v.id = ?
+      const [[order]] = await conn.query(
+        `SELECT id, user_id, customer_name, customer_email, status,
+                payment_method, payment_status, total_amount, shipping_cost
+           FROM orders
+          WHERE id = ?
           FOR UPDATE`,
-        [verificationId],
+        [orderId],
       );
 
-      if (!existing) {
+      if (!order) {
         await conn.rollback();
-        return res.status(404).json({ error: "Verification not found" });
+        return res.status(404).json({ error: "Order not found" });
       }
 
-      if (String(existing.status || "").toLowerCase() !== "pending") {
+      if (String(order.payment_method || "").toLowerCase() !== "cod") {
         await conn.rollback();
-        return res.status(409).json({
-          error: `This verification is already ${existing.status}. Only pending verifications can be approved.`,
-        });
+        return res.status(400).json({ error: "Only Cash on Delivery orders can be marked collected here" });
       }
 
-      if (String(existing.order_status || '').toLowerCase() === 'cancelled') {
+      if (String(order.status || "").toLowerCase() === "cancelled") {
         await conn.rollback();
-        return res.status(409).json({ error: 'Cancelled orders cannot receive payment approval' });
+        return res.status(409).json({ error: "Cannot mark a cancelled order as collected" });
       }
 
-      const stage = String(existing.verification_stage || "full_payment");
-      const orderId = existing.order_id || null;
-
-      const [upd] = await conn.query(
-        `UPDATE advance_payment_verifications
-           SET status = 'approved', verified_by = ?, verified_at = NOW(),
-               rejection_reason = NULL,
-               admin_note = COALESCE(?, admin_note)
-         WHERE id = ?`,
-        [req.user.id, adminNote, verificationId],
-      );
-
-      if (upd.affectedRows === 0) {
+      const currentPayStatus = String(order.payment_status || "").toLowerCase();
+      if (currentPayStatus === "paid") {
         await conn.rollback();
-        return res.status(404).json({ error: "Verification not found" });
+        return res.status(409).json({ error: "COD payment is already marked as paid" });
       }
 
-      // Decide what to do to the order based on which stage we just approved.
-      //   full_payment      → flip order to 'paid' (single-shot prepaid flow)
-      //   advance_shipping  → flip order to 'partial' (COD stage 1: warehouse can ship)
-      //   final_collection  → flip order to 'paid' (COD stage 2: rider returned cash)
-      const nextOrderPaymentStatus =
-        stage === "advance_shipping" ? "partial" : "paid";
+      const totalAmount = Number(order.total_amount) || 0;
+      const shippingCost = Number(order.shipping_cost) || 0;
+      const collectedAmount =
+        currentPayStatus === "partial"
+          ? Math.max(0, totalAmount - shippingCost)
+          : totalAmount;
 
       await conn.query(
-        `UPDATE orders o
-           JOIN advance_payment_verifications v
-             ON v.order_id = o.id
-            SET o.payment_status = ?
-          WHERE v.id = ?`,
-        [nextOrderPaymentStatus, verificationId],
+        `UPDATE orders
+            SET payment_status = 'paid',
+                updated_at = NOW()
+          WHERE id = ?`,
+        [order.id],
       );
 
-      await insertApprovedPaymentTransaction(conn, existing, req.user.id);
+      await conn.query(
+        `INSERT INTO payment_transactions
+           (order_id, user_id, transaction_type, provider, amount, currency, status, payload, processed_at)
+         VALUES (?, ?, 'payment', 'cod', ?, 'PKR', 'paid', ?, NOW())`,
+        [
+          order.id,
+          order.user_id || null,
+          collectedAmount,
+          JSON.stringify({
+            stage: "final_collection",
+            collected_by: req.user.id,
+            note: note || null,
+            processed_at: new Date().toISOString(),
+          }),
+        ],
+      );
 
-      // Mirror TID onto the order — best-effort, only applicable to stages
-      // that actually have a TID (full_payment + advance_shipping). Skip for
-      // final_collection (cash, no TID). Tolerate missing column (migration 011).
-      if (stage !== "final_collection") {
-        try {
-          await conn.query(
-            `UPDATE orders o
-               JOIN advance_payment_verifications v
-                 ON v.order_id = o.id
-                SET o.transaction_id = COALESCE(v.transaction_id, o.transaction_id)
-              WHERE v.id = ?`,
-            [verificationId],
-          );
-        } catch (mirrorErr) {
-          if (mirrorErr?.errno !== 1054) throw mirrorErr;
-          console.warn(
-            "[adminPayments] transaction_id mirror skipped — column missing. Run migration 011_add_transaction_id.sql.",
-          );
-        }
+      if (Number.isInteger(order.user_id)) {
+        await conn
+          .query(
+            `INSERT INTO notifications (user_id, type, title, message, payload)
+             VALUES (?, 'payment_verified', ?, ?, ?)`,
+            [
+              order.user_id,
+              "COD Payment Received",
+              `Cash on Delivery payment of PKR ${collectedAmount.toFixed(2)} for Order #${order.id} has been recorded.`,
+              JSON.stringify({ order_id: order.id, amount: collectedAmount, provider: "cod" }),
+            ],
+          )
+          .catch(() => {});
       }
 
-      // Stock reservation rules:
-      //   full_payment      → consume on approve (existing prepaid behavior)
-      //   advance_shipping  → consume on approve so warehouse can ship
-      //   final_collection  → NO-OP (stock was already consumed at stage 1)
-      if (stage !== "final_collection" && orderId) {
-        const consumed = await consumeReservationsOnConnection(
-          conn,
-          orderId,
-          req.user.id,
-        );
-        if (consumed === 0) {
-          await conn.rollback();
-          return res.status(409).json({
-            error:
-              "This payment cannot be approved because the order's stock reservation has expired. Create a new order or restore stock first.",
-          });
-        }
-      }
-
-      // When stage-1 (advance_shipping) is approved, create the matching
-      // stage-2 (final_collection) row so admin can later confirm the cash
-      // collected at delivery. Without this, the "COD Final Pending" tab
-      // stays empty and the COD flow can never close out.
-      // Idempotent via uq_apv_order_stage (order_id + verification_stage).
-      if (stage === "advance_shipping" && orderId) {
-        const [[orderRow]] = await conn.query(
-          `SELECT customer_name, customer_email, phone,
-                  subtotal, discount_amount, shipping_cost, total_amount
-             FROM orders WHERE id = ? LIMIT 1`,
-          [orderId],
-        );
-
-        if (orderRow) {
-          const remainingCod = Math.max(
-            0,
-            Math.round(
-              Number(orderRow.total_amount || 0) - Number(orderRow.shipping_cost || 0),
-            ),
-          );
-
-          if (remainingCod > 0) {
-            await conn.query(
-              `INSERT INTO advance_payment_verifications
-                 (order_id, customer_name, customer_phone, amount, payment_method,
-                  verification_stage, transaction_id, screenshot_url, status)
-               VALUES (?, ?, ?, ?, 'cod', 'final_collection', NULL, NULL, 'pending')
-               ON DUPLICATE KEY UPDATE id = id`,
-              [
-                Number(orderId),
-                orderRow.customer_name || "",
-                orderRow.phone || null,
-                remainingCod,
-              ],
-            );
-          }
-        }
-      }
-
-      // Notify the customer: in-app notification + transactional email.
-      // Notification is inserted inside the txn (atomic with approval).
-      // Email is fired AFTER commit so a slow SMTP can't block the response.
-      let customerEmailCtx = null;
-      if (orderId) {
-        const [[customerRow]] = await conn.query(
-          `SELECT o.user_id, o.customer_name, o.customer_email,
-                  v.amount AS approved_amount
-             FROM orders o
-             JOIN advance_payment_verifications v ON v.order_id = o.id
-            WHERE v.id = ?
-            LIMIT 1`,
-          [verificationId],
-        );
-
-        if (customerRow) {
-          const stageLabel = STAGE_LABELS[stage] || "Payment";
-          const notifTitle = "Payment Approved";
-          const notifMessage = `Your ${stageLabel} for Order #${orderId} has been approved.`;
-          await insertCustomerNotification(conn, {
-            userId: customerRow.user_id,
-            type: "payment_approved",
-            title: notifTitle,
-            message: notifMessage,
-            payload: {
-              order_id: orderId,
-              verification_id: verificationId,
-              verification_stage: stage,
-              amount: Number(customerRow.approved_amount) || 0,
-            },
-          });
-
-          customerEmailCtx = {
-            email: customerRow.customer_email,
-            customerName: customerRow.customer_name,
-            amount: Number(customerRow.approved_amount) || 0,
-            stageLabel,
-          };
-        }
-      }
+      emailCtx = {
+        email: order.customer_email,
+        customerName: order.customer_name || "Customer",
+        orderId: order.id,
+        amount: collectedAmount,
+      };
 
       await conn.commit();
 
-      // Fire-and-forget email after commit so SMTP latency doesn't block response.
-      if (customerEmailCtx?.email) {
+      if (emailCtx.email) {
         setImmediate(async () => {
           try {
             const settings = await getAdminSettings();
             await sendPaymentStatusEmail({
-              email: customerEmailCtx.email,
+              email: emailCtx.email,
               storeName: settings.storeName,
-              customerName: customerEmailCtx.customerName,
-              orderId,
-              amount: customerEmailCtx.amount,
-              currency: settings.currency,
-              stageLabel: customerEmailCtx.stageLabel,
+              customerName: emailCtx.customerName,
+              orderId: emailCtx.orderId,
+              amount: emailCtx.amount,
+              currency: settings.currency || "PKR",
+              stageLabel: "Cash on Delivery Collection",
               isApproved: true,
             });
           } catch (emailErr) {
-            console.warn("[adminPayments] approval email failed:", emailErr.message);
+            console.warn("[adminPayments] COD receipt email failed:", emailErr?.message || emailErr);
           }
         });
       }
 
-      // Fetch the freshly approved verification. Try with transaction_id first;
-      // fall back to a column-free SELECT for DBs missing migration 011.
-      const fetchSql = (includeTxId) => `
-        SELECT v.id, v.order_id, v.customer_name, v.customer_phone, v.amount,
-               v.payment_method, v.verification_stage,
-               ${includeTxId ? "v.transaction_id," : ""} v.screenshot_url, v.status,
-               v.rejection_reason, v.admin_note,
-               v.verified_by, v.verified_at, v.created_at,
-               u.name AS verified_by_name,
-               o.total_amount AS order_total, o.shipping_cost,
-               o.payment_method AS order_payment_method
-          FROM advance_payment_verifications v
-          LEFT JOIN users u ON v.verified_by = u.id
-          LEFT JOIN orders o ON v.order_id = o.id
-         WHERE v.id = ?`;
-
-      let rows;
+      return res.json({
+        success: true,
+        message: "COD cash collection recorded",
+        order_id: order.id,
+        collected_amount: collectedAmount,
+      });
+    } catch (error) {
       try {
-        [rows] = await conn.query(fetchSql(true), [verificationId]);
-      } catch (selErr) {
-        if (selErr?.errno !== 1054) throw selErr;
-        [rows] = await conn.query(fetchSql(false), [verificationId]);
-      }
-
-      return res.json({
-        message: "Verification approved",
-        verification: rows[0] || null,
-      });
-    } catch (error) {
-      try { await conn.rollback(); } catch {}
-      if (error && (error.code === "ER_DUP_ENTRY" || error.errno === 1062)) {
-        return res.status(409).json({
-          success: false,
-          message: "This Transaction ID is already linked to another order.",
-        });
-      }
-      console.error("[adminPayments] approve failed", {
-        verificationId,
-        code: error?.code,
-        errno: error?.errno,
-        sqlMessage: error?.sqlMessage,
-        message: error?.message,
-      });
-      return res.status(500).json({
-        error: "Failed to approve payment verification",
-      });
-    } finally {
-      conn.release();
-    }
-  },
-);
-
-// PUT /api/admin/payments/verifications/:id/reject
-router.put(
-  "/verifications/:id/reject",
-  authenticateToken,
-  isAdmin,
-  requirePermission("manage_payments"),
-  restrictBody("reason"),
-  async (req, res) => {
-    const verificationId = Number.parseInt(req.params.id, 10);
-    if (!Number.isInteger(verificationId) || verificationId <= 0) {
-      return res.status(400).json({ error: "Invalid verification id" });
-    }
-
-    const reason = toNullableString(req.body.reason);
-    if (!reason) {
-      return res.status(400).json({ error: "Rejection reason is required" });
-    }
-
-    const conn = await db.promise().getConnection();
-    try {
-      await conn.beginTransaction();
-
-      const [[existing]] = await conn.query(
-        `SELECT id, order_id AS order_id, verification_stage, status
-           FROM advance_payment_verifications
-          WHERE id = ?
-          FOR UPDATE`,
-        [verificationId],
-      );
-
-      if (!existing) {
         await conn.rollback();
-        return res.status(404).json({ error: "Verification not found" });
+      } catch {
+        // ignore rollback error
       }
-
-      if (String(existing.status || "").toLowerCase() !== "pending") {
-        await conn.rollback();
-        return res.status(409).json({
-          error: `This verification is already ${existing.status}. Only pending verifications can be rejected.`,
-        });
-      }
-
-      const stage = String(existing.verification_stage || "full_payment");
-      const orderId = existing.order_id || null;
-
-      const [result] = await conn.query(
-        `UPDATE advance_payment_verifications
-           SET status = 'rejected', verified_by = ?, verified_at = NOW(), rejection_reason = ?
-         WHERE id = ?`,
-        [req.user.id, reason, verificationId],
-      );
-
-      if (result.affectedRows === 0) {
-        await conn.rollback();
-        return res.status(404).json({ error: "Verification not found" });
-      }
-
-      // Reservation handling by stage:
-      //   full_payment / advance_shipping → return held stock to pool
-      //   final_collection                → NO-OP (order was physically delivered;
-      //                                     stock is gone). Also mark the order
-      //                                     payment_status='failed' so reports can
-      //                                     surface uncollected-cash orders.
-      if (stage === "final_collection") {
-        await conn.query(
-          `UPDATE orders o
-             JOIN advance_payment_verifications v
-               ON v.order_id = o.id
-              SET o.payment_status = 'failed'
-            WHERE v.id = ?`,
-          [verificationId],
-        );
-      } else if (orderId) {
-        await releaseReservationsOnConnection(conn, orderId);
-      }
-
-      // Notify the customer (in-app + email) the same way the approve path does.
-      let customerEmailCtx = null;
-      if (orderId) {
-        const [[customerRow]] = await conn.query(
-          `SELECT o.user_id, o.customer_name, o.customer_email,
-                  v.amount AS rejected_amount
-             FROM orders o
-             JOIN advance_payment_verifications v ON v.order_id = o.id
-            WHERE v.id = ?
-            LIMIT 1`,
-          [verificationId],
-        );
-
-        if (customerRow) {
-          const stageLabel = STAGE_LABELS[stage] || "Payment";
-          await insertCustomerNotification(conn, {
-            userId: customerRow.user_id,
-            type: "payment_rejected",
-            title: "Payment Could Not Be Verified",
-            message: `Your ${stageLabel} for Order #${orderId} was rejected. Reason: ${reason}`,
-            payload: {
-              order_id: orderId,
-              verification_id: verificationId,
-              verification_stage: stage,
-              amount: Number(customerRow.rejected_amount) || 0,
-              reason,
-            },
-          });
-
-          customerEmailCtx = {
-            email: customerRow.customer_email,
-            customerName: customerRow.customer_name,
-            amount: Number(customerRow.rejected_amount) || 0,
-            stageLabel,
-          };
-        }
-      }
-
-      await conn.commit();
-
-      if (customerEmailCtx?.email) {
-        setImmediate(async () => {
-          try {
-            const settings = await getAdminSettings();
-            await sendPaymentStatusEmail({
-              email: customerEmailCtx.email,
-              storeName: settings.storeName,
-              customerName: customerEmailCtx.customerName,
-              orderId,
-              amount: customerEmailCtx.amount,
-              currency: settings.currency,
-              stageLabel: customerEmailCtx.stageLabel,
-              isApproved: false,
-              rejectionReason: reason,
-            });
-          } catch (emailErr) {
-            console.warn("[adminPayments] rejection email failed:", emailErr.message);
-          }
-        });
-      }
-
-      const [rows] = await conn.query(
-        `SELECT v.id, v.order_id, v.customer_name, v.customer_phone, v.amount,
-                v.payment_method, v.verification_stage, v.transaction_id,
-                v.screenshot_url, v.status, v.rejection_reason, v.admin_note,
-                v.verified_by, v.verified_at, v.created_at,
-                u.name AS verified_by_name,
-                o.total_amount AS order_total, o.shipping_cost,
-                o.payment_method AS order_payment_method
-           FROM advance_payment_verifications v
-           LEFT JOIN users u ON v.verified_by = u.id
-           LEFT JOIN orders o ON v.order_id = o.id
-          WHERE v.id = ?`,
-        [verificationId],
-      );
-
-      return res.json({
-        message: "Verification rejected",
-        verification: rows[0] || null,
-      });
-    } catch (error) {
-      try { await conn.rollback(); } catch {}
-      console.error("[adminPayments] reject failed", {
-        verificationId,
-        code: error?.code,
-        errno: error?.errno,
-        sqlMessage: error?.sqlMessage,
-        message: error?.message,
-      });
-      return res.status(500).json({
-        error: "Failed to reject payment verification",
-      });
+      return res.status(500).json({ error: "Failed to record COD payment collection" });
     } finally {
       conn.release();
     }

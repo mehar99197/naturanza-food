@@ -1,5 +1,6 @@
 const productModel = require("../models/productModel");
 const { db } = require("../config/db");
+const { isAdminUser } = require("../middleware/auth");
 const { getAdminRecipients } = require("../utils/adminNotifications");
 const { sendEmail } = require("../utils/emailService");
 
@@ -8,8 +9,7 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const isAdminRequest = (req) =>
-  String(req?.user?.role || "").trim().toLowerCase() === "admin";
+const isAdminRequest = (req) => isAdminUser(req?.user);
 
 // Storefront responses only need availability, not the exact inventory ledger
 // or internal identifiers. Admin requests keep the complete product record.
@@ -23,7 +23,6 @@ const toPublicProduct = (product = {}) => {
   // barcode is intentionally kept: it is exposed as Schema.org GTIN so a phone
   // scan / Google Lens lookup resolves the retail code to this product page.
   delete publicProduct.qr_code_url;
-  delete publicProduct.created_at;
   delete publicProduct.updated_at;
 
   publicProduct.is_in_stock =

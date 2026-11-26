@@ -60,9 +60,34 @@ const BarChart = ({
  })),
  };
 
+ const mergedOptions = {
+ ...defaultOptions,
+ ...options,
+ plugins: {
+ ...defaultOptions.plugins,
+ ...options?.plugins,
+ legend: {
+ ...defaultOptions.plugins.legend,
+ ...options?.plugins?.legend,
+ },
+ title: {
+ ...defaultOptions.plugins.title,
+ ...options?.plugins?.title,
+ },
+ },
+ scales: {
+ ...defaultOptions.scales,
+ ...options?.scales,
+ y: {
+ ...defaultOptions.scales.y,
+ ...options?.scales?.y,
+ },
+ },
+ };
+
  return (
  <div style={{ position: 'relative', height: `${height}px`, width: '100%' }}>
- <Bar data={chartData} options={{ ...defaultOptions, ...options }} />
+ <Bar data={chartData} options={mergedOptions} />
  </div>
  );
 };

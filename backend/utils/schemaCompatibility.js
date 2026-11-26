@@ -18,6 +18,8 @@ const ensureTableStatements = [
     user_id INT NOT NULL,
     email VARCHAR(254) NOT NULL,
     code_hash CHAR(64) NOT NULL,
+    credential_hash VARCHAR(255) NULL,
+    verifier_nonce_hash CHAR(64) NULL,
     expires_at DATETIME NOT NULL,
     attempts INT NOT NULL DEFAULT 0,
     is_used BOOLEAN NOT NULL DEFAULT FALSE,
@@ -27,7 +29,7 @@ const ensureTableStatements = [
     INDEX idx_evc_email (email, is_used),
     INDEX idx_evc_expires (expires_at),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  )`,
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS password_reset_tokens (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
@@ -326,7 +328,7 @@ const ensureTableStatements = [
     store_email VARCHAR(120) NOT NULL,
     store_phone VARCHAR(30) DEFAULT '',
     currency VARCHAR(10) DEFAULT 'PKR',
-    tax_rate DECIMAL(5, 2) DEFAULT 18.00,
+    tax_rate DECIMAL(5, 2) DEFAULT 0.00,
     shipping_flat DECIMAL(10, 2) DEFAULT 250.00,
     shipping_free DECIMAL(10, 2) DEFAULT 5000.00,
     email_notifications BOOLEAN DEFAULT TRUE,
@@ -429,7 +431,50 @@ const ensureTableStatements = [
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-  )`,
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(254) NOT NULL UNIQUE,
+    status ENUM('pending', 'active', 'unsubscribed') NOT NULL DEFAULT 'pending',
+    unsubscribe_token VARCHAR(64) NOT NULL,
+    verification_token VARCHAR(64) NULL,
+    verification_token_expires_at TIMESTAMP NULL DEFAULT NULL,
+    verified_at TIMESTAMP NULL DEFAULT NULL,
+    source VARCHAR(40) NOT NULL DEFAULT 'footer',
+    subscribed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    unsubscribed_at TIMESTAMP NULL DEFAULT NULL,
+    reactivated_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_newsletter_status (status),
+    INDEX idx_newsletter_email (email),
+    INDEX idx_newsletter_verification_token (verification_token)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS about_content (
+    id INT PRIMARY KEY DEFAULT 1,
+    content LONGTEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS city_delivery_fees (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    city_name VARCHAR(100) NOT NULL UNIQUE,
+    fee DECIMAL(10, 2) NOT NULL DEFAULT 250.00,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS coupon_redemptions (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    coupon_id INT NOT NULL,
+    user_id INT NOT NULL,
+    order_id INT NOT NULL,
+    code VARCHAR(50) NOT NULL,
+    discount_amount DECIMAL(10, 2) DEFAULT 0,
+    redeemed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_coupon_redemptions_coupon_user (coupon_id, user_id),
+    INDEX idx_coupon_redemptions_order (order_id),
+    FOREIGN KEY (coupon_id) REFERENCES coupons(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
 const defaultPaymentMethods = [
@@ -731,10 +776,10 @@ const ensureProductionSchema = async (db) => {
     two_fa_recovery_codes: "JSON NULL",
   });
 
-  // One-time migration: copy legacy lockout state into both new contexts so
-  // existing locked accounts stay locked after deploy.
+  // One-time migration: copy legacy lockout state into both new contexts and
+  // clear the legacy columns so restarts never resurrect stale lockouts.
   await db.query(
-    "UPDATE users\n     SET user_failed_login_attempts = GREATEST(user_failed_login_attempts, failed_login_attempts),\n         user_locked_until = COALESCE(user_locked_until, locked_until),\n         admin_failed_login_attempts = GREATEST(admin_failed_login_attempts, failed_login_attempts),\n         admin_locked_until = COALESCE(admin_locked_until, locked_until)\n     WHERE failed_login_attempts > 0 OR locked_until IS NOT NULL",
+    "UPDATE users\n     SET user_failed_login_attempts = GREATEST(user_failed_login_attempts, failed_login_attempts),\n         user_locked_until = COALESCE(user_locked_until, locked_until),\n         admin_failed_login_attempts = GREATEST(admin_failed_login_attempts, failed_login_attempts),\n         admin_locked_until = COALESCE(admin_locked_until, locked_until),\n         failed_login_attempts = 0,\n         locked_until = NULL\n     WHERE failed_login_attempts > 0 OR locked_until IS NOT NULL",
   );
 
   await db.query(
@@ -840,30 +885,43 @@ const ensureProductionSchema = async (db) => {
     verified_at: "TIMESTAMP NULL DEFAULT NULL",
   });
 
-  // Double-opt-in: existing rows stay active; new rows default to pending.
+  // Double-opt-in: preserve existing active AND unsubscribed statuses; only
+  // backfill verified_at where missing so restarts never re-activate opt-outs.
   await db.query(
     "ALTER TABLE newsletter_subscribers MODIFY COLUMN status ENUM('pending', 'active', 'unsubscribed') NOT NULL DEFAULT 'pending'",
   );
   await db.query(
-    "UPDATE newsletter_subscribers SET status = 'active', verified_at = COALESCE(verified_at, subscribed_at) WHERE status IN ('active', 'unsubscribed')",
+    "UPDATE newsletter_subscribers SET verified_at = COALESCE(verified_at, subscribed_at) WHERE status IN ('active', 'unsubscribed') AND verified_at IS NULL",
   );
-  await db.query(
-    "CREATE INDEX IF NOT EXISTS idx_newsletter_verification_token ON newsletter_subscribers(verification_token)",
+  await ensureIndex(
+    db,
+    "newsletter_subscribers",
+    "idx_newsletter_verification_token",
+    "CREATE INDEX idx_newsletter_verification_token ON newsletter_subscribers (verification_token)",
   );
 
+  await ensureColumns(db, "email_verification_codes", {
+    credential_hash: "VARCHAR(255) NULL",
+    verifier_nonce_hash: "CHAR(64) NULL",
+  });
+
+  await ensureColumns(db, "coupons", {
+    per_user_limit: "INT NULL DEFAULT NULL",
+  });
 
   await ensureColumns(db, "admin_settings", {
-    address: "VARCHAR(255) NOT NULL DEFAULT 'Pakistan'",
+    address: "VARCHAR(255) NOT NULL DEFAULT 'Nizam Pura, Chunian, District Kasur, Punjab, Pakistan'",
     support_hours: "VARCHAR(120) NOT NULL DEFAULT 'Available 24/7'",
     facebook_url: "VARCHAR(255) NOT NULL DEFAULT ''",
     instagram_url: "VARCHAR(255) NOT NULL DEFAULT ''",
+    tiktok_url: "VARCHAR(255) NOT NULL DEFAULT ''",
     twitter_url: "VARCHAR(255) NOT NULL DEFAULT ''",
     youtube_url: "VARCHAR(255) NOT NULL DEFAULT ''",
     whatsapp_number: "VARCHAR(30) NOT NULL DEFAULT ''",
     whatsapp_enabled: "BOOLEAN NOT NULL DEFAULT TRUE",
-    map_latitude: "DECIMAL(10, 7) NOT NULL DEFAULT 31.5204000",
-    map_longitude: "DECIMAL(10, 7) NOT NULL DEFAULT 74.3587000",
-    map_location_label: "VARCHAR(120) NOT NULL DEFAULT 'Pakistan, Lahore'",
+    map_latitude: "DECIMAL(10, 7) NOT NULL DEFAULT 30.9716931",
+    map_longitude: "DECIMAL(10, 7) NOT NULL DEFAULT 73.8896874",
+    map_location_label: "VARCHAR(120) NOT NULL DEFAULT 'Nizam Pura, Chunian, District Kasur, Punjab, Pakistan'",
     newsletter_welcome_promo_code: "VARCHAR(40) NOT NULL DEFAULT ''",
     store_discount_active: "BOOLEAN NOT NULL DEFAULT FALSE",
     store_discount_percentage: "DECIMAL(5, 2) NOT NULL DEFAULT 0",
@@ -893,7 +951,7 @@ const ensureProductionSchema = async (db) => {
 
   await ensureColumns(db, "orders", ordersColumnDefinitions);
   await db.query(
-    "ALTER TABLE orders MODIFY COLUMN payment_method ENUM('cod', 'card', 'online', 'easypaisa', 'jazzcash', 'bank') DEFAULT 'cod'",
+    "ALTER TABLE orders MODIFY COLUMN payment_method ENUM('cod', 'card', 'online', 'easypaisa', 'jazzcash', 'bank', 'safepay') DEFAULT 'cod'",
   );
   await ensureIndex(
     db,

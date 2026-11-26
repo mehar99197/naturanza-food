@@ -32,13 +32,13 @@ const buildStatsMap = (reviews) => {
 
 export const ReviewProvider = ({ children }) => {
  const [reviews, setReviews] = useState([]);
- const [reviewStats, setReviewStats] = useState({});
  const fetchedRef = useRef({});
+ const reviewStats = useMemo(() => buildStatsMap(reviews), [reviews]);
 
  const ensureFetched = useCallback(async (productId) => {
- const pid = String(productId);
- if (fetchedRef.current[pid]) return;
- fetchedRef.current[pid] = true;
+ const pid = String(productId || '');
+ if (!pid || fetchedRef.current[pid]) return;
+ fetchedRef.current[pid] = 'loading';
 
  try {
  const data = await reviewAPI.getProductReviews(productId);
@@ -51,14 +51,13 @@ export const ReviewProvider = ({ children }) => {
  userName: r.customer_name || 'Guest User',
  userAvatar: r.customer_image || '',
  }));
+ fetchedRef.current[pid] = 'done';
  setReviews((prev) => {
  const existing = new Set(prev.map((r) => r.id));
- const merged = [...prev, ...normalized.filter((r) => !existing.has(r.id))];
- setReviewStats(buildStatsMap(merged));
- return merged;
+ return [...prev, ...normalized.filter((r) => !existing.has(r.id))];
  });
  } catch {
- fetchedRef.current[pid] = false;
+ fetchedRef.current[pid] = 'error';
  }
  }, []);
 
@@ -73,30 +72,24 @@ export const ReviewProvider = ({ children }) => {
  userName: reviewData.userName || 'Guest User',
  userAvatar: reviewData.userAvatar || '',
  };
- setReviews((prev) => {
- const updated = [nextReview, ...prev];
- setReviewStats(buildStatsMap(updated));
- return updated;
- });
+ setReviews((prev) => [nextReview, ...prev]);
  }, []);
 
  const getProductReviews = useCallback(
  (productId) => {
  const pid = String(productId);
- ensureFetched(productId);
  return reviews
  .filter((r) => String(r.productId) === pid)
  .sort((a, b) => new Date(b.date) - new Date(a.date));
  },
- [reviews, ensureFetched],
+ [reviews],
  );
 
  const getProductReviewStats = useCallback(
  (productId) => {
- ensureFetched(productId);
  return reviewStats[String(productId)] || { reviewCount: 0, averageRating: 0 };
  },
- [reviewStats, ensureFetched],
+ [reviewStats],
  );
 
  useEffect(() => {
@@ -107,10 +100,11 @@ export const ReviewProvider = ({ children }) => {
  () => ({
  reviews,
  addReview,
+ ensureFetched,
  getProductReviews,
  getProductReviewStats,
  }),
- [reviews, addReview, getProductReviews, getProductReviewStats],
+ [reviews, addReview, ensureFetched, getProductReviews, getProductReviewStats],
  );
 
  return <ReviewContext.Provider value={value}>{children}</ReviewContext.Provider>;

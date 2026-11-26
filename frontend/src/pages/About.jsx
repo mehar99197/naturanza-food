@@ -22,7 +22,7 @@ const DEFAULT_CONTENT = {
     eyebrow: 'About Naturanza',
     titleTop: 'Our Journey Towards',
     titleHighlight: 'Natural Wellness',
-    subtitle: 'Since 2010, we have been on a mission to bring the healing power of nature to every home, one organic product at a time.',
+    subtitle: 'We are on a mission to bring the healing power of nature to every home across Pakistan, one pure organic product at a time.',
   },
   story: {
     heading: 'From Farm to Family',
@@ -34,10 +34,10 @@ const DEFAULT_CONTENT = {
     ],
   },
   stats: [
-    { value: 14, suffix: '+', label: 'Years Experience' },
-    { value: 50, suffix: 'K+', label: 'Happy Customers' },
-    { value: 100, suffix: '+', label: 'Organic Products' },
-    { value: 25, suffix: '+', label: 'Partner Farms' },
+    { value: 3, suffix: '+', label: 'Years Experience' },
+    { value: 300, suffix: '+', label: 'Happy Customers' },
+    { value: 5, suffix: '+', label: 'Organic Products' },
+    { value: 4, suffix: '+', label: 'Partner Farms' },
   ],
   values: {
     eyebrow: 'Our Values',
@@ -310,7 +310,7 @@ export function About() {
                   return (
                     <div
                       key={`${value.title}-${index}`}
-                      className={`bg-white rounded-2xl p-5 sm:p-6 md:p-8 text-center shadow-lg hover:shadow-2xl [1.02] border border-gray-100 hover:border-green-200 relative reveal reveal-right ${valuesVisible ? 'active' : ''} snap-center flex-shrink-0 w-full min-w-full md:w-auto md:min-w-0 md:max-w-none`}
+                      className={`bg-white rounded-2xl p-5 sm:p-6 md:p-8 text-center shadow-lg hover:shadow-2xl hover:scale-[1.02] transition-transform border border-gray-100 hover:border-green-200 relative reveal reveal-right ${valuesVisible ? 'active' : ''} snap-center flex-shrink-0 w-full min-w-full md:w-auto md:min-w-0 md:max-w-none`}
                       style={{ animationDelay: `${index * 0.1}s` }}
                     >
                       <div className="w-11 h-11 sm:w-12 sm:h-12 md:w-16 md:h-16 bg-[#3d7a3d]/10 rounded-2xl flex items-center justify-center mx-auto mb-3 md:mb-6">

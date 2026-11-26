@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, useRef } from "react";
-import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -24,7 +23,7 @@ import { useOrders } from "@/context/OrderContext";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice, computeStoreSaleDiscount } from "@/lib/utils";
-import api, { paymentAPI, settingsAPI, cartAPI } from "@/services/api";
+import api, { paymentAPI, cartAPI } from "@/services/api";
 import { NoIndexSEO } from "@/components/SEO";
 import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 import { safeLocalStorage } from "@/lib/storage";
@@ -71,16 +70,7 @@ export function Checkout() {
   const [orderId, setOrderId] = useState(null);
   const [orderNumber, setOrderNumber] = useState("");
   const [confirmedTotal, setConfirmedTotal] = useState(0);
-  const [confirmedAdvanceFee, setConfirmedAdvanceFee] = useState(0);
-  const [confirmedPayOnDeliveryAmount, setConfirmedPayOnDeliveryAmount] =
-    useState(0);
-
-  // Payment popup state
-  const [showPaymentPopup, setShowPaymentPopup] = useState(false);
-  const [paymentPopupMethod, setPaymentPopupMethod] = useState("");
-
-  // Verification step payment method (for COD)
-  const [verificationPaymentMethod, setVerificationPaymentMethod] = useState("");
+  const [confirmedDiscount, setConfirmedDiscount] = useState(0);
 
   // Coupon state
   const [couponCode, setCouponCode] = useState("");
@@ -93,7 +83,6 @@ export function Checkout() {
   const [showMobileSummary, setShowMobileSummary] = useState(false);
   const [cartHydrated, setCartHydrated] = useState(false);
   const [showCartLoading, setShowCartLoading] = useState(false);
-  const cartLoadStartedRef = useRef(false);
   const couponValidationRequestRef = useRef(0);
 
   useEffect(() => {
@@ -110,15 +99,12 @@ export function Checkout() {
     }
 
     if (cartLoading) {
-      cartLoadStartedRef.current = true;
       loadingTimer = setTimeout(() => {
         setShowCartLoading(true);
       }, 300);
     } else {
       setShowCartLoading(false);
-      if (cartLoadStartedRef.current || items.length > 0) {
-        setCartHydrated(true);
-      }
+      setCartHydrated(true);
     }
 
     return () => {
@@ -126,7 +112,7 @@ export function Checkout() {
         clearTimeout(loadingTimer);
       }
     };
-  }, [authLoading, isAuthenticated, cartLoading, items.length]);
+  }, [authLoading, isAuthenticated, cartLoading]);
 
   // Fetch available coupons
   useEffect(() => {
@@ -364,74 +350,13 @@ export function Checkout() {
     loadSavedAddresses();
   }, [authLoading, isAuthenticated, user?.id]);
 
-  // Payment state
-  const [paymentMethod, setPaymentMethod] = useState("cod");
-  const [copiedType, setCopiedType] = useState(null); // null | 'jazzcash' | 'easypaisa'
-  const [activePaymentAccounts, setActivePaymentAccounts] = useState([]);
-  const [, setPaymentAccountsLoaded] = useState(false);
-
-  const [verificationFile, setVerificationFile] = useState(null);
-  const [verificationError, setVerificationError] = useState("");
-  const [transactionId, setTransactionId] = useState("");
-  const [tidError, setTidError] = useState("");
+  // Payment state (SafePay + COD only — manual wallet/bank flows removed)
+  const [paymentMethod, setPaymentMethod] = useState("safepay");
   const [activePaymentMethods, setActivePaymentMethods] = useState([]);
   const [paymentMethodsLoaded, setPaymentMethodsLoaded] = useState(false);
   const [paymentMethodsError, setPaymentMethodsError] = useState("");
-
-  const TID_REGEX = /^\d{11}$/;
-  const isWalletMethod = (m) => m === "jazzcash" || m === "easypaisa";
-  const validateTid = (value, method) => {
-    if (!isWalletMethod(method)) return "";
-    const trimmed = (value || "").trim();
-    if (!trimmed) return "Transaction ID is required for JazzCash/EasyPaisa.";
-    if (!TID_REGEX.test(trimmed)) return "TID must be exactly 11 digits.";
-    return "";
-  };
-
-  // COD Advance Payment state
-  const [codAdvanceMethod] = useState("jazzcash");
-  const [whatsappNumber, setWhatsappNumber] = useState("");
   const [shippingCities, setShippingCities] = useState([]);
   const [shippingCitiesLoading, setShippingCitiesLoading] = useState(true);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadPaymentAccounts = async () => {
-      if (authLoading) {
-        return;
-      }
-
-      if (!isAuthenticated || !user?.id) {
-        if (isMounted) {
-          setActivePaymentAccounts([]);
-          setPaymentAccountsLoaded(true);
-        }
-        return;
-      }
-
-      try {
-        const response = await paymentAPI.getActiveAccounts();
-        if (isMounted) {
-          setActivePaymentAccounts(Array.isArray(response) ? response : []);
-        }
-      } catch {
-        if (isMounted) {
-          setActivePaymentAccounts([]);
-        }
-      } finally {
-        if (isMounted) {
-          setPaymentAccountsLoaded(true);
-        }
-      }
-    };
-
-    loadPaymentAccounts();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [authLoading, isAuthenticated, user?.id]);
 
   useEffect(() => {
     let isMounted = true;
@@ -480,31 +405,6 @@ export function Checkout() {
     };
   }, [authLoading, isAuthenticated, user?.id]);
 
-  // Fetch WhatsApp number (falls back to settings context if API fails)
-  useEffect(() => {
-    let isMounted = true;
-    const loadWhatsAppNumber = async () => {
-      try {
-        const response = await settingsAPI.getWhatsAppNumber();
-        if (isMounted && response?.whatsappNumber) {
-          setWhatsappNumber(response.whatsappNumber.replace(/\D/g, ""));
-        }
-      } catch {
-        // Fall back to the value already available via SettingsContext.
-        // Admin owns the number end-to-end — no hardcoded fallback.
-        if (isMounted) {
-          const contextNumber =
-            String(settings.whatsappNumber || settings.storePhone || "").replace(/\D/g, "");
-          setWhatsappNumber(contextNumber);
-        }
-      }
-    };
-    loadWhatsAppNumber();
-    return () => {
-      isMounted = false;
-    };
-  }, [settings.whatsappNumber, settings.storePhone]);
-
   // Fetch active shipping cities
   useEffect(() => {
     let isMounted = true;
@@ -530,17 +430,6 @@ export function Checkout() {
     };
   }, []);
 
-  const activeAccountsByType = useMemo(() => {
-    const map = new Map();
-    activePaymentAccounts.forEach((account) => {
-      const key = String(account.type || "").trim().toLowerCase();
-      if (key) {
-        map.set(key, account);
-      }
-    });
-    return map;
-  }, [activePaymentAccounts]);
-
   const activePaymentMethodCodes = useMemo(
     () =>
       new Set(
@@ -550,6 +439,24 @@ export function Checkout() {
       ),
     [activePaymentMethods],
   );
+
+  const safepayMethod = useMemo(
+    () =>
+      activePaymentMethods.find(
+        (method) => String(method.code || "").trim().toLowerCase() === "safepay",
+      ) || null,
+    [activePaymentMethods],
+  );
+
+  const codMethod = useMemo(
+    () =>
+      activePaymentMethods.find(
+        (method) => String(method.code || "").trim().toLowerCase() === "cod",
+      ) || null,
+    [activePaymentMethods],
+  );
+
+  const safepayGatewayConfigured = Boolean(safepayMethod?.gateway_configured);
 
   const isCheckoutPaymentMethodAvailable = (method) =>
     !paymentMethodsLoaded || activePaymentMethodCodes.has(method);
@@ -564,13 +471,16 @@ export function Checkout() {
         return currentMethod;
       }
 
+      if (activePaymentMethodCodes.has("safepay")) {
+        return "safepay";
+      }
+
       return String(activePaymentMethods[0]?.code || "").trim().toLowerCase();
     });
   }, [activePaymentMethodCodes, activePaymentMethods, paymentMethodsLoaded]);
 
   const handleShippingChange = (e) => {
     const { name, value } = e.target;
-    // Clear validation for this field on change
     setFieldErrors((prev) => { const n = {...prev}; delete n[name]; return n; });
     setFieldValid((prev) => { const n = {...prev}; delete n[name]; return n; });
     setShippingData((prev) => ({
@@ -590,70 +500,13 @@ export function Checkout() {
     }));
   };
 
-  const handleCopyAccountNumber = async (accountNumber, type) => {
-    if (!accountNumber) return;
-    try {
-      await navigator.clipboard.writeText(accountNumber);
-      setCopiedType(type);
-    } catch { /* ignored: not fatal to this flow */ }
-  };
-
   const handlePaymentMethodSelect = (method) => {
     if (paymentMethodsLoaded && !activePaymentMethodCodes.has(method)) {
       return;
     }
-
+    setError("");
     setPaymentMethod(method);
-    if (method === "easypaisa" || method === "jazzcash") {
-      setPaymentPopupMethod(method);
-      setShowPaymentPopup(true);
-    }
   };
-
-  const handleVerificationFileChange = (event) => {
-    const file = event.target.files?.[0] || null;
-    setVerificationFile(file);
-    if (file) {
-      setVerificationError("");
-    }
-  };
-
-  const getWhatsAppMessage = () => {
-    const formatAmount = (value) => formatPrice(value, settings.currency);
-    if (paymentMethod === "cod") {
-      const amount = confirmedAdvanceFee || deliveryFee;
-      const codLabel =
-        codAdvanceMethod === "easypaisa" ? "EasyPaisa" : "JazzCash";
-      const message = `Assalam o Alaikum! My Order #${orderNumber} has been placed. I am sending ${formatAmount(amount)} advance payment via ${codLabel}. Please confirm my order.`;
-      return encodeURIComponent(message);
-    }
-
-    if (paymentMethod === "easypaisa" || paymentMethod === "jazzcash") {
-      const amount = confirmedTotal || finalTotal;
-      const message = `Assalam o Alaikum! My Order #${orderNumber} has been placed. I have sent full payment of ${formatAmount(amount)} via ${paymentMethodLabel}. I will send the payment screenshot now. Please confirm my order.`;
-      return encodeURIComponent(message);
-    }
-
-    return encodeURIComponent(
-      `Assalam o Alaikum! My Order #${orderNumber} has been placed. Please confirm my order.`,
-    );
-  };
-
-  const handleWhatsAppClick = () => {
-    if (!whatsappNumber || !orderNumber) return;
-    const message = getWhatsAppMessage();
-    window.open(`https://wa.me/${whatsappNumber}?text=${message}`, "_blank");
-  };
-
-  useEffect(() => {
-    if (!copiedType) return;
-
-    const timer = setTimeout(() => {
-      setCopiedType(null);
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, [copiedType]);
 
 
   // Coupon functions
@@ -711,33 +564,23 @@ export function Checkout() {
   const finalTotal = subtotal - discount + deliveryFee;
   const payOnDeliveryAmount = Math.max(0, subtotal - discount);
 
-  // Single source of truth for the order payload. It was built twice — once in
-  // the direct-checkout path and again in the COD advance path — with the two
-  // copies kept in sync by hand, so any change to checkout had to be made in
-  // both places and one of them would eventually be missed.
-  //
-  // Money fields are deliberately absent: the server derives payment status from
-  // the method and recomputes every total from the cart, the coupon table and
-  // the city fee table. Sending them would imply the client has a say.
+  const codUsesSafepayAdvance =
+    paymentMethod === "cod" &&
+    deliveryFee > 0 &&
+    Boolean(codMethod?.safepay_advance_enabled);
+
   const buildOrderPayload = () => ({
     customer_name: customerFullName,
     customer_email: shippingData.email,
-    shipping_address: `${shippingData.address}, ${shippingData.city}`,
+    shipping_address: [shippingData.address, shippingData.city, shippingData.postalCode]
+      .filter(Boolean)
+      .join(", "),
     phone: shippingData.phone,
     city: shippingData.city,
     address_id: selectedAddressId || null,
     payment_method: paymentMethod,
     coupon_code: appliedCoupon?.code || null,
   });
-  const selectedPaymentAccount = activeAccountsByType.get(paymentMethod);
-  const paymentMethodLabel =
-    paymentMethod === "easypaisa"
-      ? "EasyPaisa"
-      : paymentMethod === "jazzcash"
-        ? "JazzCash"
-        : paymentMethod === "bank"
-          ? "Bank Transfer"
-        : paymentMethod;
   const checkoutPanelClass =
     "relative overflow-hidden rounded-3xl border border-white/70 bg-white/90 p-4 sm:p-6 lg:p-8 shadow-[0_16px_45px_rgba(15,23,42,0.08)] backdrop-blur";
   const checkoutFieldClass =
@@ -781,69 +624,74 @@ export function Checkout() {
       return;
     }
 
-    // For all manual payments, go to verification step first.
-    if (["cod", "easypaisa", "jazzcash", "bank"].includes(paymentMethod)) {
-      // Initialize verification payment method
-      if (paymentMethod === "cod") {
-        setVerificationPaymentMethod(codAdvanceMethod || "jazzcash");
-      } else {
-        setVerificationPaymentMethod(paymentMethod);
-      }
-      setStep("verification");
+    if (paymentMethod === "safepay" && !safepayGatewayConfigured) {
+      setError(
+        "SafePay gateway keys are not configured yet on this server. Add SAFEPAY_API_KEY and SAFEPAY_SECRET_KEY in backend/.env or choose Cash on Delivery.",
+      );
       return;
     }
 
     setIsProcessing(true);
     setError("");
 
-    // Verify cart directly from backend before creating order
     try {
-      const cartResponse = await cartAPI.get();
-      const fetchedItems = Array.isArray(cartResponse.items) ? cartResponse.items : [];
-      if (fetchedItems.length === 0) {
-        setError("Your cart is empty. Please add items before placing an order.");
-        setIsProcessing(false);
+      let activeOrderId = orderId;
+      let createdOrder = null;
+
+      if (!activeOrderId) {
+        try {
+          const cartResponse = await cartAPI.get();
+          const fetchedItems = Array.isArray(cartResponse.items) ? cartResponse.items : [];
+          if (fetchedItems.length === 0) {
+            setError("Your cart is empty. Please add items before placing an order.");
+            return;
+          }
+        } catch {
+          setError("Unable to verify cart. Please refresh the page and try again.");
+          return;
+        }
+
+        if (subtotal < 1) {
+          setError(`Order subtotal must be at least ${formatPrice(1, settings.currency)} to place an order.`);
+          return;
+        }
+
+        const orderData = buildOrderPayload();
+        createdOrder = await addOrder(orderData);
+
+        if (!createdOrder || !createdOrder.id) {
+          throw new Error("Order creation failed - no order ID returned");
+        }
+
+        activeOrderId = createdOrder.id;
+        setOrderId(createdOrder.id);
+      }
+
+      const needsSafepayRedirect =
+        createdOrder?.requires_safepay ??
+        (paymentMethod === "safepay" || codUsesSafepayAdvance);
+
+      if (needsSafepayRedirect) {
+        const session = await paymentAPI.createSafepaySession(activeOrderId);
+        if (!session?.checkout_url) {
+          throw new Error("SafePay did not return a valid checkout URL.");
+        }
+        try {
+          const storageKey = getShippingStorageKey(user?.id);
+          if (storageKey) safeLocalStorage.removeItem(storageKey);
+          safeLocalStorage.removeItem(STORAGE_KEY);
+        } catch { /* ignored: not fatal to this flow */ }
+        window.location.assign(session.checkout_url);
         return;
       }
-    } catch {
-      // If we can't fetch cart, assume it's empty or has an issue
-      setError("Unable to verify cart. Please refresh the page and try again.");
-      setIsProcessing(false);
-      return;
-    }
 
-    // Validate minimum order amount
-    if (subtotal < 1) {
-      setError(`Order subtotal must be at least ${formatPrice(1, settings.currency)} to place an order.`);
-      setIsProcessing(false);
-      return;
-    }
-
-    try {
-      // Saving the address is optional. Do not block order creation on a
-      // separate address transaction; the order stores the submitted address.
-      const orderData = buildOrderPayload();
-
-      // Create order through backend API
-      const newOrder = await addOrder(orderData);
-
-      // Only proceed if order was actually created
-      if (!newOrder || !newOrder.id) {
-        throw new Error("Order creation failed - no order ID returned");
-      }
-
-      const orderNum = `ORD-${newOrder.id.toString().padStart(6, "0")}`;
-      const authoritativeTotal = Number(newOrder.total_amount ?? finalTotal) || 0;
-      const authoritativeShipping = Number(newOrder.shipping_cost ?? deliveryFee) || 0;
-      setOrderId(newOrder.id);
+      const orderNum = `ORD-${activeOrderId.toString().padStart(6, "0")}`;
+      const authoritativeTotal = Number(createdOrder?.total_amount ?? finalTotal) || 0;
+      const authoritativeDiscount = Number(createdOrder?.discount_amount ?? discount) || 0;
       setOrderNumber(orderNum);
       setConfirmedTotal(authoritativeTotal);
-      setConfirmedAdvanceFee(authoritativeShipping);
-      setConfirmedPayOnDeliveryAmount(
-        Math.max(0, authoritativeTotal - authoritativeShipping),
-      );
+      setConfirmedDiscount(authoritativeDiscount);
 
-      // Clear cart after order is confirmed
       setStep("confirmation");
       clearCart();
       try {
@@ -852,9 +700,6 @@ export function Checkout() {
         safeLocalStorage.removeItem(STORAGE_KEY);
       } catch { /* ignored: not fatal to this flow */ }
     } catch (error) {
-      // DO NOT re-fetch cart on order failure - this would clear the local cart if backend cart was already empty
-      // The backend returns "Cart is empty" if items were removed between page load and order attempt
-
       const statusCode = Number(error?.response?.status || 0);
       const errorMessage = String(error?.response?.data?.error || error?.message || "").toLowerCase();
 
@@ -957,448 +802,11 @@ export function Checkout() {
     );
   }
 
-  // Verification step for manual payments (COD, EasyPaisa, JazzCash, Bank)
-  if (step === "verification") {
-    // For COD, use advance fee (delivery fee); for others, use full total
-    const verificationTotal = paymentMethod === "cod" ? (confirmedAdvanceFee || deliveryFee) : (confirmedTotal || finalTotal);
-    // Grand total of the order (subtotal - discount + shipping). Once the order
-    // is placed the server-confirmed amount takes over.
-    const orderTotal = confirmedTotal || finalTotal;
-    const selectedVerificationAccount = activeAccountsByType.get(verificationPaymentMethod);
-    const isCod = paymentMethod === "cod";
-
-    const handleSubmitVerificationAndOrder = async () => {
-      if (!verificationFile) {
-        setVerificationError("Please upload a payment screenshot.");
-        return;
-      }
-
-      const tidValidation = validateTid(transactionId, verificationPaymentMethod);
-      if (tidValidation) {
-        setTidError(tidValidation);
-        setVerificationError(tidValidation);
-        return;
-      }
-
-      setIsProcessing(true);
-      setError("");
-
-      // First verify cart
-      try {
-        const cartResponse = await cartAPI.get();
-        const fetchedItems = Array.isArray(cartResponse.items) ? cartResponse.items : [];
-        if (fetchedItems.length === 0) {
-          setError("Your cart is empty. Please add items before placing an order.");
-          setIsProcessing(false);
-          return;
-        }
-      } catch {
-        setError("Unable to verify cart. Please refresh the page and try again.");
-        setIsProcessing(false);
-        return;
-      }
-
-      if (subtotal < 1) {
-        setError(`Order subtotal must be at least ${formatPrice(1, settings.currency)} to place an order.`);
-        setIsProcessing(false);
-        return;
-      }
-
-      try {
-        // Create the order if we haven't yet. On retry after a failed
-        // verification upload we re-use the same orderId so we don't create
-        // duplicate orders.
-        let activeOrderId = orderId;
-        if (!activeOrderId) {
-          const orderData = buildOrderPayload();
-
-          const newOrder = await addOrder(orderData);
-
-          if (!newOrder || !newOrder.id) {
-            throw new Error("Order creation failed - no order ID returned");
-          }
-
-          activeOrderId = newOrder.id;
-          const orderNum = `ORD-${newOrder.id.toString().padStart(6, "0")}`;
-          const authoritativeTotal = Number(newOrder.total_amount ?? finalTotal) || 0;
-          const authoritativeShipping = Number(newOrder.shipping_cost ?? deliveryFee) || 0;
-          setOrderId(newOrder.id);
-          setOrderNumber(orderNum);
-          setConfirmedTotal(authoritativeTotal);
-          setConfirmedAdvanceFee(isCod ? authoritativeShipping : 0);
-          setConfirmedPayOnDeliveryAmount(
-            isCod ? Math.max(0, authoritativeTotal - authoritativeShipping) : 0,
-          );
-        }
-
-        // Now submit the payment verification
-        const formData = new FormData();
-        formData.append("order_id", String(activeOrderId));
-        formData.append("customer_name", customerFullName);
-        formData.append("customer_phone", shippingData.phone || "");
-        formData.append("amount", String(Math.round(Number(verificationTotal))));
-        formData.append("payment_method", verificationPaymentMethod);
-        formData.append("verification_screenshot", verificationFile);
-        if (transactionId.trim()) {
-          formData.append("transaction_id", transactionId.trim());
-        }
-
-        await paymentAPI.submitVerification(formData);
-
-        // Clear cart and go to confirmation
-        setStep("confirmation");
-        clearCart();
-        try {
-          const storageKey = getShippingStorageKey(user?.id);
-          if (storageKey) safeLocalStorage.removeItem(storageKey);
-          safeLocalStorage.removeItem(STORAGE_KEY);
-        } catch { /* ignored: not fatal to this flow */ }
-      } catch (submitError) {
-        const statusCode = Number(submitError?.response?.status || 0);
-        // Backend payload shape varies: order routes return { error }, payment
-        // verification route returns { message }. Read both.
-        const backendMessage =
-          submitError?.response?.data?.error ||
-          submitError?.response?.data?.message ||
-          "";
-        const errorMessage = String(backendMessage || submitError?.message || "").toLowerCase();
-
-        if (statusCode === 401 || statusCode === 403 || errorMessage.includes("token") || errorMessage.includes("unauthorized")) {
-          setError("Your session has expired. Please login again to continue.");
-        } else if (!submitError?.response) {
-          setError("Unable to connect to server. Please check your internet connection and try again.");
-        } else {
-          setError(backendMessage || "Failed to place order. Please try again.");
-        }
-      } finally {
-        setIsProcessing(false);
-      }
-    };
-
-    return (
-      <>
-        <NoIndexSEO title="Payment Verification - Naturanza Food" />
-        <div className="container-custom max-w-2xl pt-8 sm:pt-12 px-4">
-          <div className="rounded-3xl border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.1)] backdrop-blur sm:p-8 md:p-10">
-            {/* Header */}
-            <div className="text-center mb-6 sm:mb-8">
-              <div className="mx-auto mb-4 inline-flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-lg shadow-emerald-500/30">
-                <CreditCard className="h-8 w-8 sm:h-10 sm:w-10" />
-              </div>
-              <h1 className="font-display text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2">
-                {isCod ? "Delivery Fee Advance Payment" : "Payment Verification Required"}
-              </h1>
-              <p className="text-sm sm:text-base text-gray-600">
-                {isCod
-                  ? `Pay ${formatPrice(verificationTotal, settings.currency)} delivery fee in advance to confirm your order. The remaining ${formatPrice(Math.max(0, orderTotal - verificationTotal), settings.currency)} will be collected as cash on delivery.`
-                  : "Please upload your payment screenshot to confirm your order."}
-              </p>
-            </div>
-
-            {/* Payment Details Card */}
-            <div className="mb-6 rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-50 p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm sm:text-base font-semibold text-gray-800 flex items-center gap-2">
-                  <span className="text-lg">💰</span>
-                  Amount to Pay
-                </h2>
-                <span className="text-xl sm:text-2xl font-bold text-emerald-700">
-                  {formatPrice(verificationTotal, settings.currency)}
-                </span>
-              </div>
-
-              {/* Show both accounts for COD, single account for others */}
-              {isCod ? (
-                <div className="space-y-3">
-                  {/* JazzCash Option */}
-                  {activeAccountsByType.get("jazzcash") && (
-                    <div
-                      className={`rounded-xl border-2 p-4 cursor-pointer transition-all ${
-                        verificationPaymentMethod === "jazzcash"
-                          ? "border-rose-400 bg-rose-50"
-                          : "border-emerald-200 bg-white hover:border-emerald-300"
-                      }`}
-                      onClick={() => setVerificationPaymentMethod("jazzcash")}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <img src="/images/payment%20logos/jazzcash.png" alt="JazzCash" className="w-8 h-8 object-contain" />
-                          <span className="font-semibold text-gray-900">JazzCash</span>
-                        </div>
-                        {verificationPaymentMethod === "jazzcash" && (
-                          <span className="text-xs bg-rose-500 text-white px-2 py-0.5 rounded-full">Selected</span>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-lg font-bold text-gray-900">{activeAccountsByType.get("jazzcash").account_number}</p>
-                          <p className="text-xs text-gray-500">{activeAccountsByType.get("jazzcash").account_name}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCopyAccountNumber(activeAccountsByType.get("jazzcash").account_number, "jazzcash");
-                          }}
-                          className="rounded px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700"
-                        >
-                          {copiedType === "jazzcash" ? "Copied!" : "Copy"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* EasyPaisa Option */}
-                  {activeAccountsByType.get("easypaisa") && (
-                    <div
-                      className={`rounded-xl border-2 p-4 cursor-pointer transition-all ${
-                        verificationPaymentMethod === "easypaisa"
-                          ? "border-emerald-400 bg-emerald-50"
-                          : "border-emerald-200 bg-white hover:border-emerald-300"
-                      }`}
-                      onClick={() => setVerificationPaymentMethod("easypaisa")}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <img src="/images/payment%20logos/easypaisa.png" alt="EasyPaisa" className="w-8 h-8 object-contain" />
-                          <span className="font-semibold text-gray-900">EasyPaisa</span>
-                        </div>
-                        {verificationPaymentMethod === "easypaisa" && (
-                          <span className="text-xs bg-emerald-500 text-white px-2 py-0.5 rounded-full">Selected</span>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-lg font-bold text-gray-900">{activeAccountsByType.get("easypaisa").account_number}</p>
-                          <p className="text-xs text-gray-500">{activeAccountsByType.get("easypaisa").account_name}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCopyAccountNumber(activeAccountsByType.get("easypaisa").account_number, "easypaisa");
-                          }}
-                          className="rounded px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700"
-                        >
-                          {copiedType === "easypaisa" ? "Copied!" : "Copy"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Fallback if no accounts */}
-                  {!activeAccountsByType.get("jazzcash") && !activeAccountsByType.get("easypaisa") && (
-                    <div className="text-center py-4">
-                      <p className="text-sm text-gray-600">Please contact support for payment details</p>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                // Single account for non-COD
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs sm:text-sm text-gray-600">Account Number:</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm sm:text-base font-semibold text-gray-900">
-                        {selectedVerificationAccount?.account_number || "N/A"}
-                      </span>
-                      {selectedVerificationAccount?.account_number && (
-                        <button
-                          type="button"
-                          onClick={() => handleCopyAccountNumber(selectedVerificationAccount.account_number, paymentMethod)}
-                          className="rounded px-2 py-1 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700"
-                        >
-                          {copiedType === paymentMethod ? "Copied!" : "Copy"}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {selectedVerificationAccount?.account_name && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs sm:text-sm text-gray-600">Account Name:</span>
-                      <span className="text-sm sm:text-base font-medium text-gray-800">
-                        {selectedVerificationAccount.account_name}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="mt-4 pt-4 border-t border-emerald-200">
-                <p className="text-xs text-emerald-700 font-medium">
-                  💡 Please send {formatPrice(verificationTotal, settings.currency)} to your selected account, then upload your payment screenshot below.
-                </p>
-              </div>
-            </div>
-
-            {/* Transaction ID Input — required for JazzCash/EasyPaisa */}
-            {isWalletMethod(verificationPaymentMethod) && (
-              <div className="mb-6">
-                <label htmlFor="tid-input-step" className="block text-sm font-semibold text-gray-800 mb-3">
-                  Transaction ID (TID) *
-                </label>
-                <input
-                  id="tid-input-step"
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={11}
-                  autoComplete="off"
-                  value={transactionId}
-                  onChange={(e) => {
-                    const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 11);
-                    setTransactionId(digitsOnly);
-                    setTidError(validateTid(digitsOnly, verificationPaymentMethod));
-                  }}
-                  placeholder="11-digit TID from your payment app"
-                  aria-invalid={Boolean(tidError)}
-                  aria-describedby={tidError ? "tid-input-step-error" : undefined}
-                  className="w-full rounded-xl border border-emerald-100 bg-white px-4 py-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-                {tidError ? (
-                  <p id="tid-input-step-error" className="mt-1 text-xs text-red-600">{tidError}</p>
-                ) : (
-                  <p className="mt-1 text-xs text-gray-500">
-                    Find this on your JazzCash/EasyPaisa transaction receipt.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Screenshot Upload */}
-            <div className="mb-6">
-              <label htmlFor="payment-screenshot" className="block text-sm font-semibold text-gray-800 mb-3">
-                Upload Payment Screenshot *
-              </label>
-              <input
-                id="payment-screenshot"
-                type="file"
-                accept="image/*"
-                onChange={handleVerificationFileChange}
-                className="w-full rounded-xl border border-emerald-100 bg-white px-4 py-3 text-sm text-gray-700 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-emerald-700 hover:file:bg-emerald-100"
-              />
-              {verificationFile && (
-                <p className="mt-2 text-sm text-emerald-600 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4" />
-                  Selected: {verificationFile.name}
-                </p>
-              )}
-              <p className="mt-2 text-xs text-gray-500">
-                Make sure the screenshot clearly shows the transaction details.
-              </p>
-            </div>
-
-            {/* Order Summary */}
-            <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <h3 className="text-sm font-semibold text-gray-800 mb-3">Order Summary</h3>
-              <div className="space-y-2 text-xs sm:text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Items:</span>
-                  <span className="font-medium text-gray-800">{items.length} item(s)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Subtotal:</span>
-                  <span className="font-medium text-gray-800">{formatPrice(subtotal, settings.currency)}</span>
-                </div>
-                {discount > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Discount:</span>
-                    <span className="font-medium text-emerald-600">-{formatPrice(discount, settings.currency)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Shipping:</span>
-                  <span className="font-medium text-gray-800">
-                    {deliveryFee > 0
-                      ? formatPrice(deliveryFee, settings.currency)
-                      : <span className="text-emerald-600 font-semibold">Free</span>}
-                  </span>
-                </div>
-                <div className="flex justify-between border-t border-slate-200 pt-2">
-                  <span className="text-gray-600 font-semibold">Order Total:</span>
-                  <span className="font-bold text-gray-800">{formatPrice(orderTotal, settings.currency)}</span>
-                </div>
-                {isCod && (
-                  <>
-                    <div className="flex justify-between bg-emerald-50 p-2 rounded-lg mt-2">
-                      <span className="text-emerald-700 font-medium">Advance Paid:</span>
-                      <span className="font-bold text-emerald-700">{formatPrice(verificationTotal, settings.currency)}</span>
-                    </div>
-                    <div className="flex justify-between bg-amber-50 p-2 rounded-lg">
-                      <span className="text-amber-700 font-medium">Pending (COD):</span>
-                      <span className="font-bold text-amber-700">{formatPrice(Math.max(0, orderTotal - verificationTotal), settings.currency)}</span>
-                    </div>
-                  </>
-                )}
-                {!isCod && (
-                  <div className="flex justify-between bg-emerald-50 p-2 rounded-lg mt-2">
-                    <span className="text-emerald-700 font-medium">Amount to Pay:</span>
-                    <span className="font-bold text-emerald-700">{formatPrice(verificationTotal, settings.currency)}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Error Message */}
-            {error && (
-              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
-                <div className="flex items-center gap-2 text-rose-700">
-                  <AlertCircle className="h-5 w-5 flex-shrink-0" />
-                  <p className="text-sm font-medium">{error}</p>
-                </div>
-              </div>
-            )}
-
-            {verificationError && (
-              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
-                <div className="flex items-center gap-2 text-rose-700">
-                  <AlertCircle className="h-5 w-5 flex-shrink-0" />
-                  <p className="text-sm font-medium">{verificationError}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Action Buttons — primary on top on mobile, right on desktop */}
-            <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:gap-4">
-              <button
-                onClick={() => setStep("payment")}
-                disabled={isProcessing}
-                className="h-12 w-full rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-50 disabled:opacity-60 sm:flex-1"
-              >
-                Back to Payment
-              </button>
-              <button
-                onClick={handleSubmitVerificationAndOrder}
-                disabled={isProcessing || !verificationFile}
-                className={`h-12 w-full rounded-xl px-5 text-sm font-bold transition-all flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-1 ${checkoutPrimaryButtonToneClass}`}
-              >
-                {isProcessing ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Processing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Shield className="w-4 h-4 shrink-0" />
-                    Upload &amp; Place Order
-                  </>
-                )}
-              </button>
-            </div>
-
-            <p className="text-xs text-gray-500 mt-4 text-center">
-              Your order will be placed after payment verification is uploaded.
-            </p>
-          </div>
-        </div>
-      </>
-    );
-  }
-
   if (step === "confirmation") {
     return (
       <>
         <NoIndexSEO title="Order Confirmed - Naturanza Food" />
-        <div className="container-custom max-w-2xl pt-8 sm:pt-12">
+        <div className="container-custom max-w-2xl pt-24 sm:pt-28 pb-16">
           <div className="rounded-3xl border border-white/70 bg-white/90 p-6 text-center shadow-[0_20px_60px_rgba(15,23,42,0.1)] backdrop-blur sm:p-8 md:p-12">
             {/* Success Icon */}
             <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-lg shadow-emerald-500/30 sm:mb-6 sm:h-24 sm:w-24">
@@ -1407,11 +815,10 @@ export function Checkout() {
 
             {/* Success Message */}
             <h1 className="font-display text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2 sm:mb-3">
-              Order Confirmed! 🎉
+              Order Confirmed!
             </h1>
             <p className="text-base sm:text-lg text-gray-600 mb-6 sm:mb-8">
-              Thank you for your purchase. Your order has been successfully
-              placed.
+              Thank you for your purchase. Your order has been successfully placed.
             </p>
 
             {/* Order Details Card */}
@@ -1425,11 +832,8 @@ export function Checkout() {
                 </div>
                 <div>
                   <p className="text-xs sm:text-sm text-gray-600 mb-1">Payment Method</p>
-                  <p className="font-semibold text-sm sm:text-base text-gray-900 capitalize">
-                    {paymentMethod === "cod" && "💵 Cash on Delivery"}
-                    {paymentMethod === "easypaisa" && "📱 EasyPaisa"}
-                    {paymentMethod === "jazzcash" && "📱 JazzCash"}
-                    {paymentMethod === "bank" && "🏦 Bank Transfer"}
+                  <p className="font-semibold text-sm sm:text-base text-gray-900">
+                    {paymentMethod === "safepay" ? "💳 SafePay" : "💵 Cash on Delivery"}
                   </p>
                 </div>
                 <div>
@@ -1437,13 +841,13 @@ export function Checkout() {
                   <p className="font-bold text-lg sm:text-xl text-green-600">
                     {formatPrice(confirmedTotal, settings.currency)}
                   </p>
-                  {discount > 0 && (
+                  {confirmedDiscount > 0 && (
                     <p className="text-xs text-gray-500">
                       <span className="line-through">
-                        {formatPrice(confirmedTotal + discount, settings.currency)}
+                        {formatPrice(confirmedTotal + confirmedDiscount, settings.currency)}
                       </span>
                       <span className="text-green-600 ml-1">
-                        -{formatPrice(discount, settings.currency)}
+                        -{formatPrice(confirmedDiscount, settings.currency)}
                       </span>
                     </p>
                   )}
@@ -1455,21 +859,10 @@ export function Checkout() {
                   </p>
                 </div>
                 {paymentMethod === "cod" && (
-                  <div>
+                  <div className="col-span-2">
                     <p className="text-xs sm:text-sm text-gray-600 mb-1">Payment Status</p>
                     <p className="font-semibold text-sm sm:text-base text-gray-900">
-                      Pending (COD balance)
-                    </p>
-                  </div>
-                )}
-                {paymentMethod === "cod" && (
-                  <div>
-                    <p className="text-xs sm:text-sm text-gray-600 mb-1">Remaining COD</p>
-                    <p className="font-semibold text-sm sm:text-base text-gray-900">
-                      {formatPrice(
-                        confirmedPayOnDeliveryAmount || payOnDeliveryAmount,
-                        settings.currency,
-                      )}
+                      Cash on Delivery ({formatPrice(confirmedTotal || payOnDeliveryAmount, settings.currency)} due at delivery)
                     </p>
                   </div>
                 )}
@@ -1479,72 +872,18 @@ export function Checkout() {
             {/* Order Status */}
             <div className="mb-6 rounded-xl border border-sky-200 bg-sky-50 p-3 sm:mb-8 sm:p-4">
               <p className="text-xs sm:text-sm text-blue-900">
-                📧 A confirmation email has been sent to{" "}
+                A confirmation email has been sent to{" "}
                 <span className="font-semibold">{shippingData.email}</span>
               </p>
             </div>
 
-            {paymentMethod === "cod" && (
-              <div className="mb-6 rounded-2xl border border-amber-200/80 bg-amber-50/70 p-4 text-left sm:mb-8 sm:p-6">
-                <p className="text-xs font-semibold text-amber-700 sm:text-sm">
-                  ⚠️ Advance payment of{" "}
-                  {formatPrice(confirmedAdvanceFee, settings.currency)} is
-                  required after placing order, otherwise your order will be
-                  cancelled.
-                </p>
-                <div className="mt-4 pt-4 border-t border-amber-200">
-                  <button
-                    type="button"
-                    onClick={handleWhatsAppClick}
-                    disabled={!orderNumber || !whatsappNumber}
-                    className={`w-full rounded-xl px-3 py-3 text-[13px] sm:text-sm font-semibold leading-tight transition-all flex items-center justify-center gap-2 ${
-                      orderNumber && whatsappNumber
-                        ? "bg-emerald-500 text-white hover:bg-emerald-600"
-                        : "bg-slate-200 text-slate-500 cursor-not-allowed"
-                    }`}
-                  >
-                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.162-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-                    </svg>
-                    Confirm Advance Payment
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {(paymentMethod === "easypaisa" || paymentMethod === "jazzcash") && (
-              <div className="mb-6 rounded-2xl border border-emerald-200/80 bg-emerald-50/70 p-4 text-left sm:mb-8 sm:p-6">
-                <p className="text-xs font-semibold text-emerald-700 sm:text-sm">
-                  ✅ Please confirm your {paymentMethodLabel} payment on WhatsApp.
-                </p>
-                <div className="mt-4 pt-4 border-t border-emerald-200">
-                  <button
-                    type="button"
-                    onClick={handleWhatsAppClick}
-                    disabled={!orderNumber || !whatsappNumber}
-                    className={`w-full rounded-xl px-3 py-3 text-[13px] sm:text-sm font-semibold leading-tight transition-all flex items-center justify-center gap-2 ${
-                      orderNumber && whatsappNumber
-                        ? "bg-emerald-500 text-white hover:bg-emerald-600"
-                        : "bg-slate-200 text-slate-500 cursor-not-allowed"
-                    }`}
-                  >
-                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.162-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-                    </svg>
-                    Confirm Payment on WhatsApp
-                  </button>
-                </div>
-              </div>
-            )}
-
-
             {/* Action Buttons */}
             <div className="flex flex-col gap-2.5 sm:flex-row sm:gap-4">
               <Link
-                to="/shop"
+                to="/orders"
                 className="flex h-12 w-full items-center justify-center rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 px-5 text-sm sm:text-base font-semibold text-white shadow-lg transition-all hover:from-green-700 hover:to-emerald-700 hover:shadow-xl sm:flex-1"
               >
-                Continue Shopping
+                View My Orders
               </Link>
               <button
                 onClick={() => window.print()}
@@ -1561,7 +900,6 @@ export function Checkout() {
             </p>
           </div>
         </div>
-
       </>
     );
   }
@@ -1574,7 +912,7 @@ export function Checkout() {
         <div className="absolute right-[-120px] top-56 h-[280px] w-[280px] rounded-full bg-green-200/20 blur-3xl" />
       </div>
 
-      <div className="container-custom relative px-4 sm:px-6 pt-24 sm:pt-0">
+      <div className="container-custom relative px-4 sm:px-6 pt-24 sm:pt-28 pb-16">
         {/* Header */}
         <div className="mb-6 rounded-2xl border border-white/75 bg-white/85 px-4 py-4 shadow-sm backdrop-blur-xl sm:mb-8 sm:px-5 sm:py-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1747,7 +1085,11 @@ export function Checkout() {
                       <input
                         type="text"
                         name="fullName"
-                        value={`${shippingData.firstName} ${shippingData.lastName}`.trim()}
+                        value={
+                          shippingData.lastName
+                            ? `${shippingData.firstName} ${shippingData.lastName}`
+                            : shippingData.firstName
+                        }
                         onChange={handleFullNameChange}
                         onBlur={(e) => handleFieldBlur("fullName", e.target.value)}
                         autoComplete="name"
@@ -1844,10 +1186,10 @@ export function Checkout() {
                       required
                       className={`${checkoutFieldClass} ${getFieldState("address") === "invalid" ? "border-red-400 bg-red-50/50" : ""}`}
                     />
+                    {fieldErrors.address && (
+                      <p className="mt-1 text-xs font-medium text-red-600">{fieldErrors.address}</p>
+                    )}
                   </div>
-                  {fieldErrors.address && (
-                    <p className="mt-1 text-xs font-medium text-red-600">{fieldErrors.address}</p>
-                  )}
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-700">
                       City *
@@ -1913,14 +1255,26 @@ export function Checkout() {
 
                 {/* Trust Signals */}
                 <div className="mt-6 mb-4 flex flex-wrap items-center justify-center gap-3">
-                  <img src="/images/payment%20logos/easypaisa.png" alt="Easypaisa" className="h-7 w-auto object-contain opacity-80" />
-                  <img src="/images/payment%20logos/jazzcash.png" alt="JazzCash" className="h-7 w-auto object-contain opacity-80" />
-                  <img src="/images/payment%20logos/cash-on-delivery.png" alt="COD" className="h-7 w-auto object-contain opacity-80" />
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+                    <Shield className="h-3.5 w-3.5" />
+                    SafePay Gateway
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                    <Truck className="h-3.5 w-3.5" />
+                    Cash on Delivery
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 justify-center mb-3">
                   <Lock className="h-3.5 w-3.5 text-emerald-600" />
-                  <span className="text-xs font-medium text-emerald-700">100% Secure Checkout</span>
+                  <span className="text-xs font-medium text-emerald-700">100% Secure Encrypted Checkout</span>
                 </div>
+
+                {error && (
+                  <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
 
                 <button
                   onClick={() => {
@@ -1970,8 +1324,43 @@ export function Checkout() {
                     </div>
                   )}
 
-                {/* Payment Method Selection */}
+                {/* Payment Method Selection (SafePay + COD only) */}
                 <div className="space-y-2.5 sm:space-y-3 mb-6 sm:mb-8">
+                  {/* SafePay Online Payment */}
+                  <label
+                    className={`${getPaymentOptionClass(paymentMethod === "safepay")} ${
+                      isCheckoutPaymentMethodAvailable("safepay") ? "" : "hidden"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="payment"
+                      value="safepay"
+                      checked={paymentMethod === "safepay"}
+                      onChange={(e) => handlePaymentMethodSelect(e.target.value)}
+                      className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 focus:ring-green-500 flex-shrink-0"
+                    />
+                    <div className="flex h-9 w-9 sm:h-10 sm:w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-green-700 text-white shadow-sm">
+                      <Shield className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="block text-sm font-semibold leading-tight text-gray-900 sm:text-base">
+                          SafePay Online Payment
+                        </span>
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                          Instant
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs leading-tight text-gray-500">
+                        Pay securely via Visa, Mastercard, Raast, or mobile wallets on SafePay
+                      </p>
+                    </div>
+                    {paymentMethod === "safepay" && (
+                      <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 flex-shrink-0" />
+                    )}
+                  </label>
+
                   {/* Cash on Delivery */}
                   <label
                     className={`${getPaymentOptionClass(paymentMethod === "cod")} ${
@@ -1996,148 +1385,63 @@ export function Checkout() {
                         Cash on Delivery
                       </span>
                       <p className="mt-0.5 text-xs leading-tight text-gray-500">
-                        Pay when you receive your order
+                        {deliveryFee > 0 && codMethod?.safepay_advance_enabled
+                          ? `Pay ${formatPrice(deliveryFee, settings.currency)} delivery fee via SafePay & ${formatPrice(payOnDeliveryAmount, settings.currency)} cash on delivery`
+                          : "Pay in cash when you receive your order"}
                       </p>
                     </div>
                     {paymentMethod === "cod" && (
                       <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 flex-shrink-0" />
                     )}
                   </label>
+                </div>
 
-                  {/* EasyPaisa */}
-                  <label
-                    className={`${getPaymentOptionClass(
-                      paymentMethod === "easypaisa",
-                    )} ${
-                      isCheckoutPaymentMethodAvailable("easypaisa") ? "" : "hidden"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="payment"
-                      value="easypaisa"
-                      checked={paymentMethod === "easypaisa"}
-                      onChange={(e) => handlePaymentMethodSelect(e.target.value)}
-                      className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 focus:ring-green-500 flex-shrink-0"
-                    />
-                    <img
-                      src="/images/payment%20logos/easypaisa.png"
-                      alt="EasyPaisa"
-                      className="w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0 object-contain"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <span className="block text-sm font-semibold leading-tight text-gray-900 sm:text-base">
-                        EasyPaisa
-                      </span>
-                      <p className="mt-0.5 text-xs leading-tight text-gray-500">
-                        Mobile wallet payment
-                      </p>
-                    </div>
-                    {paymentMethod === "easypaisa" && (
-                      <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 flex-shrink-0" />
-                    )}
-                  </label>
-
-                  {/* JazzCash */}
-                  <label
-                    className={`${getPaymentOptionClass(paymentMethod === "jazzcash")} ${
-                      isCheckoutPaymentMethodAvailable("jazzcash") ? "" : "hidden"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="payment"
-                      value="jazzcash"
-                      checked={paymentMethod === "jazzcash"}
-                      onChange={(e) => handlePaymentMethodSelect(e.target.value)}
-                      className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 focus:ring-green-500 flex-shrink-0"
-                    />
-                    <img
-                      src="/images/payment%20logos/jazzcash.png"
-                      alt="JazzCash"
-                      className="w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0 object-contain"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <span className="block text-sm font-semibold leading-tight text-gray-900 sm:text-base">
-                        JazzCash
-                      </span>
-                      <p className="mt-0.5 text-xs leading-tight text-gray-500">
-                        Mobile wallet payment
-                      </p>
-                    </div>
-                    {paymentMethod === "jazzcash" && (
-                      <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 flex-shrink-0" />
-                    )}
-                  </label>
-
-                  {/* Bank transfer */}
-                  <label
-                    className={`${getPaymentOptionClass(paymentMethod === "bank")} ${
-                      isCheckoutPaymentMethodAvailable("bank") ? "" : "hidden"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="payment"
-                      value="bank"
-                      checked={paymentMethod === "bank"}
-                      onChange={(e) => handlePaymentMethodSelect(e.target.value)}
-                      className="h-4 w-4 flex-shrink-0 text-green-600 focus:ring-green-500 sm:h-5 sm:w-5"
-                    />
-                    <CreditCard className="h-8 w-8 flex-shrink-0 text-emerald-600 sm:h-10 sm:w-10" />
-                    <div className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold leading-tight text-gray-900 sm:text-base">
-                        Bank Transfer
-                      </span>
-                      <p className="mt-0.5 text-xs leading-tight text-gray-500">Transfer to our bank account</p>
-                    </div>
-                    {paymentMethod === "bank" && <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-green-600 sm:h-5 sm:w-5" />}
-                  </label>
-
-                 </div>
-
-                {/* Conditional Payment Fields */}
-
-
-                {(paymentMethod === "easypaisa" || paymentMethod === "jazzcash" || paymentMethod === "bank") && (
-                  <div className="mb-4 rounded-2xl border border-emerald-200/80 bg-emerald-50/70 p-4 sm:mb-6 sm:p-6">
-                    <h3 className="mb-2 text-sm font-semibold text-slate-800 sm:text-base">
-                      {paymentMethodLabel} payment details
-                    </h3>
-                    <p className="mb-4 text-xs font-semibold text-emerald-700 sm:text-sm">
-                      Full payment of {formatPrice(finalTotal, settings.currency)} is required after placing the order.
-                    </p>
-                    <div className="space-y-2.5 rounded-xl border border-emerald-200 bg-white/80 p-3">
-                      <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
-                        <span className="font-semibold text-slate-800">
-                          Send to {paymentMethodLabel}:
-                        </span>
-                        <span className="text-slate-700">
-                          {selectedPaymentAccount?.account_number || "Contact support for account details"}
-                        </span>
-                        {selectedPaymentAccount?.account_number && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleCopyAccountNumber(
-                                selectedPaymentAccount.account_number,
-                                paymentMethod,
-                              )
-                            }
-                            className={`rounded px-3 py-1 text-xs font-semibold ${checkoutPrimaryButtonToneClass}`}
-                          >
-                            {copiedType === paymentMethod ? "Copied ✓" : "Copy Number"}
-                          </button>
+                {/* SafePay Details Box */}
+                {paymentMethod === "safepay" && (
+                  <div className="mb-4 rounded-2xl border border-emerald-200/80 bg-emerald-50/70 p-4 sm:mb-6 sm:p-5">
+                    <div className="flex items-start gap-3">
+                      <Lock className="mt-0.5 h-5 w-5 flex-shrink-0 text-emerald-700" />
+                      <div className="space-y-1.5 text-xs sm:text-sm text-slate-700">
+                        <p className="font-semibold text-slate-900">
+                          Total payable via SafePay: {formatPrice(finalTotal, settings.currency)}
+                        </p>
+                        <p className="text-slate-600">
+                          You will be redirected to SafePay&apos;s encrypted checkout to complete payment instantly. No manual screenshot or verification needed.
+                        </p>
+                        {paymentMethodsLoaded && !safepayGatewayConfigured && (
+                          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                            SafePay API keys are not set in this local environment yet (`SAFEPAY_API_KEY` / `SAFEPAY_SECRET_KEY` in `backend/.env`).
+                          </p>
                         )}
                       </div>
-                      {selectedPaymentAccount?.account_name && (
-                        <p className="text-xs text-slate-500">
-                          {selectedPaymentAccount.account_name}
-                        </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* COD Details Box */}
+                {paymentMethod === "cod" && (
+                  <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:mb-6 sm:p-5">
+                    <div className="space-y-2 text-xs sm:text-sm">
+                      {codUsesSafepayAdvance ? (
+                        <>
+                          <div className="flex items-center justify-between text-emerald-800">
+                            <span className="font-medium">Delivery fee via SafePay (now):</span>
+                            <span className="font-bold">{formatPrice(deliveryFee, settings.currency)}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-slate-700">
+                            <span className="font-medium">Remaining cash on delivery:</span>
+                            <span className="font-bold">{formatPrice(payOnDeliveryAmount, settings.currency)}</span>
+                          </div>
+                          <p className="pt-1 text-xs text-slate-500">
+                            Your order is confirmed automatically once SafePay verifies the delivery fee.
+                          </p>
+                        </>
+                      ) : (
+                        <div className="flex items-center justify-between text-slate-700">
+                          <span className="font-medium">Cash payable on delivery:</span>
+                          <span className="font-bold text-slate-900">{formatPrice(finalTotal, settings.currency)}</span>
+                        </div>
                       )}
-                      <p className="text-xs text-slate-600">
-                        After payment, please send your screenshot on WhatsApp to confirm.
-                      </p>
                     </div>
                   </div>
                 )}
@@ -2156,7 +1460,8 @@ export function Checkout() {
                 <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:gap-4">
                   <button
                     onClick={() => setStep("shipping")}
-                    className="h-11 w-full rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-50 sm:h-12 sm:flex-1"
+                    disabled={isProcessing}
+                    className="h-11 w-full rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-50 disabled:opacity-60 sm:h-12 sm:flex-1"
                   >
                     Back
                   </button>
@@ -2168,14 +1473,17 @@ export function Checkout() {
                   >
                     {isProcessing ? (
                       <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
-                        <span className="hidden xs:inline">Processing...</span>
-                        <span className="xs:hidden">Wait...</span>
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>{paymentMethod === "safepay" || codUsesSafepayAdvance ? "Connecting to SafePay..." : "Placing Order..."}</span>
                       </>
                     ) : (
                       <>
                         <Shield className="w-4 h-4" />
-                        Place Order
+                        {paymentMethod === "safepay"
+                          ? "Pay with SafePay"
+                          : codUsesSafepayAdvance
+                            ? "Pay Delivery Fee via SafePay"
+                            : "Place COD Order"}
                       </>
                     )}
                   </button>
@@ -2183,105 +1491,12 @@ export function Checkout() {
 
                 {/* Security Badge */}
                 <div className="mt-6 flex items-center justify-center gap-2 text-xs font-medium text-slate-500 sm:text-sm">
-                  <Shield className="h-4 w-4" />
-                  <span>Secure & encrypted payment</span>
+                  <Shield className="h-4 w-4 text-emerald-600" />
+                  <span>256-bit SSL encrypted checkout powered by SafePay</span>
                 </div>
               </div>
             )}
           </div>
-
-          {/* Payment Details Popup */}
-          {showPaymentPopup && typeof document !== "undefined" &&
-            createPortal(
-              <div
-                className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-                onClick={(event) => {
-                  if (event.target === event.currentTarget) {
-                    setShowPaymentPopup(false);
-                  }
-                }}
-              >
-                <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
-                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={`/images/payment%20logos/${paymentPopupMethod}.png`}
-                        alt={paymentPopupMethod === "easypaisa" ? "EasyPaisa" : "JazzCash"}
-                        className="w-8 h-8 object-contain"
-                      />
-                      <div>
-                        <h3 className="text-base font-semibold text-slate-900">
-                          {paymentPopupMethod === "easypaisa" ? "EasyPaisa" : "JazzCash"} Payment Details
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Copy the number and send payment
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowPaymentPopup(false)}
-                      className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
-                  <div className="p-4 space-y-4">
-                    <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
-                      <p className="text-xs font-medium text-emerald-700 mb-3">
-                        💰 Send {formatPrice(finalTotal, settings.currency)} to:
-                      </p>
-                      {activeAccountsByType.get(paymentPopupMethod) ? (
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-slate-600">Account Number:</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-lg font-bold text-slate-900">
-                                {activeAccountsByType.get(paymentPopupMethod).account_number}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleCopyAccountNumber(activeAccountsByType.get(paymentPopupMethod).account_number, paymentPopupMethod);
-                                }}
-                                className="rounded px-2 py-1 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700"
-                              >
-                                {copiedType === paymentPopupMethod ? "Copied!" : "Copy"}
-                              </button>
-                            </div>
-                          </div>
-                          {activeAccountsByType.get(paymentPopupMethod).account_name && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-slate-600">Account Name:</span>
-                              <span className="text-sm font-medium text-slate-800">
-                                {activeAccountsByType.get(paymentPopupMethod).account_name}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-slate-600">Contact support for payment details</p>
-                      )}
-                    </div>
-
-                    <div className="rounded-xl border border-amber-100 bg-amber-50/50 p-3">
-                      <p className="text-xs font-medium text-amber-700">
-                        ⚠️ After sending payment, click "Place Order" and upload your payment screenshot to confirm your order.
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowPaymentPopup(false)}
-                      className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-green-600 to-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition-all duration-300 hover:from-emerald-600 hover:to-green-700"
-                    >
-                      Got it, I will send payment
-                    </button>
-                  </div>
-                </div>
-              </div>,
-              document.body,
-            )}
 
           {/* Order Summary */}
           <div
@@ -2538,7 +1753,7 @@ export function Checkout() {
                               </span>
                             </div>
                             <span className="text-[10px] text-slate-400">
-                              Free on orders above {formatPrice(freeShippingThreshold, settings.currency)}
+                              Free with online payment (SafePay) on orders of {formatPrice(freeShippingThreshold, settings.currency)}+
                             </span>
                           </div>
                         )
@@ -2566,6 +1781,20 @@ export function Checkout() {
 
         <div className="mt-3 rounded-2xl border border-white/70 bg-white/80 px-4 py-2 shadow-sm backdrop-blur-xl sm:mt-4 sm:px-5 sm:py-2.5">
           <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-medium text-slate-500 sm:text-sm">
+            <Link
+              to="/shipping"
+              className="transition-colors duration-200 hover:text-emerald-700"
+            >
+              Shipping
+            </Link>
+            <span className="h-1 w-1 rounded-full bg-slate-300" />
+            <Link
+              to="/returns"
+              className="transition-colors duration-200 hover:text-emerald-700"
+            >
+              Returns
+            </Link>
+            <span className="h-1 w-1 rounded-full bg-slate-300" />
             <Link
               to="/terms"
               className="transition-colors duration-200 hover:text-emerald-700"

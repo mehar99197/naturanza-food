@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
   AUTH_SESSION_SYNC_EVENT,
   clearUserAccessToken,
@@ -7,6 +7,10 @@ import {
   userAPI,
   emitAuthSessionSync,
 } from "@/services/api";
+import {
+  clearSessionHintCookie,
+  shouldAttemptSilentRefresh,
+} from "@/lib/authSessionHint";
 
 const AuthContext = createContext(null);
 
@@ -156,7 +160,7 @@ export const AuthProvider = ({ children }) => {
   const isAuthFailureStatus = (statusCode) =>
     statusCode === 401 || statusCode === 403;
 
-  const applyUserState = (nextUser) => {
+  const applyUserState = useCallback((nextUser) => {
     const normalizedUser = normalizeUserObject(nextUser);
     setUser(normalizedUser);
 
@@ -173,9 +177,9 @@ export const AuthProvider = ({ children }) => {
     }
 
     return normalizedUser;
-  };
+  }, []);
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (!getUserAccessToken() || !hasUserSession()) {
       clearUserAccessToken();
       applyUserState(null);
@@ -193,9 +197,9 @@ export const AuthProvider = ({ children }) => {
       }
       return null;
     }
-  };
+  }, [applyUserState]);
 
-  const fetchProfileIfAvailable = async () => {
+  const fetchProfileIfAvailable = useCallback(async () => {
     try {
       const profileResponse = await userAPI.getProfile();
       return {
@@ -208,14 +212,27 @@ export const AuthProvider = ({ children }) => {
         status: Number(err?.response?.status || 0),
       };
     }
-  };
+  }, []);
 
-  const bootstrapAuth = async () => {
+  const bootstrapAuth = useCallback(async () => {
     const runId = ++bootstrapRunIdRef.current;
 
     try {
       setLoading(true);
       if (!getUserAccessToken() || !hasUserSession()) {
+        const canRefresh = shouldAttemptSilentRefresh({
+          hasAccessToken: Boolean(getUserAccessToken()),
+          hasActiveSession: hasUserSession(),
+          cachedUser: getCachedUserData(),
+        });
+
+        if (!canRefresh) {
+          clearUserAccessToken();
+          applyUserState(null);
+          setError(null);
+          return;
+        }
+
         try {
           await userAPI.refreshToken();
         } catch {
@@ -282,7 +299,7 @@ export const AuthProvider = ({ children }) => {
         setLoading(false);
       }
     }
-  };
+  }, [applyUserState, fetchProfileIfAvailable]);
 
   useEffect(() => {
     void bootstrapAuth();
@@ -290,7 +307,7 @@ export const AuthProvider = ({ children }) => {
     return () => {
       bootstrapRunIdRef.current += 1;
     };
-  }, []);
+  }, [bootstrapAuth]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -331,6 +348,12 @@ export const AuthProvider = ({ children }) => {
         const nextUser = normalizeUserObject(JSON.parse(event.newValue));
         if (nextUser) {
           applyUserState(nextUser);
+          if (!getUserAccessToken()) {
+            void userAPI
+              .refreshToken()
+              .then(() => refreshProfile())
+              .catch(() => {});
+          }
         }
       } catch {
         clearUserAccessToken();
@@ -344,7 +367,7 @@ export const AuthProvider = ({ children }) => {
       window.removeEventListener(AUTH_SESSION_SYNC_EVENT, handleSessionSync);
       window.removeEventListener("storage", handleStorageSync);
     };
-  }, []);
+  }, [applyUserState, refreshProfile]);
 
   // Periodic token refresh - runs every 12 minutes to keep session alive
   useEffect(() => {
@@ -474,6 +497,8 @@ export const AuthProvider = ({ children }) => {
           .toLowerCase();
 
         if (loginRole === "admin") {
+          clearUserAccessToken();
+          applyUserState(null);
           const message = "Admin accounts must use the admin login page.";
           setError(message);
           return {
@@ -548,6 +573,7 @@ export const AuthProvider = ({ children }) => {
       // Local cleanup still happens if network logout fails.
     } finally {
       clearUserAccessToken();
+      clearSessionHintCookie();
       applyUserState(null);
       setError(null);
     }

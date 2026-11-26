@@ -15,8 +15,14 @@ export function CartProvider({ children }) {
  const [isCartOpen, setIsCartOpen] = useState(false);
  const [loading, setLoading] = useState(false);
  const [error, setError] = useState(null);
+ const itemsRef = useRef(items);
  const requestGenerationRef = useRef(0);
+ const sessionGenerationRef = useRef(0);
  const quantityMutationQueuesRef = useRef(new Map());
+
+ useEffect(() => {
+  itemsRef.current = items;
+ }, [items]);
 
  const fetchCart = useCallback(async () => {
   const requestGeneration = ++requestGenerationRef.current;
@@ -49,8 +55,10 @@ export function CartProvider({ children }) {
  }
  
   if (isAuthenticated) {
+  sessionGenerationRef.current += 1;
   fetchCart();
   } else {
+  sessionGenerationRef.current += 1;
   requestGenerationRef.current += 1;
   setItems([]);
   setLoading(false);
@@ -72,15 +80,14 @@ export function CartProvider({ children }) {
  }
 
   const safeQuantity = Math.max(1, Number(quantity) || 1);
-  const requestGeneration = requestGenerationRef.current;
+  const sessionGeneration = sessionGenerationRef.current;
+  const previousItems = itemsRef.current;
 
  const price = Number(product?.price ?? 0);
  const discount = Number(product?.discount_percentage ?? 0);
  const finalPrice = price - (price * discount) / 100;
 
- let previousItems;
  setItems((current) => {
- previousItems = current;
  const existingIndex = current.findIndex(
  (item) => String(item.product_id) === String(productId)
  );
@@ -117,10 +124,10 @@ export function CartProvider({ children }) {
 
  try {
  await cartAPI.add(productId, safeQuantity);
- fetchCart();
+ await fetchCart();
  return { success: true };
   } catch (err) {
-  if (requestGeneration !== requestGenerationRef.current) {
+  if (sessionGeneration !== sessionGenerationRef.current) {
   return { success: false, error: 'Session changed while updating the cart' };
   }
   setItems(previousItems);

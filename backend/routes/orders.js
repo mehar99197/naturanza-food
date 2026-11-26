@@ -13,6 +13,7 @@ const {
   reserveStockOnConnection,
   releaseReservationsOnConnection,
 } = require('../utils/stockReservations');
+const { getSafepayConfig } = require('../utils/safepay');
 
 const ALLOWED_ORDER_STATUSES = new Set([
   'pending',
@@ -28,6 +29,15 @@ const ALLOWED_PAYMENT_STATUSES = new Set([
   'partial',
   'paid',
   'failed',
+]);
+
+const ALLOWED_SHIPMENT_STATUSES = new Set([
+  'pending',
+  'packed',
+  'shipped',
+  'in_transit',
+  'delivered',
+  'returned',
 ]);
 
 const SHIPMENT_STATUS_FOR_ORDER_STATUS = {
@@ -70,29 +80,31 @@ const releaseCouponUsageOnConnection = async (connection, couponCode, orderId = 
 const normalizePaymentMethod = (rawMethod) => {
   const nextMethod = String(rawMethod || 'cod').trim().toLowerCase();
 
-  if (nextMethod === 'creditcard' || nextMethod === 'credit_card') {
-    return 'card';
+  if (nextMethod === 'safepay' || nextMethod === 'safe_pay') {
+    return 'safepay';
   }
 
-  // COD is the default storefront method. It must pass through here — returning
-  // null made every COD order fail the availability check below with a 400.
   if (nextMethod === 'cod' || nextMethod === 'cash_on_delivery') {
     return 'cod';
-  }
-
-  if (nextMethod === 'easypaisa' || nextMethod === 'jazzcash' || nextMethod === 'bank') {
-    return nextMethod;
-  }
-
-  if (nextMethod === 'card' || nextMethod === 'online') {
-    return nextMethod;
   }
 
   return null;
 };
 
+const formatPaymentMethodLabel = (rawMethod) => {
+  const method = String(rawMethod || 'cod').trim().toLowerCase();
+  if (method === 'safepay') return 'SafePay (Online Payment)';
+  if (method === 'cod') return 'Cash on Delivery';
+  if (method === 'easypaisa') return 'EasyPaisa';
+  if (method === 'jazzcash') return 'JazzCash';
+  if (method === 'bank') return 'Bank Transfer';
+  if (method === 'card') return 'Card';
+  if (method === 'online') return 'Online';
+  return method.toUpperCase();
+};
+
 const getAllowedPaymentMethods = async (connection) => {
-  const fallback = new Set(['cod', 'card', 'online', 'easypaisa', 'jazzcash', 'bank']);
+  const supportedMethods = new Set(['safepay', 'cod']);
 
   try {
     const [rows] = await connection.query(
@@ -102,21 +114,18 @@ const getAllowedPaymentMethods = async (connection) => {
     );
 
     if (!rows.length) {
-      return fallback;
+      return supportedMethods;
     }
 
     const allowedMethods = new Set(
       rows
         .map((row) => String(row.code || '').trim().toLowerCase())
-        .filter(Boolean),
+        .filter((code) => supportedMethods.has(code)),
     );
 
-    // COD is a core storefront method. Keep legacy/incomplete payment-method
-    // rows from making the hard-coded checkout option unusable.
-    allowedMethods.add('cod');
-    return allowedMethods;
+    return allowedMethods.size > 0 ? allowedMethods : supportedMethods;
   } catch (error) {
-    return fallback;
+    return supportedMethods;
   }
 };
 
@@ -131,21 +140,33 @@ const parseNullableDate = (value) => {
 
 const createTrackingNumber = (orderId) => `TRK-${String(orderId).padStart(10, '0')}`;
 
+const hasOrderReadPermission = (user) => {
+  if (!isAdminUser(user)) {
+    return false;
+  }
+  if (String(user?.admin_role || '').toLowerCase() === 'super_admin') {
+    return true;
+  }
+  const permissions = Array.isArray(user?.admin_permissions)
+    ? user.admin_permissions.map((value) => String(value).trim())
+    : [];
+  return ['manage_orders', 'manage_shipping', 'manage_payments'].some((permission) =>
+    permissions.includes(permission),
+  );
+};
+
 const requireOrdersPermissionForAdmins = (req, res, next) => {
   if (!isAdminUser(req.user)) {
     return next();
   }
-  return requirePermission('manage_orders')(req, res, next);
+  // Ownership check runs inside getOrderWithAuthorization, which allows an
+  // admin to read their own order or any order when they hold order/shipping/
+  // payment permission.
+  return next();
 };
 
 const requireAnyOrderReadPermission = (req, res, next) => {
-  if (String(req.user?.admin_role || '').toLowerCase() === 'super_admin') {
-    return next();
-  }
-  const permissions = Array.isArray(req.user?.admin_permissions)
-    ? req.user.admin_permissions.map((value) => String(value).trim())
-    : [];
-  if (['manage_orders', 'manage_shipping', 'manage_payments'].some((permission) => permissions.includes(permission))) {
+  if (hasOrderReadPermission(req.user)) {
     return next();
   }
   return res.status(403).json({ error: 'You do not have permission to view orders' });
@@ -340,17 +361,8 @@ const sendCustomerOrderConfirmation = async ({
   const orderDate = orderDateRaw
     ? new Date(orderDateRaw).toLocaleString("en-PK")
     : "-";
-  const paymentMethod = normalizePaymentMethod(order?.payment_method);
-  const paymentMethodLabel =
-    paymentMethod === "easypaisa"
-      ? "EasyPaisa"
-      : paymentMethod === "jazzcash"
-        ? "JazzCash"
-        : paymentMethod === "card"
-          ? "Card"
-          : paymentMethod === "online"
-            ? "Online"
-            : "Cash on Delivery";
+  const paymentMethod = String(order?.payment_method || "cod").trim().toLowerCase();
+  const paymentMethodLabel = formatPaymentMethodLabel(paymentMethod);
   const paymentStatusRaw = String(order?.payment_status || "pending").trim().toLowerCase();
   const paymentStatusLabel =
     paymentStatusRaw.charAt(0).toUpperCase() + paymentStatusRaw.slice(1);
@@ -599,32 +611,36 @@ const upsertShipmentForOrder = async (
   },
 ) => {
   const [existingRows] = await connection.query(
-    'SELECT id FROM shipments WHERE order_id = ? LIMIT 1',
+    'SELECT id, tracking_number FROM shipments WHERE order_id = ? LIMIT 1',
     [orderId],
   );
 
   const nextShipmentStatus =
     shipmentStatus || SHIPMENT_STATUS_FOR_ORDER_STATUS[orderStatus] || 'pending';
-  const nextTrackingNumber = trackingNumber || createTrackingNumber(orderId);
+  const normalizedTrackingNumber = trackingNumber ? String(trackingNumber).trim() : null;
   const shippedAt =
     orderStatus === 'shipped' || nextShipmentStatus === 'shipped' ? new Date() : null;
   const deliveredAt =
     orderStatus === 'delivered' || nextShipmentStatus === 'delivered' ? new Date() : null;
 
   if (existingRows.length > 0) {
+    const updateTrackingNumber =
+      normalizedTrackingNumber ||
+      (!existingRows[0].tracking_number ? createTrackingNumber(orderId) : null);
+
     await connection.query(
       `UPDATE shipments
        SET courier_name = COALESCE(?, courier_name),
            tracking_number = COALESCE(?, tracking_number),
            shipment_status = ?,
-           shipped_at = COALESCE(?, shipped_at),
+           shipped_at = COALESCE(shipped_at, ?),
            estimated_delivery = COALESCE(?, estimated_delivery),
-           delivered_at = COALESCE(?, delivered_at),
+           delivered_at = COALESCE(delivered_at, ?),
            metadata = JSON_SET(COALESCE(metadata, JSON_OBJECT()), '$.updated_from_order_status', ?)
        WHERE order_id = ?`,
       [
         courierName,
-        nextTrackingNumber,
+        updateTrackingNumber,
         nextShipmentStatus,
         shippedAt,
         estimatedDelivery,
@@ -637,6 +653,8 @@ const upsertShipmentForOrder = async (
     return;
   }
 
+  const insertTrackingNumber = normalizedTrackingNumber || createTrackingNumber(orderId);
+
   await connection.query(
     `INSERT INTO shipments
      (order_id, courier_name, tracking_number, shipment_status, shipped_at, estimated_delivery, delivered_at, metadata)
@@ -644,7 +662,7 @@ const upsertShipmentForOrder = async (
     [
       orderId,
       courierName,
-      nextTrackingNumber,
+      insertTrackingNumber,
       nextShipmentStatus,
       shippedAt,
       estimatedDelivery,
@@ -751,7 +769,7 @@ const getOrderWithAuthorization = async (connection, orderId, user) => {
   }
 
   const order = orderRows[0];
-  if (order.user_id !== user.id && !isAdminUser(user)) {
+  if (order.user_id !== user.id && !hasOrderReadPermission(user)) {
     return { error: { code: 403, message: 'Access denied' } };
   }
 
@@ -780,6 +798,8 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
 
   const connection = await db.promise().getConnection();
   let transactionCommitted = false;
+  let orderId = null;
+  let totalAmount = 0;
 
   try {
     await connection.beginTransaction();
@@ -789,7 +809,8 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
                (p.price - (p.price * p.discount_percentage / 100)) AS final_price
        FROM cart c
        JOIN products p ON c.product_id = p.id
-       WHERE c.user_id = ? AND p.is_active = TRUE
+       WHERE c.user_id = ? AND p.is_active = TRUE AND p.deleted_at IS NULL
+       ORDER BY c.product_id ASC
        FOR UPDATE`,
       [req.user.id],
     );
@@ -820,21 +841,18 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     const paymentMethod = normalizePaymentMethod(req.body?.payment_method);
     const allowedPaymentMethods = await getAllowedPaymentMethods(connection);
 
-    if (!allowedPaymentMethods.has(paymentMethod)) {
+    if (!paymentMethod || !allowedPaymentMethods.has(paymentMethod)) {
       await connection.rollback();
       return res.status(400).json({
-        error: 'Selected payment method is currently unavailable',
+        error: 'Selected payment method is currently unavailable. Please choose SafePay or Cash on Delivery.',
       });
     }
 
-    // SECURITY: never trust the client-supplied payment status. Prepaid gateway
-    // methods are 'paid'; COD / wallet / bank transfer stay 'pending' until an
-    // admin verifies the payment. Financial totals are recomputed below.
-    const PREPAID_METHODS = new Set(['online', 'card']);
-    if (PREPAID_METHODS.has(paymentMethod)) {
+    const safepayConfig = getSafepayConfig();
+    if (paymentMethod === 'safepay' && !safepayConfig.configured) {
       await connection.rollback();
-      return res.status(400).json({
-        error: 'This payment method is not available yet. Please choose Cash on Delivery or a manual wallet payment.',
+      return res.status(503).json({
+        error: 'SafePay payment gateway is not configured in this environment. Please configure SAFEPAY_API_KEY and SAFEPAY_SECRET_KEY or choose Cash on Delivery.',
       });
     }
 
@@ -932,24 +950,37 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
         perUserExhausted = Number(redemptions) >= Number(coupon.per_user_limit);
       }
 
-      if (
-        coupon &&
-        !perUserExhausted &&
-        !(coupon.usage_limit && coupon.used_count >= coupon.usage_limit) &&
-        !(coupon.min_order_amount && subtotal < safeNumber(coupon.min_order_amount))
-      ) {
-        appliedCouponId = coupon.id;
-        if (String(coupon.discount_type) === 'percentage') {
-          discountAmount = (subtotal * safeNumber(coupon.discount_value)) / 100;
-          if (coupon.max_discount && discountAmount > safeNumber(coupon.max_discount)) {
-            discountAmount = safeNumber(coupon.max_discount);
-          }
-        } else {
-          discountAmount = safeNumber(coupon.discount_value);
+      if (!coupon) {
+        await connection.rollback();
+        return res.status(400).json({ error: 'Invalid or expired coupon code' });
+      }
+      if (perUserExhausted) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: 'You have already reached the usage limit for this coupon',
+        });
+      }
+      if (coupon.usage_limit && coupon.used_count >= coupon.usage_limit) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: 'Coupon usage limit has been reached',
+        });
+      }
+      if (coupon.min_order_amount && subtotal < safeNumber(coupon.min_order_amount)) {
+        await connection.rollback();
+        return res.status(400).json({
+          error: `Minimum order amount of ${safeNumber(coupon.min_order_amount)} is required for this coupon`,
+        });
+      }
+
+      appliedCouponId = coupon.id;
+      if (String(coupon.discount_type) === 'percentage') {
+        discountAmount = (subtotal * safeNumber(coupon.discount_value)) / 100;
+        if (coupon.max_discount && discountAmount > safeNumber(coupon.max_discount)) {
+          discountAmount = safeNumber(coupon.max_discount);
         }
       } else {
-        effectiveCouponCode = null;
-        appliedCouponId = null;
+        discountAmount = safeNumber(coupon.discount_value);
       }
     }
     discountAmount = Math.min(Math.max(0, discountAmount), subtotal);
@@ -985,14 +1016,30 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       shippingCost = safeNumber(cityFee.fee);
     }
 
-    const totalAmount = Math.max(0, subtotal - discountAmount + tax + shippingCost);
+    totalAmount = Math.max(0, subtotal - discountAmount + tax + shippingCost);
+
+    // SafePay flow:
+    //   - paymentMethod === 'safepay': full order total paid via SafePay checkout.
+    //   - paymentMethod === 'cod' with shippingCost > 0 & SafePay configured:
+    //     delivery fee advance paid via SafePay, remaining balance paid on delivery.
+    //   - paymentMethod === 'cod' without SafePay advance: confirmed directly as COD.
+    const requiresSafepay =
+      paymentMethod === 'safepay' ||
+      (paymentMethod === 'cod' && shippingCost > 0 && safepayConfig.configured);
+    const safepayStage = requiresSafepay
+      ? (paymentMethod === 'cod' ? 'advance_shipping' : 'full_payment')
+      : null;
+    const safepayAmount = requiresSafepay
+      ? (paymentMethod === 'cod' ? shippingCost : totalAmount)
+      : 0;
+    const initialOrderStatus = requiresSafepay ? 'pending' : 'confirmed';
 
     const [orderInsertResult] = await connection.query(
       `INSERT INTO orders
        (user_id, address_id, customer_name, customer_email, total_amount, subtotal, discount_amount, tax, shipping_cost,
         coupon_code, status, payment_method, payment_status, payment_details, shipping_address, city, phone,
         estimated_delivery, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         req.user.id,
         addressId,
@@ -1004,6 +1051,7 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
         tax,
         shippingCost,
         effectiveCouponCode,
+        initialOrderStatus,
         paymentMethod,
         paymentStatus,
         paymentDetailsPayload ? JSON.stringify(paymentDetailsPayload) : null,
@@ -1015,7 +1063,7 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       ],
     );
 
-    const orderId = orderInsertResult.insertId;
+    orderId = orderInsertResult.insertId;
 
     // Record WHO redeemed, not just that a redemption happened. coupons.used_count
     // is a global tally; without this row the per-customer cap checked above has
@@ -1042,12 +1090,10 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     );
 
     // Stock policy:
-    //   - paymentStatus === 'paid'    : prepaid (card/online). Hard-deduct now, customer is committed.
-    //   - paymentStatus === 'pending' : awaiting manual verification (COD advance / wallet screenshot).
-    //                                   Reserve only. Admin approval will deduct; reject/timeout releases.
-    // This prevents overselling during the verification queue without locking stock forever
-    // on abandoned cart-uploads.
-    const shouldReserveOnly = paymentStatus === 'pending';
+    //   - requiresSafepay === true  : reserve stock while customer completes SafePay
+    //                                 hosted checkout (60-minute TTL; consumed on verify/webhook).
+    //   - requiresSafepay === false : direct COD order; hard-deduct stock immediately.
+    const shouldReserveOnly = requiresSafepay;
 
     if (shouldReserveOnly) {
       const reservationItems = cartItems.map((item) => ({
@@ -1112,20 +1158,24 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     await insertOrderStatusHistory(connection, {
       orderId,
       fromStatus: null,
-      toStatus: 'pending',
+      toStatus: initialOrderStatus,
       changedByUserId: req.user.id,
-      note: 'Order created',
+      note: requiresSafepay
+        ? 'Order created — awaiting SafePay payment'
+        : 'Order created and confirmed (Cash on Delivery)',
     });
 
-    await insertPaymentTransaction(connection, {
-      orderId,
-      userId: req.user.id,
-      transactionType: 'payment',
-      provider: paymentMethod,
-      amount: totalAmount,
-      status: paymentStatus,
-      payload: paymentDetailsPayload,
-    });
+    if (!requiresSafepay) {
+      await insertPaymentTransaction(connection, {
+        orderId,
+        userId: req.user.id,
+        transactionType: 'payment',
+        provider: paymentMethod,
+        amount: totalAmount,
+        status: paymentStatus,
+        payload: paymentDetailsPayload,
+      });
+    }
 
     await connection.query('DELETE FROM cart WHERE user_id = ?', [req.user.id]);
 
@@ -1203,7 +1253,7 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     }
 
     const custEmail = order?.customer_email || customerEmail;
-    if (custEmail) {
+    if (custEmail && !requiresSafepay) {
       setImmediate(() => {
         sendCustomerOrderConfirmation({
           order,
@@ -1220,6 +1270,9 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       message: 'Order created successfully',
       orderId,
       total: totalAmount.toFixed(2),
+      requires_safepay: requiresSafepay,
+      safepay_stage: safepayStage,
+      safepay_amount: Number(safepayAmount.toFixed(2)),
       order,
     });
   } catch (error) {
@@ -1227,7 +1280,7 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
       await connection.rollback();
     } else {
       console.error('[orders] post-commit response hydration failed:', {
-        orderId: error?.orderId,
+        orderId,
         code: error?.code,
         message: error?.message,
       });
@@ -1285,7 +1338,7 @@ router.get('/admin/all', authenticateToken, isAdmin, requireAnyOrderReadPermissi
     .map((value) => value.trim().toLowerCase())
     .filter((value) => value && value !== 'all' && ALLOWED_ORDER_STATUSES.has(value));
   const search = req.query.search ? String(req.query.search).trim() : '';
-  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
 
   try {
@@ -1342,8 +1395,36 @@ router.get('/admin/all', authenticateToken, isAdmin, requireAnyOrderReadPermissi
       [...filterParams, limit, offset],
     );
 
+    const [[statusCountsRow]] = await db.promise().query(
+      `SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+          SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) AS confirmed,
+          SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
+          SUM(CASE WHEN status = 'shipped' THEN 1 ELSE 0 END) AS shipped,
+          SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) AS delivered,
+          SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
+          COALESCE(SUM(CASE WHEN status != 'cancelled' THEN total_amount ELSE 0 END), 0) AS totalRevenue
+        FROM orders`,
+    );
+
     const hydratedOrders = await hydrateOrders(db.promise(), orders);
-    res.json({ data: hydratedOrders, total: Number(total) || 0, limit, offset });
+    res.json({
+      data: hydratedOrders,
+      total: Number(total) || 0,
+      limit,
+      offset,
+      statusCounts: {
+        total: Number(statusCountsRow?.total || 0),
+        pending: Number(statusCountsRow?.pending || 0),
+        confirmed: Number(statusCountsRow?.confirmed || 0),
+        processing: Number(statusCountsRow?.processing || 0),
+        shipped: Number(statusCountsRow?.shipped || 0),
+        delivered: Number(statusCountsRow?.delivered || 0),
+        cancelled: Number(statusCountsRow?.cancelled || 0),
+        totalRevenue: Number(statusCountsRow?.totalRevenue || 0),
+      },
+    });
   } catch (error) {
     res.status(500).json({ error: 'Database error' });
   }
@@ -1377,21 +1458,25 @@ router.get('/:id/invoice', authenticateToken, requireOrdersPermissionForAdmins, 
 
     const [order] = await hydrateOrders(db.promise(), orders);
     const adminSettings = await getAdminSettings(db.promise());
+    const storeName = String(adminSettings.storeName || '').trim();
+    const storeEmail = String(adminSettings.storeEmail || '').trim();
+    const storePhone = String(adminSettings.storePhone || '').trim();
+    const storeAddress = String(adminSettings.address || '').trim();
     const companyOverrides = {
-      ...(adminSettings.storeName ? { legalName: adminSettings.storeName } : {}),
-      ...(adminSettings.storeEmail ? { email: adminSettings.storeEmail } : {}),
-      ...(adminSettings.storePhone ? { phone: adminSettings.storePhone } : {}),
+      ...(storeName ? { brandName: storeName } : {}),
+      ...(storeEmail ? { email: storeEmail } : {}),
+      ...(storePhone ? { phone: storePhone } : {}),
       // From-address tracks the admin's editable store address (same source the
       // storefront uses), so changing it in the dashboard updates new invoices.
-      ...(adminSettings.address ? { officeAddress: adminSettings.address } : {}),
+      ...(storeAddress ? { officeAddress: storeAddress } : {}),
     };
 
-    // Amount paid = approved payment verifications (COD advance / prepaid / final
-    // collection). Balance Due is what is still pending (e.g. COD to collect).
+    // Amount paid = completed payment transactions (SafePay full payment,
+    // SafePay COD advance, or confirmed COD cash collection).
     const [[paidRow]] = await db.promise().query(
       `SELECT COALESCE(SUM(amount), 0) AS paid
-         FROM advance_payment_verifications
-        WHERE order_id = ? AND status = 'approved'`,
+         FROM payment_transactions
+        WHERE order_id = ? AND transaction_type = 'payment' AND status = 'paid'`,
       [orderId],
     );
     const paymentStatus = String(order.payment_status || 'pending').toLowerCase();
@@ -1617,13 +1702,20 @@ router.put('/:id/shipment', authenticateToken, isAdmin, requireOrderOrShippingPe
     metadata,
   } = req.body || {};
 
+  const normalizedShipmentStatus = shipment_status
+    ? String(shipment_status).trim().toLowerCase()
+    : null;
+  if (normalizedShipmentStatus && !ALLOWED_SHIPMENT_STATUSES.has(normalizedShipmentStatus)) {
+    return res.status(400).json({ error: 'Invalid shipment status' });
+  }
+
   const connection = await db.promise().getConnection();
 
   try {
     await connection.beginTransaction();
 
     const [orderRows] = await connection.query(
-      'SELECT id, status, user_id FROM orders WHERE id = ? FOR UPDATE',
+      'SELECT id, status, payment_status, user_id FROM orders WHERE id = ? FOR UPDATE',
       [orderId],
     );
 
@@ -1632,13 +1724,25 @@ router.put('/:id/shipment', authenticateToken, isAdmin, requireOrderOrShippingPe
       return res.status(404).json({ error: 'Order not found' });
     }
 
+    const orderPaymentStatus = String(orderRows[0].payment_status || 'pending').toLowerCase();
+    if (
+      normalizedShipmentStatus &&
+      ['shipped', 'in_transit', 'delivered'].includes(normalizedShipmentStatus) &&
+      !['partial', 'paid'].includes(orderPaymentStatus)
+    ) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'Payment must be approved before an order can be shipped or delivered.',
+      });
+    }
+
     await upsertShipmentForOrder(connection, {
       orderId,
       orderStatus: orderRows[0].status,
-      courierName: courier_name || null,
-      trackingNumber: tracking_number || null,
+      courierName: courier_name ? String(courier_name).trim() : null,
+      trackingNumber: tracking_number ? String(tracking_number).trim() : null,
       estimatedDelivery: parseNullableDate(estimated_delivery),
-      shipmentStatus: shipment_status || null,
+      shipmentStatus: normalizedShipmentStatus,
     });
 
     if (metadata) {
@@ -1669,6 +1773,11 @@ router.put('/:id/shipment', authenticateToken, isAdmin, requireOrderOrShippingPe
     });
   } catch (error) {
     await connection.rollback();
+    if (error?.code === 'ER_DUP_ENTRY' || error?.errno === 1062) {
+      return res.status(409).json({
+        error: 'Tracking number is already assigned to another order',
+      });
+    }
     res.status(500).json({ error: 'Error updating shipment' });
   } finally {
     connection.release();
@@ -1818,40 +1927,21 @@ router.put('/:id/status', authenticateToken, isAdmin, requireOrderOrShippingPerm
       });
     }
 
-    // COD two-stage: when admin marks a COD order as 'delivered' for the
-    // first time, refuse if stage-1 advance shipping payment isn't approved
-    // (payment_status would still be 'pending'). Otherwise auto-insert the
-    // pending stage-2 verification so admin can confirm cash collection.
+    // If a COD order initiated a SafePay delivery-fee advance (transaction_id starts
+    // with track_) that is still pending, refuse marking delivered until SafePay confirms.
     const isCodOrder = String(order.payment_method || '').toLowerCase() === 'cod';
+    const hasPendingSafepayAdvance =
+      isCodOrder &&
+      currentPaymentStatus === 'pending' &&
+      String(order.transaction_id || '').startsWith('track_');
     const becameDelivered = nextStatusRaw === 'delivered' && order.status !== 'delivered';
 
-    if (isCodOrder && becameDelivered) {
-      if (currentPaymentStatus !== 'partial') {
-        await connection.rollback();
-        return res.status(409).json({
-          error: 'Cannot mark COD order delivered: advance shipping payment must be approved first.',
-          code: 'STAGE_ONE_NOT_APPROVED',
-        });
-      }
-
-      const totalAmount = Number(order.total_amount) || 0;
-      const shippingCost = Number(order.shipping_cost) || 0;
-      const stage2Amount = Math.max(0, totalAmount - shippingCost);
-
-      // INSERT IGNORE + UNIQUE(order_id, verification_stage) keeps this idempotent
-      // when admin clicks "Mark delivered" twice or two admins race.
-      await connection.query(
-        `INSERT IGNORE INTO advance_payment_verifications
-           (order_id, customer_name, customer_phone, amount, payment_method,
-            verification_stage, status)
-         VALUES (?, ?, ?, ?, 'cod', 'final_collection', 'pending')`,
-        [
-          Number(orderId),
-          order.customer_name || 'Customer',
-          order.phone || null,
-          stage2Amount,
-        ],
-      );
+    if (hasPendingSafepayAdvance && becameDelivered) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'Cannot mark COD order delivered while SafePay delivery-fee advance is still pending.',
+        code: 'SAFEPAY_ADVANCE_PENDING',
+      });
     }
 
     if (nextPaymentStatus !== currentPaymentStatus) {
@@ -1859,7 +1949,7 @@ router.put('/:id/status', authenticateToken, isAdmin, requireOrderOrShippingPerm
         orderId,
         userId: order.user_id,
         transactionType: 'payment',
-        provider: normalizePaymentMethod(order.payment_method),
+        provider: normalizePaymentMethod(order.payment_method) || order.payment_method || 'cod',
         amount: order.total_amount,
         status: nextPaymentStatus,
         payload: {
@@ -1921,10 +2011,15 @@ router.delete('/:id', authenticateToken, isAdmin, requirePermission('manage_orde
     }
 
     const order = orderRows[0];
-    const shouldRestoreStock = order.status !== 'cancelled';
+    const shouldRestoreStock = ['pending', 'confirmed', 'processing'].includes(
+      String(order.status || '').toLowerCase(),
+    );
+
+    // Always release any active ('held') reservations before DELETE FROM orders
+    // so ON DELETE CASCADE on stock_reservations can never orphan products.reserved_stock.
+    await releaseReservationsOnConnection(connection, orderId);
 
     if (shouldRestoreStock) {
-      await releaseReservationsOnConnection(connection, orderId);
       await restoreConsumedOrSoldInventoryOnConnection(
         connection,
         orderId,

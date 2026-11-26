@@ -15,6 +15,17 @@ const { syncDefaultAdminPassword } = require('../utils/envSync');
 const { hasReusedPassword, addPasswordToHistory } = require('../utils/passwordHistory');
 
 const isValidAdminStatus = (status) => ['active', 'inactive'].includes(status);
+const SIMPLE_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const requireSelfOrSuperAdmin = (req, res, next) => {
+  const targetId = Number(req.params.id);
+  const isSelf = Number.isInteger(targetId) && targetId === req.user.id;
+  const isSuperAdmin = String(req.user?.admin_role || '').toLowerCase() === 'super_admin';
+  if (!isSelf && !isSuperAdmin) {
+    return res.status(403).json({ error: 'You can only update your own profile image' });
+  }
+  return next();
+};
 
 const parseEnumValues = (enumDefinition = "") => {
   const match = String(enumDefinition).match(/^enum\((.*)\)$/i);
@@ -114,7 +125,7 @@ router.get('/admins', authenticateToken, isAdmin, requireSuperAdmin, async (req,
 });
 
 // POST /api/admin-management/admins - Create new admin
-router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, uploadProfileImage, async (req, res) => {
+router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, uploadProfileImage, restrictBody('full_name', 'email', 'phone', 'role', 'permissions'), async (req, res) => {
   try {
 
     const { full_name, email, phone, role, permissions } = req.body;
@@ -124,6 +135,9 @@ router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, uploadProf
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
+    if (normalizedEmail.length > 254 || !SIMPLE_EMAIL_REGEX.test(normalizedEmail)) {
+      return res.status(400).json({ error: 'Please provide a valid email address' });
+    }
 
     // Look up any existing user with this email. Three cases:
     //   - active admin     → genuine conflict, reject
@@ -192,6 +206,10 @@ router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, uploadProf
         ],
       );
       userId = existingUser.id;
+      await Promise.allSettled([
+        revokeSessionsByUserId(db.promise(), userId),
+        revokeRefreshTokensByUserId(db.promise(), userId, 'admin_reactivated'),
+      ]);
       await logAdminAction(
         req.user.id,
         `Reactivated admin: ${normalizedEmail} (user ${existingUser.id})`,
@@ -270,7 +288,18 @@ router.patch('/admins/:id/status', authenticateToken, isAdmin, requireSuperAdmin
     }
 
     const isActive = status === 'active';
-    await db.promise().query('UPDATE users SET is_active = ? WHERE id = ? AND role = "admin"', [isActive, id]);
+    const [result] = await db.promise().query('UPDATE users SET is_active = ? WHERE id = ? AND role = "admin"', [isActive, id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Admin not found' });
+    }
+
+    if (!isActive) {
+      await Promise.allSettled([
+        revokeSessionsByUserId(db.promise(), Number(id)),
+        revokeRefreshTokensByUserId(db.promise(), Number(id), 'admin_deactivated'),
+      ]);
+    }
 
     await logAdminAction(req.user.id, `Changed admin ${id} status to ${status}`, getClientIP(req));
 
@@ -283,15 +312,9 @@ router.patch('/admins/:id/status', authenticateToken, isAdmin, requireSuperAdmin
 router.isValidAdminStatus = isValidAdminStatus;
 
 // POST /api/admin-management/admins/:id/profile-image - Upload/update admin profile image
-router.post('/admins/:id/profile-image', authenticateToken, isAdmin, uploadProfileImage, async (req, res) => {
+router.post('/admins/:id/profile-image', authenticateToken, isAdmin, requireSelfOrSuperAdmin, uploadProfileImage, async (req, res) => {
   try {
     const targetId = Number(req.params.id);
-    const isSelf = targetId === req.user.id;
-    const isSuperAdmin = String(req.user.admin_role || '').toLowerCase() === 'super_admin';
-
-    if (!isSelf && !isSuperAdmin) {
-      return res.status(403).json({ error: 'You can only update your own profile image' });
-    }
 
     if (!req.file || !req.file.url) {
       return res.status(400).json({ error: 'No image file uploaded' });
@@ -346,7 +369,11 @@ router.delete('/admins/:id/profile-image', authenticateToken, isAdmin, async (re
 // PATCH /api/admin-management/admins/:id/role - Update admin role and permissions
 router.patch('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin, restrictBody('role', 'permissions'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const targetId = Number(req.params.id);
+    if (!Number.isInteger(targetId) || targetId <= 0) {
+      return res.status(400).json({ error: 'Invalid admin id' });
+    }
+
     const { role, permissions } = req.body;
     const normalizedRole = String(role || '').trim().toLowerCase();
     const allowedInputRoles = new Set(['super_admin', 'staff_admin', 'admin', 'moderator']);
@@ -356,13 +383,33 @@ router.patch('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin, 
     }
 
     const resolvedRole = await resolveAdminRole(db.promise(), normalizedRole);
+    if (targetId === req.user.id && resolvedRole !== 'super_admin') {
+      return res.status(400).json({ error: 'Cannot demote your own super admin role' });
+    }
 
-    await db.promise().query(
-      'UPDATE users SET admin_role = ?, admin_permissions = ? WHERE id = ? AND role = "admin"',
-      [resolvedRole, JSON.stringify(permissions || null), id]
+    const permissionsProvided = Object.prototype.hasOwnProperty.call(req.body, 'permissions');
+    const serializedPermissions = permissionsProvided ? JSON.stringify(permissions ?? null) : null;
+
+    const [result] = await db.promise().query(
+      `UPDATE users
+          SET admin_role = ?,
+              admin_permissions = CASE WHEN ? = 1 THEN ? ELSE admin_permissions END
+        WHERE id = ? AND role = "admin"`,
+      [resolvedRole, permissionsProvided ? 1 : 0, serializedPermissions, targetId]
     );
 
-    await logAdminAction(req.user.id, `Updated admin ${id} role to ${resolvedRole}`, getClientIP(req));
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Admin not found' });
+    }
+
+    if (targetId !== req.user.id) {
+      await Promise.allSettled([
+        revokeSessionsByUserId(db.promise(), targetId),
+        revokeRefreshTokensByUserId(db.promise(), targetId, 'admin_role_updated'),
+      ]);
+    }
+
+    await logAdminAction(req.user.id, `Updated admin ${targetId} role to ${resolvedRole}`, getClientIP(req));
 
     res.json({ message: 'Admin role updated successfully' });
   } catch (error) {
@@ -373,28 +420,38 @@ router.patch('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin, 
 // DELETE /api/admin-management/admins/:id/role - Remove admin role
 router.delete('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const targetId = Number(req.params.id);
+    if (!Number.isInteger(targetId) || targetId <= 0) {
+      return res.status(400).json({ error: 'Invalid admin id' });
+    }
 
     // Prevent self-deletion
-    if (parseInt(id) === req.user.id) {
+    if (targetId === req.user.id) {
       return res.status(400).json({ error: 'Cannot remove your own admin role' });
     }
 
     // Change role to customer instead of deleting
-    await db.promise().query(
-      'UPDATE users SET role = "customer", admin_role = NULL, admin_permissions = NULL WHERE id = ?',
-      [id]
+    const [result] = await db.promise().query(
+      'UPDATE users SET role = "customer", admin_role = NULL, admin_permissions = NULL WHERE id = ? AND role = "admin"',
+      [targetId]
     );
 
-    // Invalidate any outstanding password-reset tokens for this user so that
-    // old welcome/reset emails don't keep returning a confusing "Invalid reset
-    // link" error after the account has been demoted. Soft-mark them used.
-    await db.promise().query(
-      'UPDATE password_reset_tokens SET is_used = TRUE, used_at = NOW() WHERE user_id = ? AND is_used = FALSE',
-      [id]
-    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Admin not found' });
+    }
 
-    await logAdminAction(req.user.id, `Removed admin role from user ${id}`, getClientIP(req));
+    // Invalidate any outstanding password-reset tokens and active sessions for
+    // this user so old tokens/sessions cannot linger after demotion.
+    await Promise.allSettled([
+      db.promise().query(
+        'UPDATE password_reset_tokens SET is_used = TRUE, used_at = NOW() WHERE user_id = ? AND is_used = FALSE',
+        [targetId]
+      ),
+      revokeSessionsByUserId(db.promise(), targetId),
+      revokeRefreshTokensByUserId(db.promise(), targetId, 'admin_role_removed'),
+    ]);
+
+    await logAdminAction(req.user.id, `Removed admin role from user ${targetId}`, getClientIP(req));
 
     res.json({ message: 'Admin role removed successfully' });
   } catch (error) {

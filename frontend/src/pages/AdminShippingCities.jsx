@@ -99,14 +99,21 @@ export function AdminShippingCities() {
     const { name, value, type, checked } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: type === "checkbox" ? checked : type === "number" ? parseInt(value, 10) || 0 : value,
+      [name]:
+        type === "checkbox"
+          ? checked
+          : type === "number"
+            ? value === ""
+              ? ""
+              : Math.max(0, parseInt(value, 10) || 0)
+            : value,
     }));
   };
 
   const handleEdit = (city) => {
     setFormData({
       city_name: city.city_name || "",
-      fee: city.fee || "",
+      fee: city.fee ?? "",
       is_active: Boolean(city.is_active),
     });
     setEditingCityId(city.id);

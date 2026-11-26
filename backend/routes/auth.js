@@ -13,7 +13,7 @@ const {
   verifyAccessToken,
   verifyRefreshToken,
   toExpiryDate,
-  getRefreshCookieOptions,
+  setRefreshSessionCookies,
   clearRefreshCookie,
   getJwtRuntimeInfo,
 } = require("../utils/jwtTokens");
@@ -452,14 +452,9 @@ const issueAuthSession = async (req, res, userRecord, provider = "password") => 
     userAgent: req.headers["user-agent"] || null,
   });
 
-  // Remove a legacy host-only cookie before issuing the shared apex-domain
-  // cookie, otherwise browsers can send both values after a www -> apex move.
-  clearRefreshCookie(res, req);
-  res.cookie(
-    JWT_RUNTIME.refreshCookieName,
-    refresh.token,
-    getRefreshCookieOptions(req),
-  );
+  // Remove legacy host-only cookies before issuing the shared apex-domain
+  // cookies, otherwise browsers can send duplicate values after a www -> apex move.
+  setRefreshSessionCookies(res, req, refresh.token);
 
   return {
     accessToken: access.token,
@@ -633,41 +628,58 @@ router.post("/verify-email", async (req, res) => {
     const activationPasswordHash =
       result.credentialHash || (await bcrypt.hash(submittedPassword, 12));
 
-    if (!(await claimVerificationCode(db.promise(), result.codeId))) {
-      return res.status(400).json({
-        error: "This code was already used. Please request a new one.",
-        code: "INVALID_CODE",
-      });
+    const connection = await db.promise().getConnection();
+    let user = null;
+    try {
+      await connection.beginTransaction();
+
+      const [users] = await connection.query(
+        "SELECT id, name, email, phone, address, profile_image, role, admin_role, is_active, signup_provider, password_set_by_user FROM users WHERE id = ? FOR UPDATE",
+        [result.userId],
+      );
+      user = users[0] || null;
+
+      if (!user || !user.is_active) {
+        await connection.rollback();
+        return res.status(403).json({ error: "Account is not available. Please contact support." });
+      }
+
+      if (isAdminAccount(user)) {
+        await connection.rollback();
+        return res.status(403).json({
+          error: "Admin accounts must use the admin login page.",
+          isAdmin: true,
+          redirect: "/admin/login",
+        });
+      }
+
+      if (!(await claimVerificationCode(connection, result.codeId))) {
+        await connection.rollback();
+        return res.status(400).json({
+          error: "This code was already used. Please request a new one.",
+          code: "INVALID_CODE",
+        });
+      }
+
+      await connection.query(
+        `UPDATE users
+            SET email_verified = TRUE,
+                password = ?,
+                password_set_by_user = TRUE
+          WHERE id = ?`,
+        [activationPasswordHash, result.userId],
+      );
+
+      await connection.commit();
+      user.password_set_by_user = true;
+    } catch (txError) {
+      await connection.rollback().catch(() => {});
+      throw txError;
+    } finally {
+      connection.release();
     }
 
     res.clearCookie(PENDING_SIGNUP_COOKIE, { path: "/" });
-
-    await db.promise().query(
-      `UPDATE users
-          SET email_verified = TRUE,
-              password = ?,
-              password_set_by_user = TRUE
-        WHERE id = ?`,
-      [activationPasswordHash, result.userId],
-    );
-
-    const [users] = await db.promise().query(
-      "SELECT id, name, email, phone, address, profile_image, role, admin_role, is_active, signup_provider, password_set_by_user FROM users WHERE id = ? LIMIT 1",
-      [result.userId],
-    );
-    const user = users[0];
-
-    if (!user || !user.is_active) {
-      return res.status(403).json({ error: "Account is not available. Please contact support." });
-    }
-
-    if (isAdminAccount(user)) {
-      return res.status(403).json({
-        error: "Admin accounts must use the admin login page.",
-        isAdmin: true,
-        redirect: "/admin/login",
-      });
-    }
 
     const authSession = await issueAuthSession(req, res, user, "password");
 
@@ -843,12 +855,6 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // Last use of the pooled connection — hand it straight back. Everything
-    // below runs against the pool itself, so holding this one would only add
-    // contention against DB_CONNECTION_LIMIT.
-    await resetLoginFailuresAtomic(connection, user.id);
-    releaseConnection();
-
     if (isAdminAccount(user)) {
       void recordLoginHistorySafely({
         req,
@@ -863,6 +869,12 @@ router.post("/login", async (req, res) => {
         error: "Please use the admin login page for staff accounts.",
       });
     }
+
+    // Last use of the pooled connection — hand it straight back. Everything
+    // below runs against the pool itself, so holding this one would only add
+    // contention against DB_CONNECTION_LIMIT.
+    await resetLoginFailuresAtomic(connection, user.id);
+    releaseConnection();
 
     // Block sign-in until the email is verified. Existing accounts were
     // grandfathered as verified by the migration, so only new, unverified
@@ -1244,6 +1256,15 @@ router.put(
         return res.status(401).json({ error: "Current password is incorrect" });
       }
 
+      if (
+        rows[0].password &&
+        (await bcrypt.compare(newPassword, rows[0].password))
+      ) {
+        return res.status(400).json({
+          error: "New password must be different from your current password.",
+        });
+      }
+
       if (await hasReusedPassword(connection, req.user.id, newPassword, 5)) {
         return res.status(400).json({
           error:
@@ -1493,7 +1514,7 @@ router.put("/addresses/:id", authenticateToken, restrictBody('recipient_name', '
   db.query(
     `UPDATE user_addresses
          SET label = ?, recipient_name = ?, phone = ?, line1 = ?, line2 = ?, city = ?, state = ?, postal_code = ?, country = ?
-         WHERE id = ? AND user_id = ?`,
+         WHERE id = ? AND user_id = ? AND is_active = TRUE`,
     [
       label,
       recipientName,
@@ -1517,7 +1538,7 @@ router.put("/addresses/:id", authenticateToken, restrictBody('recipient_name', '
       }
 
       db.query(
-        "SELECT * FROM user_addresses WHERE id = ? AND user_id = ?",
+        "SELECT * FROM user_addresses WHERE id = ? AND user_id = ? AND is_active = TRUE",
         [req.params.id, req.user.id],
         (readErr, rows) => {
           if (readErr || rows.length === 0) {
@@ -1537,46 +1558,42 @@ router.put("/addresses/:id", authenticateToken, restrictBody('recipient_name', '
 });
 
 // Set default address
-router.patch("/addresses/:id/default", authenticateToken, restrictBody(), (req, res) => {
-  db.query(
-    "SELECT id FROM user_addresses WHERE id = ? AND user_id = ? LIMIT 1",
-    [req.params.id, req.user.id],
-    (findErr, rows) => {
-      if (findErr) {
-        return res.status(500).json({ error: "Database error" });
-      }
+router.patch("/addresses/:id/default", authenticateToken, restrictBody(), async (req, res) => {
+  const connection = await db.promise().getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.query("SELECT id FROM users WHERE id = ? FOR UPDATE", [req.user.id]);
 
-      if (rows.length === 0) {
-        return res.status(404).json({ error: "Address not found" });
-      }
+    const [rows] = await connection.query(
+      "SELECT id FROM user_addresses WHERE id = ? AND user_id = ? AND is_active = TRUE LIMIT 1 FOR UPDATE",
+      [req.params.id, req.user.id],
+    );
 
-      db.query(
-        "UPDATE user_addresses SET is_default = FALSE WHERE user_id = ?",
-        [req.user.id],
-        (resetErr) => {
-          if (resetErr) {
-            return res.status(500).json({ error: "Error updating addresses" });
-          }
+    if (rows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ error: "Address not found" });
+    }
 
-          db.query(
-            "UPDATE user_addresses SET is_default = TRUE WHERE id = ? AND user_id = ?",
-            [req.params.id, req.user.id],
-            (setErr) => {
-              if (setErr) {
-                return res
-                  .status(500)
-                  .json({ error: "Error setting default address" });
-              }
+    await connection.query(
+      "UPDATE user_addresses SET is_default = FALSE WHERE user_id = ?",
+      [req.user.id],
+    );
 
-              return res.json({
-                message: "Default address updated successfully",
-              });
-            },
-          );
-        },
-      );
-    },
-  );
+    await connection.query(
+      "UPDATE user_addresses SET is_default = TRUE WHERE id = ? AND user_id = ? AND is_active = TRUE",
+      [req.params.id, req.user.id],
+    );
+
+    await connection.commit();
+    return res.json({
+      message: "Default address updated successfully",
+    });
+  } catch (error) {
+    await connection.rollback().catch(() => {});
+    return res.status(500).json({ error: "Error setting default address" });
+  } finally {
+    connection.release();
+  }
 });
 
 // Soft-delete address
@@ -1600,7 +1617,7 @@ router.delete("/addresses/:id", authenticateToken, (req, res) => {
 
 // Get notifications for current user
 router.get("/notifications", authenticateToken, (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
   db.query(
     "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
     [req.user.id, limit],
@@ -1931,21 +1948,41 @@ router.post("/reset-password", async (req, res) => {
         });
       }
 
-      if (!(await claimPasswordResetToken(connection, tokenValidation.tokenId))) {
-        return res.status(400).json({
-          error: "This reset link has already been used or expired.",
-          success: false,
-        });
-      }
-
       const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-      await connection.query(
-        "UPDATE users SET password = ?, password_set_by_user = TRUE WHERE id = ?",
-        [hashedPassword, tokenValidation.userId]
-      );
+      let inTransaction = false;
+      try {
+        await connection.beginTransaction();
+        inTransaction = true;
 
-      await addPasswordToHistory(connection, tokenValidation.userId, newPassword);
+        if (!(await claimPasswordResetToken(connection, tokenValidation.tokenId))) {
+          await connection.rollback();
+          inTransaction = false;
+          return res.status(400).json({
+            error: "This reset link has already been used or expired.",
+            success: false,
+          });
+        }
+
+        await connection.query(
+          `UPDATE users
+              SET password = ?,
+                  password_set_by_user = TRUE,
+                  user_failed_login_attempts = 0,
+                  user_locked_until = NULL
+            WHERE id = ?`,
+          [hashedPassword, tokenValidation.userId]
+        );
+
+        await addPasswordToHistory(connection, tokenValidation.userId, newPassword);
+        await connection.commit();
+        inTransaction = false;
+      } catch (txError) {
+        if (inTransaction) {
+          await connection.rollback().catch(() => {});
+        }
+        throw txError;
+      }
     } finally {
       releaseConnection();
     }
@@ -1959,6 +1996,7 @@ router.post("/reset-password", async (req, res) => {
       tokenValidation.userId,
       "password_reset",
     );
+    clearRefreshCookie(res, req);
 
 
     return res.json({
@@ -2048,18 +2086,18 @@ router.post("/refresh", restrictBody(), async (req, res) => {
     const [userRows] = await db.promise().query(
       `SELECT
           id, name, email, phone, address, profile_image,
-          signup_provider, password_set_by_user, role, is_active
+          signup_provider, password_set_by_user, role, admin_role, is_active
        FROM users
        WHERE id = ?
        LIMIT 1`,
       [refreshRecord.user_id],
     );
 
-    if (!userRows.length || !userRows[0].is_active) {
+    if (!userRows.length || !userRows[0].is_active || isAdminAccount(userRows[0])) {
       await revokeRefreshTokensByUserId(
         db.promise(),
         refreshRecord.user_id,
-        "account_inactive",
+        userRows[0] && isAdminAccount(userRows[0]) ? "admin_account_disallowed" : "account_inactive",
       );
       clearRefreshCookie(res, req);
       return res.status(401).json({ error: "Session invalid. Please log in again." });
@@ -2085,12 +2123,7 @@ router.post("/refresh", restrictBody(), async (req, res) => {
     await touchRefreshTokenByJti(db.promise(), nextRefresh.jti);
     await updateSessionToken(db.promise(), refreshRecord.session_id, nextAccess.token);
 
-    clearRefreshCookie(res, req);
-    res.cookie(
-      JWT_RUNTIME.refreshCookieName,
-      nextRefresh.token,
-      getRefreshCookieOptions(req),
-    );
+    setRefreshSessionCookies(res, req, nextRefresh.token);
 
     return res.json({
       message: "Token refreshed successfully",

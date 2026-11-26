@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { orderAPI } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { useAdminAuth } from "@/context/AdminAuthContext";
@@ -18,8 +19,9 @@ export const useOrders = () => {
 };
 
 export const OrderProvider = ({ children }) => {
+  const location = useLocation();
   const { user, loading: authLoading } = useAuth();
-  const { admin, loading: adminLoading } = useAdminAuth();
+  const { admin, loading: adminLoading, canAccess } = useAdminAuth();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -28,6 +30,7 @@ export const OrderProvider = ({ children }) => {
   // customer's full (bounded) list otherwise. Status and search are sent to the
   // server; they used to filter an in-memory copy of the entire orders table.
   const [totalOrders, setTotalOrders] = useState(0);
+  const [statusCounts, setStatusCounts] = useState(null);
   const [orderQuery, setOrderQuery] = useState({
     page: 1,
     pageSize: DEFAULT_ADMIN_PAGE_SIZE,
@@ -35,7 +38,11 @@ export const OrderProvider = ({ children }) => {
     search: "",
   });
 
-  const isAdminViewer = Boolean(admin?.id);
+  const isAdminPage = location.pathname.startsWith("/admin");
+  const canViewAdminOrders =
+    Boolean(admin?.id) &&
+    (canAccess("orders") || canAccess("shipping") || canAccess("payments"));
+  const isAdminViewer = isAdminPage && canViewAdminOrders;
 
   const normalize = (list) =>
     list.map((order) => ({
@@ -49,7 +56,7 @@ export const OrderProvider = ({ children }) => {
 
       if (isAdminViewer) {
         const { page, pageSize, status, search } = orderQuery;
-        const { data, total } = await orderAPI.getAdminPage({
+        const { data, total, statusCounts: nextCounts } = await orderAPI.getAdminPage({
           limit: pageSize,
           offset: (page - 1) * pageSize,
           status,
@@ -57,11 +64,19 @@ export const OrderProvider = ({ children }) => {
         });
         setOrders(normalize(data));
         setTotalOrders(total);
-      } else {
+        if (nextCounts) {
+          setStatusCounts(nextCounts);
+        }
+      } else if (!isAdminPage && user?.id) {
         const response = await orderAPI.getAll();
         const rawOrders = Array.isArray(response) ? response : response.data || [];
         setOrders(normalize(rawOrders));
         setTotalOrders(rawOrders.length);
+        setStatusCounts(null);
+      } else {
+        setOrders([]);
+        setTotalOrders(0);
+        setStatusCounts(null);
       }
 
       setError(null);
@@ -73,7 +88,7 @@ export const OrderProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  }, [isAdminViewer, orderQuery]);
+  }, [isAdminViewer, isAdminPage, orderQuery, user?.id]);
 
   // Changing a filter or search term must go back to page 1, otherwise the pager
   // can sit on a page the new result set does not have.
@@ -87,23 +102,21 @@ export const OrderProvider = ({ children }) => {
 
   useEffect(() => {
     // Wait until BOTH auth contexts have settled, so we don't fire the fetch
-    // before the admin token has been read from storage (the bug that made the
-    // admin Orders page load empty until a manual Refresh).
+    // before the admin session has been restored.
     if (authLoading || adminLoading) {
       return;
     }
 
-    // Fetch when EITHER a customer OR an admin is authenticated. The admin
-    // Orders page has no regular `user`, so the old `!user?.id` check bailed out
-    // and never loaded the list.
-    if (!user?.id && !admin?.id) {
+    if (isAdminPage ? !canViewAdminOrders : !user?.id) {
       setOrders([]);
+      setTotalOrders(0);
+      setStatusCounts(null);
       setLoading(false);
       return;
     }
 
     void fetchOrders();
-  }, [authLoading, adminLoading, fetchOrders, user?.id, admin?.id]);
+  }, [authLoading, adminLoading, isAdminPage, canViewAdminOrders, fetchOrders, user?.id]);
 
   const addOrder = async (orderData) => {
     try {
@@ -132,11 +145,18 @@ export const OrderProvider = ({ children }) => {
         };
       }
 
+      const enrichedOrder = {
+        ...newOrder,
+        requires_safepay: Boolean(response.requires_safepay),
+        safepay_stage: response.safepay_stage || null,
+        safepay_amount: Number(response.safepay_amount || 0),
+      };
+
       setOrders((prevOrders) => [
-        newOrder,
-        ...prevOrders.filter((order) => order.id !== newOrder.id),
+        enrichedOrder,
+        ...prevOrders.filter((order) => order.id !== enrichedOrder.id),
       ]);
-      return newOrder;
+      return enrichedOrder;
     } catch (err) {
       console.error("Failed to create order:", err);
       throw err;
@@ -207,7 +227,7 @@ export const OrderProvider = ({ children }) => {
     });
   };
 
-  const getUserOrders = async (userId) => {
+  const getUserOrders = async () => {
     try {
       const response = await orderAPI.getUserOrders();
       return Array.isArray(response) ? response : response.data || [];
@@ -243,13 +263,14 @@ export const OrderProvider = ({ children }) => {
     return {
       total: orders.length,
       pending: orders.filter((o) => o.status === "pending").length,
+      confirmed: orders.filter((o) => o.status === "confirmed").length,
       processing: orders.filter((o) => o.status === "processing").length,
       shipped: orders.filter((o) => o.status === "shipped").length,
       delivered: orders.filter((o) => o.status === "delivered").length,
       cancelled: orders.filter((o) => o.status === "cancelled").length,
       totalRevenue: orders
         .filter((o) => o.payment_status === "paid")
-        .reduce((sum, o) => sum + (o.total_amount || 0), 0),
+        .reduce((sum, o) => sum + Number(o.total_amount || 0), 0),
     };
   };
 
@@ -269,6 +290,7 @@ export const OrderProvider = ({ children }) => {
     getOrderStats,
     fetchOrders,
     totalOrders,
+    statusCounts,
     orderQuery,
     setOrderFilters,
     adminPageSize: DEFAULT_ADMIN_PAGE_SIZE,

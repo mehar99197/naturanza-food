@@ -1,5 +1,9 @@
 const crypto = require("crypto");
-const { getCookieDomain } = require("../utils/jwtTokens");
+const {
+  getCookieDomain,
+  shouldUseSecureCookies,
+  resolveSameSite,
+} = require("../utils/jwtTokens");
 
 const configuredCsrfSecret = String(process.env.CSRF_SECRET || "").trim();
 const jwtSecret = String(process.env.JWT_SECRET || "").trim();
@@ -17,12 +21,6 @@ const CSRF_COOKIE_MAX_AGE = 24 * 60 * 60 * 1000;
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-const isStaticAssetPath = (path) => {
-  if (!path) return false;
-  const staticExtensions = [".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".map"];
-  return staticExtensions.some((ext) => path.toLowerCase().endsWith(ext));
-};
-
 const generateToken = () => {
   return crypto.randomBytes(CSRF_TOKEN_LENGTH).toString("hex");
 };
@@ -38,15 +36,19 @@ const createSignedToken = (token, salt = "") => {
 
 const verifySignedToken = (signedToken, salt = "") => {
   try {
+    if (typeof signedToken !== "string") {
+      return { valid: false, reason: "Invalid format" };
+    }
     const parts = signedToken.split(".");
     if (parts.length !== 3) {
       return { valid: false, reason: "Invalid format" };
     }
 
     const [token, timestamp, signature] = parts;
-    const tokenAge = Date.now() - parseInt(timestamp, 36);
+    const parsedTimestamp = parseInt(timestamp, 36);
+    const tokenAge = Date.now() - parsedTimestamp;
 
-    if (tokenAge > CSRF_COOKIE_MAX_AGE) {
+    if (!Number.isFinite(parsedTimestamp) || tokenAge < -60_000 || tokenAge > CSRF_COOKIE_MAX_AGE) {
       return { valid: false, reason: "Token expired" };
     }
 
@@ -55,27 +57,29 @@ const verifySignedToken = (signedToken, salt = "") => {
     hmac.update(data);
     const expectedSignature = hmac.digest("base64url");
 
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+    const sigBuf = Buffer.from(signature);
+    const expectedBuf = Buffer.from(expectedSignature);
+    if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
       return { valid: false, reason: "Invalid signature" };
     }
 
-    return { valid: true, token, timestamp: parseInt(timestamp, 36) };
+    return { valid: true, token, timestamp: parsedTimestamp };
   } catch (error) {
     return { valid: false, reason: "Verification failed" };
   }
 };
 
-// NOTE: there is deliberately no path exclusion list here. One used to exist,
-// documented as "GET requests only" — but SAFE_METHODS below already skips every
-// GET, so the list could only ever take effect on POST/PUT/PATCH/DELETE, the
-// exact requests it was meant not to cover. It left POST /api/products and
-// POST /api/categories with no CSRF check at all, reachable with an admin's
-// cookie session. Anything genuinely needing an exemption must be matched on
-// method AND path, not path alone.
+// NOTE: there is deliberately no path-only skip list here. SAFE_METHODS
+// already skips every GET/HEAD/OPTIONS request, so skipping by file extension
+// or prefix only exempted unsafe methods (e.g., DELETE /api/admin/users/5.js).
+// The sole narrow method+path exemption is RFC 8058 one-click newsletter
+// unsubscribe, which mail clients POST directly using an unguessable 64-hex token.
+const ONE_CLICK_UNSUBSCRIBE_RE = /^\/api\/newsletter\/unsubscribe\/[A-Za-z0-9_-]{16,128}$/;
+
 const csrfMiddleware = (options = {}) => {
   const {
-    cookieSecure = process.env.NODE_ENV === "production",
-    cookieSameSite = process.env.NODE_ENV === "production" ? "strict" : "lax",
+    cookieSecure = shouldUseSecureCookies(),
+    cookieSameSite = resolveSameSite(),
   } = options;
 
   const shouldSkip = (req) => {
@@ -83,11 +87,7 @@ const csrfMiddleware = (options = {}) => {
       return true;
     }
 
-    if (isStaticAssetPath(req.path)) {
-      return true;
-    }
-
-    if (req.path.startsWith("/images/") || req.path.startsWith("/uploads/")) {
+    if (req.method === "POST" && ONE_CLICK_UNSUBSCRIBE_RE.test(String(req.path || ""))) {
       return true;
     }
 

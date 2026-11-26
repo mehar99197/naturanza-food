@@ -250,7 +250,15 @@ export function AdminAbout() {
                 <label className="mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">
                   {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
                   {uploading ? 'Uploading…' : 'Upload image'}
-                  <input type="file" accept="image/*" className="hidden" onChange={(e) => handleUpload(e.target.files?.[0])} />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      void handleUpload(e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
                 </label>
               </div>
               <div>

@@ -131,9 +131,10 @@ export function ProfileOrders() {
   const [detailActionSuccess, setDetailActionSuccess] = useState("");
   const downloadInFlightRef = useRef(false);
 
+  const userId = user?.id;
   const orders = useMemo(() => {
-    const userOrders = user?.id
-      ? allOrders.filter((order) => Number(order.user_id) === Number(user.id))
+    const userOrders = userId
+      ? allOrders.filter((order) => Number(order.user_id) === Number(userId))
       : [];
 
     return [...userOrders].sort(
@@ -141,7 +142,7 @@ export function ProfileOrders() {
         new Date(b.order_date || b.created_at) -
         new Date(a.order_date || a.created_at),
     );
-  }, [allOrders, user?.id]);
+  }, [allOrders, userId]);
 
   useEffect(() => {
     if (!selectedOrder) {
@@ -157,10 +158,11 @@ export function ProfileOrders() {
     }
   }, [orders, selectedOrder]);
 
+  const selectedOrderId = selectedOrder?.id;
   useEffect(() => {
     setDetailActionError("");
     setDetailActionSuccess("");
-  }, [selectedOrder?.id]);
+  }, [selectedOrderId]);
 
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
@@ -445,7 +447,11 @@ export function ProfileOrders() {
         ) : (
           <OrderTracker
             currentStatus={toTrackerStatus(selectedOrder.status)}
-            trackingNumber={`TRK-${String(selectedOrder.id).padStart(8, "0")}`}
+            trackingNumber={
+              selectedOrder.shipment?.tracking_number ||
+              selectedOrder.tracking_number ||
+              `TRK-${String(selectedOrder.id).padStart(10, "0")}`
+            }
             estimatedDelivery={
               selectedOrder.estimated_delivery
                 ? formatDate(selectedOrder.estimated_delivery)
@@ -542,13 +548,17 @@ export function ProfileOrders() {
           <div className="mt-3.5 sm:mt-6 p-2.5 sm:p-4 bg-blue-50 rounded-lg">
             <p className="text-sm text-gray-700 leading-snug">
               <span className="font-semibold">Payment Method:</span>{" "}
-              {selectedOrder.payment_method === "cod" && "Cash on Delivery"}
-              {selectedOrder.payment_method === "easypaisa" && "EasyPaisa"}
-              {selectedOrder.payment_method === "jazzcash" && "JazzCash"}
-              {selectedOrder.payment_method === "creditCard" && "Credit Card"}
-              {!["cod", "easypaisa", "jazzcash", "creditCard"].includes(
-                selectedOrder.payment_method,
-              ) && "N/A"}
+              {(() => {
+                const method = String(selectedOrder.payment_method || "").trim().toLowerCase();
+                if (method === "safepay") return "SafePay (Online Payment)";
+                if (method === "cod") return "Cash on Delivery";
+                if (method === "easypaisa") return "EasyPaisa";
+                if (method === "jazzcash") return "JazzCash";
+                if (method === "bank") return "Bank Transfer";
+                if (method === "card" || method === "creditcard") return "Credit Card";
+                if (method === "online") return "Online Payment";
+                return selectedOrder.payment_method || "N/A";
+              })()}
             </p>
           </div>
       </div>

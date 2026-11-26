@@ -72,6 +72,17 @@ const isSuperAdminIpAllowed = async ({ ipAddress, database = db.promise() }) => 
   return entries.some((entry) => ipMatchesCidr(ipAddress, entry.cidr));
 };
 
+const serializeAuditMetadata = (metadata) => {
+  if (metadata === null || metadata === undefined) return null;
+  try {
+    const serialized = JSON.stringify(metadata);
+    if (serialized.length <= 4000) return serialized;
+    return JSON.stringify({ truncated: true, preview: serialized.slice(0, 3800) });
+  } catch {
+    return null;
+  }
+};
+
 // Audit logging must never break the request it decorates — swallow errors.
 const recordAdminAuditLog = async ({
   adminId,
@@ -96,7 +107,7 @@ const recordAdminAuditLog = async ({
         actorEmail ? String(actorEmail).slice(0, 254) : null,
         ipAddress ? String(ipAddress).slice(0, 64) : null,
         userAgent ? String(userAgent).slice(0, 255) : null,
-        metadata ? JSON.stringify(metadata).slice(0, 4000) : null,
+        serializeAuditMetadata(metadata),
       ],
     );
   } catch {

@@ -4,12 +4,8 @@ import { adminAPI } from "@/services/api";
 import { AlertCircle, RefreshCw } from "lucide-react";
 
 const PAYMENT_METHOD_OPTIONS = [
+  { code: "safepay", label: "SafePay" },
   { code: "cod", label: "Cash on Delivery" },
-  { code: "card", label: "Card Payment" },
-  { code: "online", label: "Online Transfer" },
-  { code: "easypaisa", label: "EasyPaisa" },
-  { code: "jazzcash", label: "JazzCash" },
-  { code: "bank", label: "Bank Transfer" },
 ];
 
 const initialTaxForm = {
@@ -156,7 +152,11 @@ export function AdminOperations() {
   const toggleTaxRate = async (taxRate) => {
     try {
       await adminAPI.updateTaxRate(taxRate.id, {
-        ...taxRate,
+        name: taxRate.name,
+        rate_percent: Number(taxRate.rate_percent) || 0,
+        country: taxRate.country || "Pakistan",
+        state: taxRate.state || "",
+        is_default: taxRate.is_default === true || taxRate.is_default === 1,
         is_active: !(taxRate.is_active === true || taxRate.is_active === 1),
       });
       await loadData();
@@ -170,7 +170,10 @@ export function AdminOperations() {
   const setDefaultTaxRate = async (taxRate) => {
     try {
       await adminAPI.updateTaxRate(taxRate.id, {
-        ...taxRate,
+        name: taxRate.name,
+        rate_percent: Number(taxRate.rate_percent) || 0,
+        country: taxRate.country || "Pakistan",
+        state: taxRate.state || "",
         is_default: true,
         is_active: true,
       });

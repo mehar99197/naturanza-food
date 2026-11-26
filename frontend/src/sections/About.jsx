@@ -49,8 +49,8 @@ export function About() {
  </div>
 
  <p className="text-[14px] sm:text-sm md:text-base text-gray-600 leading-relaxed max-w-[62ch]">
- For over a decade, we've been sourcing the finest organic products directly from sustainable farms. 
- Our commitment to quality, purity, and environmental responsibility sets us apart in the industry.
+ We source the finest pure organic products directly from trusted local farms across Pakistan.
+ Our commitment to quality, purity, and environmental responsibility sets us apart.
  </p>
 
  <div className="space-y-3 md:space-y-4">

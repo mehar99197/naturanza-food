@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
     address TEXT,
     signup_provider ENUM('password', 'google') DEFAULT 'password',
     password_set_by_user BOOLEAN DEFAULT TRUE,
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
     role ENUM('customer', 'admin') DEFAULT 'customer',
     admin_role ENUM('super_admin', 'staff_admin', 'admin', 'moderator') DEFAULT NULL,
     admin_permissions JSON DEFAULT NULL,
@@ -89,7 +90,17 @@ CREATE TABLE IF NOT EXISTS cart (
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     UNIQUE KEY unique_user_product (user_id, product_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- Wishlist table
+-- Wishlist table (canonical user_wishlist + legacy wishlist alias)
+CREATE TABLE IF NOT EXISTS user_wishlist (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    product_id INT NOT NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_wishlist_product (user_id, product_id),
+    INDEX idx_user_wishlist_user_time (user_id, added_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS wishlist (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
@@ -106,13 +117,14 @@ CREATE TABLE IF NOT EXISTS orders (
     user_id INT NOT NULL,
     address_id INT,
     customer_name VARCHAR(120),
-    customer_email VARCHAR(120),
+    customer_email VARCHAR(254),
     total_amount DECIMAL(10, 2) NOT NULL,
     subtotal DECIMAL(10, 2) DEFAULT 0,
     discount_amount DECIMAL(10, 2) DEFAULT 0,
     tax DECIMAL(10, 2) DEFAULT 0,
     shipping_cost DECIMAL(10, 2) DEFAULT 0,
     coupon_code VARCHAR(50),
+    transaction_id VARCHAR(50) NULL,
     status ENUM(
         'pending',
         'confirmed',
@@ -121,7 +133,7 @@ CREATE TABLE IF NOT EXISTS orders (
         'delivered',
         'cancelled'
     ) DEFAULT 'pending',
-    payment_method ENUM('cod', 'card', 'online', 'easypaisa', 'jazzcash', 'bank') DEFAULT 'cod',
+    payment_method ENUM('cod', 'card', 'online', 'easypaisa', 'jazzcash', 'bank', 'safepay') DEFAULT 'cod',
     payment_status ENUM('pending', 'partial', 'paid', 'failed') DEFAULT 'pending',
     payment_details JSON,
     shipping_address TEXT NOT NULL,
@@ -268,7 +280,8 @@ CREATE TABLE IF NOT EXISTS city_delivery_fees (
     fee INT NOT NULL DEFAULT 0,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_city_delivery_fees_city_name (city_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Insert default cities
@@ -550,7 +563,7 @@ CREATE TABLE IF NOT EXISTS token_blacklist (
 CREATE TABLE IF NOT EXISTS user_login_history (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT,
-    attempted_email VARCHAR(120),
+    attempted_email VARCHAR(254),
     login_provider VARCHAR(50) DEFAULT 'password',
     ip_address VARCHAR(64),
     user_agent VARCHAR(255),
@@ -589,27 +602,28 @@ CREATE TABLE IF NOT EXISTS user_notification_settings (
 CREATE TABLE IF NOT EXISTS admin_settings (
     id INT PRIMARY KEY DEFAULT 1,
     store_name VARCHAR(120) NOT NULL,
-    store_email VARCHAR(120) NOT NULL,
+    store_email VARCHAR(254) NOT NULL,
     store_phone VARCHAR(30) DEFAULT '',
     currency VARCHAR(10) DEFAULT 'PKR',
-    tax_rate DECIMAL(5, 2) DEFAULT 18.00,
+    tax_rate DECIMAL(5, 2) DEFAULT 0.00,
     shipping_flat DECIMAL(10, 2) DEFAULT 250.00,
     shipping_free DECIMAL(10, 2) DEFAULT 5000.00,
     email_notifications BOOLEAN DEFAULT TRUE,
     order_notifications BOOLEAN DEFAULT TRUE,
     low_stock_alerts BOOLEAN DEFAULT TRUE,
     low_stock_threshold INT DEFAULT 10,
-    address VARCHAR(255) NOT NULL DEFAULT 'Pakistan',
+    address VARCHAR(255) NOT NULL DEFAULT 'Nizam Pura, Chunian, District Kasur, Punjab, Pakistan',
     support_hours VARCHAR(120) NOT NULL DEFAULT 'Available 24/7',
     facebook_url VARCHAR(255) NOT NULL DEFAULT '',
     instagram_url VARCHAR(255) NOT NULL DEFAULT '',
+    tiktok_url VARCHAR(255) NOT NULL DEFAULT '',
     twitter_url VARCHAR(255) NOT NULL DEFAULT '',
     youtube_url VARCHAR(255) NOT NULL DEFAULT '',
     whatsapp_number VARCHAR(30) NOT NULL DEFAULT '',
     whatsapp_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    map_latitude DECIMAL(10, 7) NOT NULL DEFAULT 31.5204000,
-    map_longitude DECIMAL(10, 7) NOT NULL DEFAULT 74.3587000,
-    map_location_label VARCHAR(120) NOT NULL DEFAULT 'Pakistan, Lahore',
+    map_latitude DECIMAL(10, 7) NOT NULL DEFAULT 30.9716931,
+    map_longitude DECIMAL(10, 7) NOT NULL DEFAULT 73.8896874,
+    map_location_label VARCHAR(120) NOT NULL DEFAULT 'Nizam Pura, Chunian, District Kasur, Punjab, Pakistan',
     newsletter_welcome_promo_code VARCHAR(40) NOT NULL DEFAULT '',
     store_discount_active BOOLEAN NOT NULL DEFAULT FALSE,
     store_discount_percentage DECIMAL(5, 2) NOT NULL DEFAULT 0,
@@ -735,6 +749,7 @@ CREATE TABLE IF NOT EXISTS advance_payment_verifications (
     amount DECIMAL(10, 2) NOT NULL,
     payment_method ENUM('jazzcash','easypaisa','bank','cod') NOT NULL,
     verification_stage ENUM('full_payment','advance_shipping','final_collection') NOT NULL DEFAULT 'full_payment',
+    transaction_id VARCHAR(50) NULL,
     screenshot_url VARCHAR(255),
     status ENUM('pending','approved','rejected') DEFAULT 'pending',
     rejection_reason VARCHAR(255),
@@ -742,7 +757,71 @@ CREATE TABLE IF NOT EXISTS advance_payment_verifications (
     verified_by INT,
     verified_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_apv_transaction_id (transaction_id),
     UNIQUE KEY uq_apv_order_stage (order_id, verification_stage),
     INDEX idx_apv_stage_status (verification_stage, status),
     CONSTRAINT fk_apv_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Email verification codes (self-signup OTP)
+CREATE TABLE IF NOT EXISTS email_verification_codes (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    email VARCHAR(254) NOT NULL,
+    code_hash CHAR(64) NOT NULL,
+    credential_hash VARCHAR(255) NULL,
+    verifier_nonce_hash CHAR(64) NULL,
+    expires_at DATETIME NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    is_used BOOLEAN NOT NULL DEFAULT FALSE,
+    used_at DATETIME NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_evc_user (user_id, is_used, expires_at),
+    INDEX idx_evc_email (email, is_used),
+    INDEX idx_evc_expires (expires_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Password reset tokens
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    email VARCHAR(254) NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    is_used BOOLEAN DEFAULT FALSE,
+    used_at DATETIME,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_password_reset_token_hash (token_hash),
+    INDEX idx_password_reset_user (user_id, is_used, expires_at),
+    INDEX idx_password_reset_email (email, is_used),
+    INDEX idx_password_reset_expires (expires_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Password history (blocks reuse of last 5 passwords)
+CREATE TABLE IF NOT EXISTS password_history (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_password_history_user (user_id, created_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Blog posts
+CREATE TABLE IF NOT EXISTS blog_posts (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    slug VARCHAR(200) NOT NULL UNIQUE,
+    title VARCHAR(200) NOT NULL,
+    excerpt VARCHAR(500),
+    content LONGTEXT NOT NULL,
+    author VARCHAR(120) DEFAULT 'Naturanza Food Team',
+    category VARCHAR(80),
+    image_url VARCHAR(255),
+    read_time VARCHAR(40),
+    keywords VARCHAR(500),
+    featured BOOLEAN NOT NULL DEFAULT FALSE,
+    is_published BOOLEAN NOT NULL DEFAULT TRUE,
+    published_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_blog_published (is_published, published_at),
+    INDEX idx_blog_category (category)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

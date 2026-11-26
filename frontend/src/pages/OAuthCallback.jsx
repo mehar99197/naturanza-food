@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import {
   AUTH_SESSION_SYNC_EVENT,
+  clearUserAccessToken,
   setUserAccessToken,
   userAPI,
 } from '@/services/api';
@@ -89,12 +90,16 @@ const OAuthCallback = () => {
  navigate(safeNextPath, { replace: true });
  })
  .catch(() => {
+ clearUserAccessToken();
+ safeLocalStorage.removeItem('userData');
  navigate('/login', {
  state: { error: 'Session could not be restored. Please sign in again.' },
  replace: true,
  });
  });
- } catch (error) {
+ } catch {
+ clearUserAccessToken();
+ safeLocalStorage.removeItem('userData');
  navigate('/login', { 
  state: { error: 'Failed to process authentication data' },
  replace: true 
@@ -110,7 +115,7 @@ return (
       <NoIndexSEO title="Authentication" />
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-emerald-100">
     <div className="text-center">
-    <Loader2 className="w-12 h-12 text-green-600 mx-auto mb-4" />
+    <Loader2 className="w-12 h-12 text-green-600 animate-spin mx-auto mb-4" />
     <p className="text-lg text-gray-700">Completing authentication...</p>
     <p className="text-sm text-gray-500 mt-2">Please wait while we log you in</p>
     </div>

@@ -116,9 +116,39 @@ function sanitizeRequestBody(req, res, next) {
     next();
 }
 
+// Express 5 defines `req.query` as a getter-only prototype property, so a plain
+// `req.query = ...` assignment silently fails in non-strict mode. Define an own
+// property on `req` so downstream handlers observe the cleaned object.
+function setRequestQuery(req, value) {
+    Object.defineProperty(req, 'query', {
+        value,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+    });
+}
+
+// Express 5–compatible HTTP Parameter Pollution guard (replaces `hpp`, whose
+// mutations are discarded on Express 5's getter-only `req.query`). Collapses
+// duplicate query parameters (arrays) to their last value.
+function preventParamPollution(req, res, next) {
+    if (req.query && typeof req.query === 'object') {
+        const collapsed = {};
+        for (const key of Object.keys(req.query)) {
+            if (FORBIDDEN_KEYS.has(key)) {
+                continue;
+            }
+            const value = req.query[key];
+            collapsed[key] = Array.isArray(value) ? value[value.length - 1] : value;
+        }
+        setRequestQuery(req, collapsed);
+    }
+    next();
+}
+
 function sanitizeQueryParams(req, res, next) {
     if (req.query) {
-        req.query = sanitizeObject(req.query);
+        setRequestQuery(req, sanitizeObject(req.query));
     }
     next();
 }
@@ -133,9 +163,9 @@ function validatePassword(password) {
     const hasUpperCase = /[A-Z]/.test(password);
     const hasLowerCase = /[a-z]/.test(password);
     const hasNumber = /[0-9]/.test(password);
-    const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+    const hasSpecial = /[^A-Za-z0-9]/.test(password);
 
-    const isValid = password.length >= minLength && hasUpperCase && hasLowerCase && hasNumber;
+    const isValid = password.length >= minLength && hasUpperCase && hasLowerCase && hasNumber && hasSpecial;
 
     return {
         isValid,
@@ -146,7 +176,7 @@ function validatePassword(password) {
             number: hasNumber,
             special: hasSpecial
         },
-        message: !isValid ? 'Password must be at least 12 characters with uppercase, lowercase, and numbers' : ''
+        message: !isValid ? 'Password must be at least 12 characters with uppercase, lowercase, numbers, and a special character' : ''
     };
 }
 
@@ -180,6 +210,7 @@ module.exports = {
     sanitizeObject,
     sanitizeRequestBody,
     sanitizeQueryParams,
+    preventParamPollution,
     isValidEmail,
     validatePassword,
     restrictBody,

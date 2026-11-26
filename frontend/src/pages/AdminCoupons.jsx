@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 
 export default function AdminCoupons() {
- const { coupons, addCoupon, updateCoupon, deleteCoupon, toggleCouponStatus, loading: adminDataLoading, error: adminDataError } = useAdminData();
+ const { coupons, addCoupon, updateCoupon, deleteCoupon, toggleCouponStatus, fetchAllData, loading: adminDataLoading, error: adminDataError } = useAdminData();
  const { settings } = useSettings();
  const currency = settings.currency || 'PKR';
  const [showForm, setShowForm] = useState(false);
@@ -28,6 +28,7 @@ export default function AdminCoupons() {
  const [showSuccessToast, setShowSuccessToast] = useState(false);
  const [toastMessage, setToastMessage] = useState('');
  const [error, setError] = useState('');
+ const [saving, setSaving] = useState(false);
  const [searchQuery, setSearchQuery] = useState('');
  const [formData, setFormData] = useState({
  code: '',
@@ -48,6 +49,7 @@ export default function AdminCoupons() {
 
  const handleSubmit = async (e) => {
  e.preventDefault();
+ if (saving) return;
  
  // Validation
  if (!formData.code || !formData.discount_value) {
@@ -67,6 +69,8 @@ export default function AdminCoupons() {
  };
 
  try {
+ setSaving(true);
+ setError('');
  if (editingCoupon) {
  await updateCoupon(editingCoupon.id, payload);
  setToastMessage('Coupon updated successfully!');
@@ -80,6 +84,8 @@ export default function AdminCoupons() {
  resetForm();
  } catch (error) {
  setError('Error: ' + (error.response?.data?.error || 'Failed to save coupon'));
+ } finally {
+ setSaving(false);
  }
  };
 
@@ -182,7 +188,7 @@ export default function AdminCoupons() {
  <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2 sm:items-center">
  <button
  type="button"
- onClick={() => window.location.reload()}
+ onClick={() => void fetchAllData()}
  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-emerald-200/90 bg-white px-3 text-[13px] font-semibold text-emerald-800 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 sm:h-11 sm:rounded-2xl sm:px-4 sm:text-sm sm:w-auto"
  >
  <RefreshCw className="h-4 w-4" />
@@ -454,8 +460,11 @@ export default function AdminCoupons() {
  )}
  </td>
  <td className="px-4 py-4">
- <span
- className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${
+ <button
+ type="button"
+ onClick={() => toggleStatus(coupon.id)}
+ title="Toggle coupon status"
+ className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold transition-opacity hover:opacity-80 ${
  coupon.is_active
  ? 'bg-emerald-100 text-emerald-700'
  : 'bg-amber-100 text-amber-700'
@@ -467,7 +476,7 @@ export default function AdminCoupons() {
  }`}
  />
  {coupon.is_active ? 'Active' : 'Inactive'}
- </span>
+ </button>
  </td>
  <td className="px-6 py-4 text-right">
  <div className="inline-flex items-center gap-2">
@@ -522,7 +531,13 @@ export default function AdminCoupons() {
  </div>
 
  <div className="scrollbar-hide flex-1 overflow-y-auto px-4 py-4 sm:max-h-[72vh] sm:px-8 sm:py-6">
- <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-7">
+ <form id="coupon-form" onSubmit={handleSubmit} className="space-y-5 sm:space-y-7">
+ {error && (
+ <div className="flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+ <AlertCircle className="h-5 w-5 shrink-0" />
+ <span>{error}</span>
+ </div>
+ )}
  <section className="space-y-3 sm:space-y-4">
  <div className="flex items-center gap-2 text-emerald-700">
  <Ticket className="h-4 w-4" />
@@ -559,7 +574,7 @@ export default function AdminCoupons() {
  className="h-11 w-full rounded-xl border border-emerald-100 bg-white px-4 text-sm text-slate-700 shadow-sm outline-none transition-all duration-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:h-12 sm:rounded-2xl"
  >
  <option value="percentage">Percentage (%)</option>
- <option value="fixed">Fixed Amount (₹)</option>
+ <option value="fixed">Fixed Amount ({currency})</option>
  </select>
  </label>
 
@@ -677,12 +692,13 @@ export default function AdminCoupons() {
  <div className="sticky bottom-0 z-20 border-t border-emerald-100 bg-white/95 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 backdrop-blur-sm sm:px-8 sm:py-4 sm:backdrop-blur-none">
  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
  <button
- type="button"
- onClick={handleSubmit}
- className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-[#16a34a] px-5 py-2 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(22,163,74,0.32)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#15803d]"
+ type="submit"
+ form="coupon-form"
+ disabled={saving}
+ className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-[#16a34a] px-5 py-2 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(22,163,74,0.32)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#15803d] disabled:cursor-not-allowed disabled:opacity-60"
  >
  <CheckCircle2 className="h-4 w-4" />
- {editingCoupon ? 'Update Coupon' : 'Create Coupon'}
+ {saving ? 'Saving...' : editingCoupon ? 'Update Coupon' : 'Create Coupon'}
  </button>
  <button
  type="button"

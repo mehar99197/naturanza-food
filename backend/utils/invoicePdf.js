@@ -2,20 +2,40 @@ const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
 
-const COMPANY = {
-  legalName: process.env.BUSINESS_LEGAL_NAME || 'Naturanza Wellness Pvt. Ltd.',
-  website: process.env.BUSINESS_WEBSITE || 'www.naturanzafood.com',
-  email: process.env.BUSINESS_SUPPORT_EMAIL || 'support@naturanzafood.com',
-  phone: process.env.BUSINESS_SUPPORT_PHONE || '+92340 9502646',
-  officeAddress:
-    process.env.BUSINESS_OFFICE_ADDRESS ||
-    'Office 204, Cedar Tower, MM Alam Road, Gulberg III, Lahore 54660, Pakistan',
+const DEFAULT_COMPANY = {
+  brandName: 'Naturanza Food',
+  legalName: 'Naturanza Foods',
+  website: 'www.naturanzafood.com',
+  email: 'support@naturanzafood.com',
+  phone: '+92340 9502646',
+  officeAddress: 'Nizam Pura, Chunian, District Kasur, Punjab, Pakistan',
 };
+
+const readEnvText = (value, fallback) => {
+  const cleaned = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || fallback;
+};
+
+const getDefaultCompany = () => ({
+  brandName: readEnvText(process.env.BUSINESS_BRAND_NAME, DEFAULT_COMPANY.brandName),
+  legalName: readEnvText(process.env.BUSINESS_LEGAL_NAME, DEFAULT_COMPANY.legalName),
+  website: readEnvText(process.env.BUSINESS_WEBSITE, DEFAULT_COMPANY.website),
+  email: readEnvText(process.env.BUSINESS_SUPPORT_EMAIL, DEFAULT_COMPANY.email),
+  phone: readEnvText(process.env.BUSINESS_SUPPORT_PHONE, DEFAULT_COMPANY.phone),
+  officeAddress: readEnvText(
+    process.env.BUSINESS_OFFICE_ADDRESS,
+    DEFAULT_COMPANY.officeAddress,
+  ),
+});
 
 const PAYMENT_METHOD_LABELS = {
   cod: 'Cash on Delivery',
+  safepay: 'SafePay (Online Payment)',
   easypaisa: 'EasyPaisa',
   jazzcash: 'JazzCash',
+  bank: 'Bank Transfer',
   card: 'Card',
   online: 'Online Payment',
 };
@@ -223,9 +243,54 @@ const drawItemsTableHeader = (doc, y, columns) => {
     });
 };
 
+const resolveInvoiceCompany = (overrides = {}) => {
+  const defaults = getDefaultCompany();
+  const safeOverrides =
+    overrides && typeof overrides === 'object' ? overrides : {};
+  const hasExplicitBrandName =
+    Object.prototype.hasOwnProperty.call(safeOverrides, 'brandName') &&
+    safeOverrides.brandName !== undefined &&
+    safeOverrides.brandName !== null;
+
+  const legalName = normalizeText(safeOverrides.legalName, defaults.legalName);
+  const brandName = hasExplicitBrandName
+    ? normalizeText(safeOverrides.brandName, '')
+    : normalizeText(defaults.brandName, '');
+  const website = normalizeText(safeOverrides.website, defaults.website);
+  const email = normalizeText(safeOverrides.email, defaults.email);
+  const phone = normalizeText(safeOverrides.phone, defaults.phone);
+  const officeAddress = normalizeText(
+    safeOverrides.officeAddress,
+    defaults.officeAddress,
+  );
+
+  let displayName = legalName;
+  if (brandName) {
+    const normalizedBrand = brandName.toLowerCase();
+    const normalizedLegal = legalName.toLowerCase();
+    if (normalizedBrand === normalizedLegal || normalizedBrand.includes(normalizedLegal)) {
+      displayName = brandName;
+    } else {
+      displayName = `${brandName} (${legalName})`;
+    }
+  }
+
+  return {
+    ...defaults,
+    ...safeOverrides,
+    brandName,
+    legalName,
+    website,
+    email,
+    phone,
+    officeAddress,
+    displayName,
+  };
+};
+
 const createInvoicePdfBuffer = async (order, options = {}) => {
   const currency = options.currency || 'PKR';
-  const company = { ...COMPANY, ...(options.company || {}) };
+  const company = resolveInvoiceCompany(options.company);
   const amountPaid = options.amountPaid != null ? Number(options.amountPaid) || 0 : null;
   const balanceDue = options.balanceDue != null ? Number(options.balanceDue) || 0 : null;
   const paymentStatus = options.paymentStatus ? String(options.paymentStatus).toLowerCase() : null;
@@ -238,7 +303,7 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         margin: 34,
         info: {
           Title: `Invoice ORD-${String(order.id || '').padStart(6, '0')}`,
-          Author: company.legalName,
+          Author: company.displayName,
           Subject: 'Order Invoice',
           CreationDate: new Date(),
         },
@@ -388,7 +453,7 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
       }
       const billToBlock = billToLines.join('\n');
       const fromBlock = [
-        company.legalName,
+        company.displayName,
         company.email,
         company.phone,
         company.officeAddress,
@@ -628,14 +693,14 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         drawTotalRow('Amount Paid', formatMoney(amountPaid, currency), { color: MUTED_TEXT });
         const due = balanceDue != null ? balanceDue : Math.max(0, grandTotal - amountPaid);
         const dueLabel = due > 0
-          ? (isCodOrder ? 'Balance Due (Cash on Delivery)' : 'Balance Due (Pending)')
+          ? (isCodOrder ? 'Balance Due (COD)' : 'Balance Due (Pending)')
           : 'Balance Due';
         drawTotalRow(
           dueLabel,
           formatMoney(due, currency),
           {
             bold: true,
-            size: 12,
+            size: 11,
             color: due > 0 ? DISCOUNT_RED : PRIMARY_GREEN,
             step: 18,
           },
@@ -656,7 +721,7 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         .font('Helvetica')
         .fontSize(9)
         .fillColor(MUTED_TEXT)
-        .text('3-day returns, only for shipping-related issues.', margin, footerY + 14, {
+        .text('7-day returns for damaged, defective, or incorrect items.', margin, footerY + 14, {
           width: contentWidth,
           align: 'center',
         })
@@ -674,4 +739,6 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
 
 module.exports = {
   createInvoicePdfBuffer,
+  getPaymentMethodLabel,
+  resolveInvoiceCompany,
 };

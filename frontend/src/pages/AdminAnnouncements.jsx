@@ -646,6 +646,12 @@ export default function AdminAnnouncements() {
 
                     <div className="scrollbar-hide flex-1 overflow-y-auto px-4 py-4 sm:max-h-[72vh] sm:px-8 sm:py-6">
                       <div className="space-y-6">
+                        {error ? (
+                          <div className="flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                            <AlertCircle className="h-5 w-5 shrink-0" />
+                            <span>{error}</span>
+                          </div>
+                        ) : null}
                         <section className="space-y-4">
                           <div className="flex items-center gap-2 text-emerald-700">
                             <Megaphone className="h-4 w-4" />

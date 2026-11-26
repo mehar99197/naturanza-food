@@ -23,7 +23,7 @@ router.post('/', authenticateToken, restrictBody('product_id', 'rating', 'commen
 
     // Check if product exists
     const [product] = await db.promise().query(
-      'SELECT id, is_active FROM products WHERE id = ?',
+      'SELECT id, is_active FROM products WHERE id = ? AND deleted_at IS NULL',
       [parsedProductId]
     );
 

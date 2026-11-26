@@ -1,7 +1,7 @@
 const { z } = require("zod");
 
 const strongPassword = z
-  .string({ required_error: "Password is required" })
+  .string({ error: "Password is required" })
   .min(12, "Password must be at least 12 characters")
   .max(128, "Password must be at most 128 characters")
   .regex(/[A-Z]/, "Password must include at least one uppercase letter")
@@ -10,7 +10,7 @@ const strongPassword = z
   .regex(/[^A-Za-z0-9]/, "Password must include at least one special character");
 
 const adminResetPasswordSchema = z
-  .string({ required_error: "Password is required" })
+  .string({ error: "Password is required" })
   .min(12, "Admin password must be at least 12 characters")
   .max(128, "Password must be at most 128 characters")
   .regex(/[A-Z]/, "Password must include at least one uppercase letter")

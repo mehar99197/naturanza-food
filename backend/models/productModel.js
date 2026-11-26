@@ -239,6 +239,17 @@ const hydrateProducts = async (products) => {
     productIds,
   );
 
+  const [reviewStats] = await dbPool.query(
+    `SELECT
+       product_id,
+       ROUND(AVG(rating), 1) AS average_rating,
+       COUNT(*) AS review_count
+     FROM reviews
+     WHERE product_id IN (${placeholders}) AND is_approved = 1
+     GROUP BY product_id`,
+    productIds,
+  );
+
   const imageMap = new Map();
   for (const image of images) {
     const current = imageMap.get(image.product_id) || [];
@@ -246,13 +257,29 @@ const hydrateProducts = async (products) => {
     imageMap.set(image.product_id, current);
   }
 
+  const reviewStatsMap = new Map();
+  for (const row of reviewStats) {
+    reviewStatsMap.set(row.product_id, {
+      average_rating: Number(row.average_rating) || 0,
+      review_count: Number(row.review_count) || 0,
+    });
+  }
+
   return products.map((product) => {
     const gallery = imageMap.get(product.id) || [];
     const jsonImages = parseJson(product.images, []);
     const primaryImage = gallery.find((entry) => entry.is_primary) || gallery[0] || null;
+    const stats = reviewStatsMap.get(product.id) || {
+      average_rating: 0,
+      review_count: 0,
+    };
 
     return {
       ...product,
+      average_rating: stats.average_rating,
+      review_count: stats.review_count,
+      rating: stats.average_rating,
+      reviews: stats.review_count,
       image_url:
         product.image_url ||
         (primaryImage ? primaryImage.image_url : Array.isArray(jsonImages) ? jsonImages[0] : null),

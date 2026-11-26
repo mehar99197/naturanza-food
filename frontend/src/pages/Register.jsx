@@ -7,7 +7,7 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { useAuth } from "@/context/AuthContext";
 import { sanitizeEmail, sanitizeInput } from "@/lib/sanitize";
 import LeftPanel from "@/components/auth/LeftPanel";
@@ -58,7 +58,7 @@ const Register = () => {
   const {
     register,
     handleSubmit,
-    watch,
+    control,
     formState: { errors, isSubmitting },
   } = useForm({
     mode: "onBlur",
@@ -76,8 +76,8 @@ const Register = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const passwordValue = watch("password", "");
-  const confirmPasswordValue = watch("confirmPassword", "");
+  const passwordValue = useWatch({ control, name: "password", defaultValue: "" });
+  const confirmPasswordValue = useWatch({ control, name: "confirmPassword", defaultValue: "" });
   const strengthScore = getPasswordStrength(passwordValue);
 
   const allowDevGoogle =

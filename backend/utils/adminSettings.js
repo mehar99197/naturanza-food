@@ -1,9 +1,19 @@
 const { dbPool } = require("../config/db");
 
+const envOrDefault = (value, fallback) => {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || fallback;
+};
+
+const DEFAULT_BUSINESS_ADDRESS = envOrDefault(
+  process.env.BUSINESS_OFFICE_ADDRESS,
+  "Nizam Pura, Chunian, District Kasur, Punjab, Pakistan",
+);
+
 const DEFAULT_ADMIN_SETTINGS = {
-  storeName: process.env.BUSINESS_LEGAL_NAME || "Naturanza",
-  storeEmail: process.env.BUSINESS_SUPPORT_EMAIL || "support@naturanzafood.com",
-  storePhone: process.env.BUSINESS_SUPPORT_PHONE || "+92340 9502646",
+  storeName: envOrDefault(process.env.BUSINESS_BRAND_NAME, "Naturanza Food"),
+  storeEmail: envOrDefault(process.env.BUSINESS_SUPPORT_EMAIL, "support@naturanzafood.com"),
+  storePhone: envOrDefault(process.env.BUSINESS_SUPPORT_PHONE, "+92340 9502646"),
   currency: "PKR",
   taxRate: 0,
   shippingFlat: 250,
@@ -12,7 +22,7 @@ const DEFAULT_ADMIN_SETTINGS = {
   orderNotifications: true,
   lowStockAlerts: true,
   lowStockThreshold: 10,
-  address: "Pakistan",
+  address: DEFAULT_BUSINESS_ADDRESS,
   supportHours: "Available 24/7",
   facebookUrl: "",
   instagramUrl: "",
@@ -21,9 +31,9 @@ const DEFAULT_ADMIN_SETTINGS = {
   youtubeUrl: "",
   whatsappNumber: "",
   whatsappEnabled: true,
-  mapLatitude: 31.5204,
-  mapLongitude: 74.3587,
-  mapLocationLabel: "Pakistan, Lahore",
+  mapLatitude: 30.9716931,
+  mapLongitude: 73.8896874,
+  mapLocationLabel: DEFAULT_BUSINESS_ADDRESS,
   newsletterWelcomePromoCode: "",
   storeDiscountActive: false,
   storeDiscountPercentage: 0,
@@ -142,7 +152,7 @@ const getAdminSettings = async (connection = null) => {
       whatsapp_number, whatsapp_enabled, map_latitude, map_longitude, map_location_label,
       newsletter_welcome_promo_code, store_discount_active, store_discount_percentage,
       store_discount_label)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE id = id`,
     [
       defaults.storeName,
@@ -275,6 +285,11 @@ const updateAdminSettings = async (connection = null, updates = {}) => {
     next.currency = "PKR";
   }
 
+  // A store-wide sale with a 0% discount has no effect and must not stay active.
+  if (next.storeDiscountActive && next.storeDiscountPercentage <= 0) {
+    next.storeDiscountActive = false;
+  }
+
   await db.query(
     `UPDATE admin_settings
      SET store_name = ?,
@@ -356,7 +371,9 @@ const toPublicSettings = (settings) => ({
   youtubeUrl: settings.youtubeUrl,
   whatsappNumber: settings.whatsappNumber,
   whatsappEnabled: settings.whatsappEnabled,
-  storeDiscountActive: settings.storeDiscountActive,
+  storeDiscountActive:
+    Boolean(settings.storeDiscountActive) &&
+    Number(settings.storeDiscountPercentage) > 0,
   storeDiscountPercentage: settings.storeDiscountPercentage,
   storeDiscountLabel: settings.storeDiscountLabel,
 });

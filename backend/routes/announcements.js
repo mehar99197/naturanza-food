@@ -79,13 +79,24 @@ const normalizeDateTime = (value, fieldName) => {
   return withSeconds;
 };
 
+const toTimestamp = (value) => {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  return new Date(String(value).replace(" ", "T")).getTime();
+};
+
 const ensureDateRangeIsValid = (startDate, endDate) => {
   if (!startDate || !endDate) {
     return;
   }
 
-  const startValue = new Date(startDate.replace(" ", "T")).getTime();
-  const endValue = new Date(endDate.replace(" ", "T")).getTime();
+  const startValue = toTimestamp(startDate);
+  const endValue = toTimestamp(endDate);
+
+  if (!Number.isFinite(startValue) || !Number.isFinite(endValue)) {
+    throw new Error("start_date and end_date must be valid datetimes");
+  }
 
   if (endValue < startValue) {
     throw new Error("end_date must be greater than or equal to start_date");
@@ -140,8 +151,15 @@ router.post(
     const message = normalizeTextField(req.body.message);
     const type = normalizeType(req.body.type || "info");
     const isActive = normalizeBoolean(req.body.is_active, true);
-    const startDate = normalizeDateTime(req.body.start_date, "start_date");
-    const endDate = normalizeDateTime(req.body.end_date, "end_date");
+
+    let startDate;
+    let endDate;
+    try {
+      startDate = normalizeDateTime(req.body.start_date, "start_date");
+      endDate = normalizeDateTime(req.body.end_date, "end_date");
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
 
     if (!title || !message) {
       return res

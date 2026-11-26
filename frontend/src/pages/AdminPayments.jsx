@@ -1,7 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, CreditCard, RefreshCw, RotateCcw, Wallet } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import {
+  AlertCircle,
+  CheckCircle2,
+  CreditCard,
+  RefreshCw,
+  RotateCcw,
+  Shield,
+  Truck,
+  Wallet,
+} from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { AdminPaymentsExtensions } from "@/components/AdminPaymentsExtensions";
 import { useOrders } from "@/context/OrderContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatPrice } from "@/lib/utils";
@@ -12,24 +21,38 @@ const META_CACHE_KEY = "admin:payments:meta";
 
 const paymentStatusClass = {
   paid: "bg-emerald-100 text-emerald-700",
+  partial: "bg-indigo-100 text-indigo-700",
   pending: "bg-yellow-100 text-yellow-700",
   failed: "bg-red-100 text-red-700",
+  cancelled: "bg-slate-100 text-slate-600",
   refunded: "bg-orange-100 text-orange-700",
 };
 
 const formatMethodLabel = (value) => {
   const method = String(value || "unknown").toLowerCase();
   const map = {
+    safepay: "SafePay",
     cod: "Cash on Delivery",
     card: "Card",
     online: "Online",
-    easypaisa: "EasyPaisa",
-    jazzcash: "JazzCash",
-    bank: "Bank Transfer",
-    paypal: "PayPal",
+    easypaisa: "EasyPaisa (Legacy)",
+    jazzcash: "JazzCash (Legacy)",
+    bank: "Bank Transfer (Legacy)",
   };
-
   return map[method] || method.toUpperCase();
+};
+
+const formatDateShort = (value) => {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
 };
 
 export function AdminPayments() {
@@ -37,86 +60,102 @@ export function AdminPayments() {
   const { settings } = useSettings();
   const [refundAmount, setRefundAmount] = useState(0);
   const [verifiedRevenue, setVerifiedRevenue] = useState(null);
-  const [error, setError] = useState("");
+  const [gatewayStatus, setGatewayStatus] = useState(null);
+  const [transactions, setTransactions] = useState([]);
+  const [pendingCodOrders, setPendingCodOrders] = useState([]);
+  const [txProviderFilter, setTxProviderFilter] = useState("all");
+  const [txStatusFilter, setTxStatusFilter] = useState("all");
+  const [collectingOrderId, setCollectingOrderId] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [mobileView, setMobileView] = useState("transactions");
-  const [showAllMobileMethods, setShowAllMobileMethods] = useState(false);
-  const [showAllMobileTransactions, setShowAllMobileTransactions] = useState(false);
 
-  // SWR cache fans out the two stat endpoints in parallel and returns a single
-  // memoised payload. Re-visits to this section now render the cards instantly
-  // while the background refresh keeps numbers fresh.
   const {
     data: metaData,
     refresh: refreshMeta,
   } = useSWRCache(META_CACHE_KEY, async () => {
-    const [stats, analytics] = await Promise.all([
+    const [stats, analytics, gateway, txs, pendingCod] = await Promise.all([
       adminAPI.getDashboardStats().catch(() => null),
       adminAPI.getPaymentAnalytics().catch(() => null),
+      adminAPI.getPaymentGatewayStatus().catch(() => null),
+      adminAPI.getPaymentTransactions({ limit: 80 }).catch(() => []),
+      adminAPI.getPendingCodOrders().catch(() => []),
     ]);
-    return { stats, analytics };
+    return { stats, analytics, gateway, txs, pendingCod };
   });
 
   useEffect(() => {
     if (!metaData) return;
     setRefundAmount(Number(metaData.stats?.totalRefundAmount || 0));
+    if (metaData.gateway) {
+      setGatewayStatus(metaData.gateway);
+    }
+    if (Array.isArray(metaData.txs)) {
+      setTransactions(metaData.txs);
+    }
+    if (Array.isArray(metaData.pendingCod)) {
+      setPendingCodOrders(metaData.pendingCod);
+    }
     if (metaData.analytics?.success) {
       setVerifiedRevenue({
         total: Number(metaData.analytics.total_revenue) || 0,
         month: Number(metaData.analytics.month_revenue) || 0,
         today: Number(metaData.analytics.today_revenue) || 0,
-        approvedCount: Number(metaData.analytics.approved_count) || 0,
-        pendingCount: Number(metaData.analytics.pending_count) || 0,
+        safepayRevenue: Number(metaData.analytics.safepay_revenue) || 0,
         prepaid: Number(metaData.analytics.prepaid_revenue) || 0,
         codAdvance: Number(metaData.analytics.cod_advance_revenue) || 0,
         codFinal: Number(metaData.analytics.cod_final_revenue) || 0,
         pendingCodCollections: Number(metaData.analytics.pending_cod_collections) || 0,
+        pendingCodAmount: Number(metaData.analytics.pending_cod_amount) || 0,
       });
     }
   }, [metaData]);
 
-  const loadMeta = async () => {
-    invalidateSWRKey(META_CACHE_KEY);
-    await refreshMeta();
-  };
-
-  const refreshAll = async () => {
+  const refreshAll = useCallback(async () => {
     try {
       setIsRefreshing(true);
-      await Promise.all([fetchOrders(), loadMeta()]);
+      invalidateSWRKey(META_CACHE_KEY);
+      await Promise.all([fetchOrders(), refreshMeta()]);
     } finally {
       setIsRefreshing(false);
     }
+  }, [fetchOrders, refreshMeta]);
+
+  const handleMarkCodCollected = async (orderId) => {
+    try {
+      setCollectingOrderId(orderId);
+      await adminAPI.markCodCollected(orderId);
+      toast.success(`Order #${orderId} COD payment marked as collected.`);
+      await refreshAll();
+    } catch (err) {
+      toast.error(
+        err?.response?.data?.error ||
+          err?.message ||
+          "Failed to mark COD payment as collected",
+      );
+    } finally {
+      setCollectingOrderId(null);
+    }
   };
 
+  const filteredTransactions = useMemo(
+    () =>
+      transactions.filter((tx) => {
+        const provider = String(tx.provider || "").toLowerCase();
+        const status = String(tx.status || "pending").toLowerCase();
+        if (txProviderFilter !== "all" && provider !== txProviderFilter) return false;
+        if (txStatusFilter !== "all" && status !== txStatusFilter) return false;
+        return true;
+      }),
+    [transactions, txProviderFilter, txStatusFilter],
+  );
+
   const metrics = useMemo(() => {
-    const paidOrders = orders.filter((order) => String(order.payment_status).toLowerCase() === "paid");
-    const totalRevenue = paidOrders.reduce(
+    const paidOrders = orders.filter(
+      (order) => String(order.payment_status).toLowerCase() === "paid",
+    );
+    const fallbackTotal = paidOrders.reduce(
       (sum, order) => sum + Number(order.total_amount || 0),
       0,
     );
-
-    const today = new Date();
-    const currentMonth = today.getMonth();
-    const currentYear = today.getFullYear();
-
-    const thisMonthRevenue = paidOrders
-      .filter((order) => {
-        const date = new Date(order.order_date || order.created_at);
-        return date.getMonth() === currentMonth && date.getFullYear() === currentYear;
-      })
-      .reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
-
-    const todayRevenue = paidOrders
-      .filter((order) => {
-        const date = new Date(order.order_date || order.created_at);
-        return (
-          date.getDate() === today.getDate() &&
-          date.getMonth() === today.getMonth() &&
-          date.getFullYear() === today.getFullYear()
-        );
-      })
-      .reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
 
     const methodsMap = new Map();
     orders.forEach((order) => {
@@ -132,52 +171,13 @@ export function AdminPayments() {
       .map(([method, data]) => ({ method, ...data }))
       .sort((a, b) => b.amount - a.amount);
 
-    const recentTransactions = [...orders]
-      .sort(
-        (a, b) =>
-          new Date(b.order_date || b.created_at) -
-          new Date(a.order_date || a.created_at),
-      )
-      .slice(0, 12);
-
-    // Prefer the server-side rollup when present — it queries
-    // advance_payment_verifications directly with PKT timezone pinned, so
-    // it can't drift the way client-side date math does across timezones.
-    // Fall back to the orders-derived totals when the endpoint is unreachable.
     return {
-      totalRevenue: verifiedRevenue?.total ?? totalRevenue,
-      thisMonthRevenue: verifiedRevenue?.month ?? thisMonthRevenue,
-      todayRevenue: verifiedRevenue?.today ?? todayRevenue,
+      totalRevenue: verifiedRevenue?.total ?? fallbackTotal,
+      thisMonthRevenue: verifiedRevenue?.month ?? 0,
+      todayRevenue: verifiedRevenue?.today ?? 0,
       paymentMethods,
-      recentTransactions,
     };
   }, [orders, verifiedRevenue]);
-
-  const quickSummaryItems = useMemo(
-    () => [
-      { key: "total", label: "Revenue", value: formatPrice(metrics.totalRevenue, settings.currency) },
-      { key: "month", label: "Month", value: formatPrice(metrics.thisMonthRevenue, settings.currency) },
-      { key: "today", label: "Today", value: formatPrice(metrics.todayRevenue, settings.currency) },
-      { key: "refund", label: "Refund", value: formatPrice(refundAmount, settings.currency) },
-    ],
-    [metrics.thisMonthRevenue, metrics.todayRevenue, metrics.totalRevenue, refundAmount, settings.currency],
-  );
-
-  const mobilePaymentMethods = useMemo(
-    () =>
-      showAllMobileMethods
-        ? metrics.paymentMethods
-        : metrics.paymentMethods.slice(0, 3),
-    [metrics.paymentMethods, showAllMobileMethods],
-  );
-
-  const mobileTransactions = useMemo(
-    () =>
-      showAllMobileTransactions
-        ? metrics.recentTransactions
-        : metrics.recentTransactions.slice(0, 4),
-    [metrics.recentTransactions, showAllMobileTransactions],
-  );
 
   const maxMethodAmount = Math.max(
     ...metrics.paymentMethods.map((item) => item.amount),
@@ -186,12 +186,13 @@ export function AdminPayments() {
 
   return (
     <AdminLayout>
-      <div className="mx-auto w-full max-w-[1240px] space-y-4 sm:space-y-6">
+      <div className="mx-auto w-full max-w-[1240px] space-y-5 sm:space-y-6">
+        {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-[2rem] font-bold text-slate-900 sm:text-3xl">Payments</h1>
             <p className="text-sm text-slate-600 sm:text-base">
-              Live payment and revenue data from real orders.
+              SafePay online gateway transactions and Cash on Delivery collections.
             </p>
           </div>
           <button
@@ -204,12 +205,6 @@ export function AdminPayments() {
           </button>
         </div>
 
-        {error ? (
-          <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
-            <AlertCircle className="h-5 w-5" />
-            {error}
-          </div>
-        ) : null}
         {ordersError ? (
           <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
             <AlertCircle className="h-5 w-5" />
@@ -217,226 +212,276 @@ export function AdminPayments() {
           </div>
         ) : null}
 
-        <section className="md:hidden">
-          <div className="rounded-2xl border border-emerald-100 bg-white p-2.5 shadow-[0_10px_24px_rgba(15,64,28,0.08)]">
-            <div className="grid grid-cols-4 gap-1.5">
-              {quickSummaryItems.map((item) => (
-                <article key={item.key} className="rounded-xl border border-emerald-100 bg-[#f7fbf7] px-1.5 py-2">
-                  <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
-                    {item.label}
-                  </p>
-                  <p className="mt-0.5 truncate text-xs font-extrabold text-slate-900">{item.value}</p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <div className="hidden grid-cols-1 gap-4 md:grid md:grid-cols-2 xl:grid-cols-4">
-          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
-            <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
-              <Wallet className="h-5 w-5" />
-            </div>
-            <p className="text-2xl font-extrabold text-slate-900">
-              {formatPrice(metrics.totalRevenue, settings.currency)}
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-600">Total Revenue</p>
-          </div>
-
-          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
-            <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
-              <CreditCard className="h-5 w-5" />
-            </div>
-            <p className="text-2xl font-extrabold text-slate-900">
-              {formatPrice(metrics.thisMonthRevenue, settings.currency)}
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-600">This Month</p>
-          </div>
-
-          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
-            <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-lime-100 text-lime-700">
-              <CreditCard className="h-5 w-5" />
-            </div>
-            <p className="text-2xl font-extrabold text-slate-900">
-              {formatPrice(metrics.todayRevenue, settings.currency)}
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-600">Today</p>
-          </div>
-
-          <div className="group rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_34px_rgba(15,64,28,0.16)]">
-            <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-red-700">
-              <RotateCcw className="h-5 w-5" />
-            </div>
-            <p className="text-2xl font-extrabold text-slate-900">
-              {formatPrice(refundAmount, settings.currency)}
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-600">Refunded</p>
-          </div>
-        </div>
-
-        {/* COD vs Prepaid breakdown — populated from verified analytics endpoint */}
-        {verifiedRevenue && (
-          <div className="hidden grid-cols-1 gap-4 md:grid md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
-              <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
-                <Wallet className="h-5 w-5" />
+        {/* SafePay Gateway Status Banner */}
+        {gatewayStatus && (
+          <div
+            className={`flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 ${
+              gatewayStatus.configured
+                ? "border-emerald-200 bg-gradient-to-r from-emerald-50 to-green-50"
+                : "border-amber-200 bg-amber-50/70"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                  gatewayStatus.configured
+                    ? "bg-emerald-600 text-white"
+                    : "bg-amber-500 text-white"
+                }`}
+              >
+                <Shield className="h-5 w-5" />
               </div>
-              <p className="text-2xl font-extrabold text-slate-900">
-                {formatPrice(verifiedRevenue.prepaid, settings.currency)}
-              </p>
-              <p className="mt-1 text-sm font-medium text-slate-600">Prepaid Revenue</p>
-            </div>
-
-            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
-              <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
-                <CreditCard className="h-5 w-5" />
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-base font-bold text-slate-900">SafePay Payment Gateway</h2>
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-bold uppercase ${
+                      gatewayStatus.configured
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    {gatewayStatus.configured ? "Active" : "Keys Missing"}
+                  </span>
+                  <span className="rounded-full bg-white/80 px-2.5 py-0.5 text-xs font-semibold uppercase text-slate-700 border border-slate-200">
+                    {gatewayStatus.environment}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-slate-600 sm:text-sm">
+                  {gatewayStatus.configured
+                    ? `Connected in ${gatewayStatus.environment} mode (${gatewayStatus.currency}). Manual screenshot payments are disabled.`
+                    : "Set SAFEPAY_API_KEY, SAFEPAY_SECRET_KEY, and SAFEPAY_WEBHOOK_SECRET in backend/.env to process live/sandbox SafePay checkouts."}
+                </p>
               </div>
-              <p className="text-2xl font-extrabold text-slate-900">
-                {formatPrice(verifiedRevenue.codAdvance, settings.currency)}
-              </p>
-              <p className="mt-1 text-sm font-medium text-slate-600">COD Advance Revenue</p>
             </div>
-
-            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
-              <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
-                <Wallet className="h-5 w-5" />
-              </div>
-              <p className="text-2xl font-extrabold text-slate-900">
-                {formatPrice(verifiedRevenue.codFinal, settings.currency)}
-              </p>
-              <p className="mt-1 text-sm font-medium text-slate-600">COD Collected Revenue</p>
-            </div>
-
-            <div className="rounded-2xl border border-amber-200 bg-amber-50/40 p-5 shadow-[0_10px_28px_rgba(120,80,10,0.08)]">
-              <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
-                <AlertCircle className="h-5 w-5" />
-              </div>
-              <p className="text-2xl font-extrabold text-amber-900">
-                {verifiedRevenue.pendingCodCollections}
-              </p>
-              <p className="mt-1 text-sm font-medium text-amber-800">Pending COD Collections</p>
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 ${
+                  gatewayStatus.webhook_configured
+                    ? "bg-emerald-100 text-emerald-800"
+                    : "bg-slate-200 text-slate-700"
+                }`}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Webhook {gatewayStatus.webhook_configured ? "Configured" : "Not Set"}
+              </span>
             </div>
           </div>
         )}
 
-        <section className="md:hidden">
-          <div className="rounded-2xl border border-emerald-100 bg-white p-3 shadow-[0_10px_24px_rgba(15,64,28,0.08)]">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="text-base font-bold text-slate-900">
-                {mobileView === "methods" ? "Payment Methods" : "Recent Transactions"}
+        {/* Revenue KPIs */}
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+          <div className="rounded-2xl border border-emerald-100 bg-white p-4 sm:p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
+            <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+              <Wallet className="h-5 w-5" />
+            </div>
+            <p className="text-xl sm:text-2xl font-extrabold text-slate-900">
+              {formatPrice(metrics.totalRevenue, settings.currency)}
+            </p>
+            <p className="mt-1 text-xs sm:text-sm font-medium text-slate-600">Total Verified Revenue</p>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-100 bg-white p-4 sm:p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
+            <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+              <Shield className="h-5 w-5" />
+            </div>
+            <p className="text-xl sm:text-2xl font-extrabold text-slate-900">
+              {formatPrice(verifiedRevenue?.safepayRevenue ?? 0, settings.currency)}
+            </p>
+            <p className="mt-1 text-xs sm:text-sm font-medium text-slate-600">SafePay Collected</p>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-100 bg-white p-4 sm:p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
+            <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-lime-100 text-lime-700">
+              <CreditCard className="h-5 w-5" />
+            </div>
+            <p className="text-xl sm:text-2xl font-extrabold text-slate-900">
+              {formatPrice(metrics.thisMonthRevenue, settings.currency)}
+            </p>
+            <p className="mt-1 text-xs sm:text-sm font-medium text-slate-600">This Month</p>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-100 bg-white p-4 sm:p-5 shadow-[0_10px_28px_rgba(15,64,28,0.08)]">
+            <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-red-700">
+              <RotateCcw className="h-5 w-5" />
+            </div>
+            <p className="text-xl sm:text-2xl font-extrabold text-slate-900">
+              {formatPrice(refundAmount, settings.currency)}
+            </p>
+            <p className="mt-1 text-xs sm:text-sm font-medium text-slate-600">Refunded</p>
+          </div>
+        </div>
+
+        {/* Pending COD Collections */}
+        <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Truck className="h-5 w-5 text-amber-600" />
+              <h2 className="text-lg font-bold text-slate-900">
+                Pending Cash on Delivery Collections ({pendingCodOrders.length})
               </h2>
-              <div className="inline-flex rounded-full border border-emerald-100 bg-[#f4faf5] p-1">
-                <button
-                  type="button"
-                  onClick={() => setMobileView("methods")}
-                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    mobileView === "methods" ? "bg-emerald-700 text-white" : "text-slate-600"
-                  }`}
+            </div>
+            {verifiedRevenue?.pendingCodAmount > 0 && (
+              <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">
+                Outstanding: {formatPrice(verifiedRevenue.pendingCodAmount, settings.currency)}
+              </span>
+            )}
+          </div>
+
+          {pendingCodOrders.length === 0 ? (
+            <p className="text-sm text-slate-500">All Cash on Delivery orders are settled.</p>
+          ) : (
+            <div className="space-y-3">
+              {pendingCodOrders.map((order) => (
+                <div
+                  key={order.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-amber-100 bg-amber-50/40 p-4 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  Methods
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMobileView("transactions")}
-                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    mobileView === "transactions" ? "bg-emerald-700 text-white" : "text-slate-600"
-                  }`}
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-slate-900">
+                        ORD-{String(order.id).padStart(6, "0")}
+                      </span>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold capitalize text-slate-700 border border-slate-200">
+                        {order.status}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${paymentStatusClass[order.payment_status] || "bg-slate-100 text-slate-700"}`}
+                      >
+                        {order.payment_status === "partial" ? "Advance Paid via SafePay" : "COD Pending"}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-700">
+                      {order.customer_name || order.customer_email || "Customer"} · {order.city || "—"}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Placed {formatDateShort(order.created_at)}
+                      {order.advance_paid > 0
+                        ? ` · Advance Paid: ${formatPrice(order.advance_paid, settings.currency)}`
+                        : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 sm:justify-end">
+                    <div className="text-left sm:text-right">
+                      <p className="text-xs text-slate-500">Cash to Collect</p>
+                      <p className="text-base font-extrabold text-amber-900">
+                        {formatPrice(order.remaining_cash, settings.currency)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleMarkCodCollected(order.id)}
+                      disabled={collectingOrderId === order.id}
+                      className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      {collectingOrderId === order.id ? "Saving..." : "Mark Collected"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Gateway Transactions Table + Method Distribution */}
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+          <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6 xl:col-span-2">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-lg font-bold text-slate-900">
+                Payment Transactions ({filteredTransactions.length})
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  value={txProviderFilter}
+                  onChange={(e) => setTxProviderFilter(e.target.value)}
+                  className="rounded-xl border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500"
                 >
-                  Txns
-                </button>
+                  <option value="all">All Providers</option>
+                  <option value="safepay">SafePay</option>
+                  <option value="cod">Cash on Delivery</option>
+                </select>
+                <select
+                  value={txStatusFilter}
+                  onChange={(e) => setTxStatusFilter(e.target.value)}
+                  className="rounded-xl border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="paid">Paid</option>
+                  <option value="pending">Pending</option>
+                  <option value="failed">Failed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
               </div>
             </div>
 
-            {mobileView === "methods" ? (
-              <div className="space-y-3">
-                {mobilePaymentMethods.length > 0 ? (
-                  mobilePaymentMethods.map((method) => {
-                    const widthPercentage = Math.max((method.amount / maxMethodAmount) * 100, 5);
-                    return (
-                      <div key={method.method} className="rounded-xl border border-emerald-100 bg-[#f0f8f2] px-3 py-2.5">
-                        <div className="mb-1.5 flex items-center justify-between text-sm font-semibold text-slate-700">
-                          <span>{formatMethodLabel(method.method)}</span>
-                          <span>{formatPrice(method.amount, settings.currency)}</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-emerald-100/70">
-                          <div
-                            className="h-2 rounded-full bg-gradient-to-r from-[#245418] to-[#65a63f]"
-                            style={{ width: `${widthPercentage}%` }}
-                          />
-                        </div>
-                        <p className="mt-1 text-xs text-slate-500">{method.count} transactions</p>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <p className="text-sm text-slate-500">No payment data available.</p>
-                )}
-
-                {metrics.paymentMethods.length > 3 ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllMobileMethods((prev) => !prev)}
-                    className="inline-flex min-h-[36px] items-center rounded-lg border border-emerald-200 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-50"
-                  >
-                    {showAllMobileMethods ? "Show fewer methods" : `Show all ${metrics.paymentMethods.length} methods`}
-                  </button>
-                ) : null}
-              </div>
+            {filteredTransactions.length === 0 ? (
+              <p className="py-8 text-center text-sm text-slate-500">
+                No payment transactions match the selected filters.
+              </p>
             ) : (
-              <div className="space-y-2.5">
-                {mobileTransactions.length > 0 ? (
-                  mobileTransactions.map((order) => {
-                    const paymentStatus = String(order.payment_status || "pending").toLowerCase();
-                    return (
-                      <article key={order.id} className="rounded-xl border border-emerald-100 bg-[#f0f8f2] px-3 py-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-slate-900">
-                              #{order.id} · {order.customer_name || order.customer_email || "Customer"}
-                            </p>
-                            <p className="truncate text-xs text-slate-500">
-                              {formatMethodLabel(order.payment_method)}
-                            </p>
-                          </div>
-                          <span
-                            className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${paymentStatusClass[paymentStatus] || "bg-gray-100 text-gray-700"}`}
-                          >
-                            {paymentStatus}
+              <div className="space-y-2.5 max-h-[520px] overflow-y-auto pr-1">
+                {filteredTransactions.map((tx) => {
+                  const status = String(tx.status || "pending").toLowerCase();
+                  return (
+                    <div
+                      key={tx.id}
+                      className="flex flex-col gap-2 rounded-xl border border-emerald-100 bg-[#f6fbf7] px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold text-slate-900">
+                            {tx.order_id ? `ORD-${String(tx.order_id).padStart(6, "0")}` : `TX #${tx.id}`}
                           </span>
+                          <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200">
+                            {formatMethodLabel(tx.provider)}
+                          </span>
+                          {tx.stage && (
+                            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+                              {tx.stage === "advance_shipping"
+                                ? "COD Advance"
+                                : tx.stage === "final_collection"
+                                  ? "COD Cash"
+                                  : "Full Payment"}
+                            </span>
+                          )}
                         </div>
-                        <p className="mt-1 text-right text-sm font-bold text-slate-900">
-                          {formatPrice(Number(order.total_amount || 0), settings.currency)}
+                        <p className="mt-0.5 truncate text-xs text-slate-600">
+                          {tx.customer_name || tx.user_name || tx.customer_email || "Customer"} ·{" "}
+                          {formatDateShort(tx.processed_at || tx.created_at)}
                         </p>
-                      </article>
-                    );
-                  })
-                ) : (
-                  <p className="text-sm text-slate-500">No transactions found.</p>
-                )}
-
-                {metrics.recentTransactions.length > 4 ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllMobileTransactions((prev) => !prev)}
-                    className="inline-flex min-h-[36px] items-center rounded-lg border border-emerald-200 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-50"
-                  >
-                    {showAllMobileTransactions
-                      ? "Show fewer transactions"
-                      : `Show all ${metrics.recentTransactions.length} transactions`}
-                  </button>
-                ) : null}
+                        {tx.gateway_reference && (
+                          <p className="mt-0.5 truncate font-mono text-[11px] text-slate-500">
+                            Ref: {tx.gateway_reference}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between gap-3 sm:block sm:text-right">
+                        <p className="text-sm font-extrabold text-slate-900">
+                          {formatPrice(Number(tx.amount || 0), tx.currency || settings.currency)}
+                        </p>
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${paymentStatusClass[status] || "bg-slate-100 text-slate-700"}`}
+                        >
+                          {status || "recorded"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
-        </section>
 
-        <div className="hidden grid-cols-1 gap-4 md:grid xl:grid-cols-2">
-          <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-5">
-            <h2 className="mb-4 text-lg font-bold text-slate-900">Payment Methods</h2>
+          <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-6">
+            <h2 className="mb-4 text-lg font-bold text-slate-900">Payment Methods Breakdown</h2>
             <div className="space-y-4">
               {metrics.paymentMethods.length > 0 ? (
                 metrics.paymentMethods.map((method) => {
-                  const widthPercentage = Math.max((method.amount / maxMethodAmount) * 100, 5);
+                  const widthPercentage = Math.max(
+                    (method.amount / maxMethodAmount) * 100,
+                    5,
+                  );
                   return (
                     <div key={method.method}>
                       <div className="mb-1.5 flex items-center justify-between text-sm font-semibold text-slate-700">
@@ -449,56 +494,18 @@ export function AdminPayments() {
                           style={{ width: `${widthPercentage}%` }}
                         />
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">{method.count} transactions</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {method.count} order{method.count === 1 ? "" : "s"}
+                      </p>
                     </div>
                   );
                 })
               ) : (
-                <p className="text-sm text-slate-500">No payment data available.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-[0_14px_30px_rgba(15,64,28,0.08)] sm:p-5">
-            <h2 className="mb-4 text-lg font-bold text-slate-900">Recent Transactions</h2>
-            <div className="space-y-3">
-              {metrics.recentTransactions.length > 0 ? (
-                metrics.recentTransactions.map((order) => {
-                  const paymentStatus = String(order.payment_status || "pending").toLowerCase();
-                  return (
-                    <div
-                      key={order.id}
-                      className="flex items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-[#f0f8f2] px-3 py-2.5"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">
-                          #{order.id} · {order.customer_name || order.customer_email || "Customer"}
-                        </p>
-                        <p className="truncate text-xs text-slate-500">
-                          {formatMethodLabel(order.payment_method)}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-slate-900">
-                          {formatPrice(Number(order.total_amount || 0), settings.currency)}
-                        </p>
-                        <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${paymentStatusClass[paymentStatus] || "bg-gray-100 text-gray-700"}`}
-                        >
-                          {paymentStatus}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="text-sm text-slate-500">No transactions found.</p>
+                <p className="text-sm text-slate-500">No order payment data yet.</p>
               )}
             </div>
           </div>
         </div>
-
-        <AdminPaymentsExtensions />
       </div>
     </AdminLayout>
   );

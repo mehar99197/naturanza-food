@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Pencil,
@@ -38,6 +38,16 @@ export default function AdminTeam() {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState("");
   const [uploading, setUploading] = useState(false);
+  const previewUrlRef = useRef("");
+
+  const revokePreviewUrl = () => {
+    if (previewUrlRef.current && previewUrlRef.current.startsWith("blob:")) {
+      URL.revokeObjectURL(previewUrlRef.current);
+    }
+    previewUrlRef.current = "";
+  };
+
+  useEffect(() => () => revokePreviewUrl(), []);
 
   const loadMembers = async () => {
     try {
@@ -62,6 +72,7 @@ export default function AdminTeam() {
   );
 
   const openCreateModal = () => {
+    revokePreviewUrl();
     setEditingMember(null);
     setFormData(initialFormState);
     setValidationErrors({});
@@ -72,6 +83,7 @@ export default function AdminTeam() {
   };
 
   const openEditModal = (member) => {
+    revokePreviewUrl();
     setEditingMember(member);
     setFormData({
       name: String(member.name || ""),
@@ -89,6 +101,7 @@ export default function AdminTeam() {
   };
 
   const closeModal = () => {
+    revokePreviewUrl();
     setShowModal(false);
     setEditingMember(null);
     setFormData(initialFormState);
@@ -130,8 +143,11 @@ export default function AdminTeam() {
       return;
     }
 
+    revokePreviewUrl();
+    const nextUrl = URL.createObjectURL(file);
+    previewUrlRef.current = nextUrl;
     setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
+    setImagePreview(nextUrl);
     setValidationErrors((prev) => {
       const next = { ...prev };
       delete next.image;
@@ -189,6 +205,7 @@ export default function AdminTeam() {
     } catch (requestError) {
       setError(
         requestError?.response?.data?.error ||
+          requestError?.message ||
           "Something went wrong saving the team member.",
       );
     } finally {
@@ -425,6 +442,11 @@ export default function AdminTeam() {
               </div>
 
               <div className="p-6 space-y-5">
+                {error && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+                    {error}
+                  </div>
+                )}
                 {/* Image Upload */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -463,6 +485,7 @@ export default function AdminTeam() {
                     {(imagePreview || formData.image) && (
                       <button
                         onClick={() => {
+                          revokePreviewUrl();
                           setImageFile(null);
                           setImagePreview("");
                           handleChange("image", "");

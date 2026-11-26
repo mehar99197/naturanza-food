@@ -265,6 +265,8 @@ axiosInstance.interceptors.request.use(async (config) => {
     /^\/wishlist(\/|$)/.test(requestUrl) ||
     /^\/cart(\/|$)/.test(requestUrl) ||
     /^\/orders(\/|$)/.test(requestUrl) ||
+    /^\/returns(\/|$)/.test(requestUrl) ||
+    /^\/coupons\/validate(\/|$)/.test(requestUrl) ||
     /^\/reviews(\/|$)/.test(requestUrl) ||
     /^\/payments(\/|$)/.test(requestUrl);
   const isAdminRoute =
@@ -279,18 +281,12 @@ axiosInstance.interceptors.request.use(async (config) => {
   let token = null;
   let authScope = "none";
 
-  // Admin scope is resolved FIRST, then user scope fills in. isUserScopedRoute
-  // matches /orders/*, which also covers /orders/admin/all and /orders/:id/status
-  // — checking it first meant an admin's request went out with no Authorization
-  // header at all, working only because authenticateToken falls back to the
-  // adminAccessToken cookie, and burning a wasted 401 round-trip on the reads
-  // that do get retried. An admin without a user session is the normal case.
+  // Admin scope is strictly isolated from customer tokens so an admin page
+  // never accidentally authenticates an admin API call with a storefront token.
   if (isAdminRoute || isAdminPage) {
     token = adminToken || null;
-    authScope = token ? "admin" : "none";
-  }
-
-  if (!token && isUserScopedRoute) {
+    authScope = "admin";
+  } else if (isUserScopedRoute) {
     token = userToken || null;
     authScope = token ? "user" : "none";
   }
@@ -322,8 +318,17 @@ axiosInstance.interceptors.request.use(async (config) => {
 const isAdminEndpoint = (url) =>
   url.includes("/admin-management") || url.includes("/admin/");
 
+const isAdminAuthEndpoint = (url) =>
+  /^\/admin\/(login|staff-login|forgot-password|reset-password)(\/|$)/.test(url);
+
 const isAuthEndpoint = (url) =>
-  /^\/auth(\/|$)/.test(url) || url.includes("/auth/");
+  /^\/auth\/(login|register|google|refresh|refresh-token|logout|forgot-password|reset-password|verify-email|resend-verification)(\/|$)/.test(
+    url,
+  );
+
+const isPasswordVerificationEndpoint = (url) =>
+  /^\/profile\/(change-password|delete-account)(\/|$)/.test(url) ||
+  /^\/auth\/change-password(\/|$)/.test(url);
 
 const isUserRoute = (url) =>
   /^\/auth(\/|$)/.test(url) ||
@@ -331,6 +336,8 @@ const isUserRoute = (url) =>
   /^\/wishlist(\/|$)/.test(url) ||
   /^\/cart(\/|$)/.test(url) ||
   /^\/orders(\/|$)/.test(url) ||
+  /^\/returns(\/|$)/.test(url) ||
+  /^\/coupons\/validate(\/|$)/.test(url) ||
   /^\/reviews(\/|$)/.test(url) ||
   /^\/payments(\/|$)/.test(url);
 
@@ -389,31 +396,35 @@ axiosInstance.interceptors.response.use(
       return Promise.reject(withCsrfUserMessage(error));
     }
 
-    // Don't retry auth endpoints (login, register, etc.)
-    if (isAuthEndpoint(requestUrl)) {
+    // Don't retry unauthenticated auth lifecycle endpoints (login, register, refresh, etc.)
+    if (isAuthEndpoint(requestUrl) || isAdminAuthEndpoint(requestUrl)) {
       return Promise.reject(error);
     }
 
-    // For admin endpoints - retry with admin token on 401
-    if (status === 401 && isAdminEndpoint(requestUrl)) {
-      const adminToken = getAdminAccessToken();
-      if (adminToken && !originalRequest._retry) {
-        originalRequest._retry = true;
-        originalRequest.headers = originalRequest.headers || {};
-        originalRequest.headers.Authorization = `Bearer ${adminToken}`;
-        return axiosInstance(originalRequest);
-      }
+    // For admin endpoints or admin-scoped requests: invalidate session on 401
+    if (status === 401 && (isAdminEndpoint(requestUrl) || originalRequest._authScope === "admin")) {
       clearAdminSessionStorage();
       emitAuthSessionSync("admin-token-invalid");
       return Promise.reject(error);
     }
 
-    // For user routes - auto-refresh token on 401/403 if not already retried
-    if ((status === 401 || status === 403) &&
-        isUserRoute(requestUrl) &&
-        !originalRequest._retry &&
-        !originalRequest._refreshRetry &&
-        !shouldSkipAuthRefresh(originalRequest)) {
+    // Wrong current password on profile security actions returns 401; do not
+    // treat that as an expired access token or log the user out.
+    const isWrongPassword401 =
+      status === 401 &&
+      isPasswordVerificationEndpoint(requestUrl) &&
+      /password/i.test(String(responseData?.error || responseData?.message || ""));
+
+    // For user routes - auto-refresh token ONLY on 401 (never 403 permission errors)
+    if (
+      status === 401 &&
+      !isWrongPassword401 &&
+      originalRequest._authScope !== "admin" &&
+      isUserRoute(requestUrl) &&
+      !originalRequest._retry &&
+      !originalRequest._refreshRetry &&
+      !shouldSkipAuthRefresh(originalRequest)
+    ) {
       originalRequest._refreshRetry = true;
 
       try {
@@ -431,11 +442,6 @@ axiosInstance.interceptors.response.use(
         emitAuthSessionSync("user-token-refresh-failed");
         return Promise.reject(error);
       }
-    }
-
-    if (status === 401 && originalRequest._authScope === "admin") {
-      clearAdminSessionStorage();
-      emitAuthSessionSync("admin-token-invalid");
     }
 
     return Promise.reject(error);
@@ -693,11 +699,6 @@ export const userAPI = {
 
   resetPassword: async (data) => {
     const response = await axiosInstance.post("/auth/reset-password", data);
-    return response.data;
-  },
-
-  getStats: async () => {
-    const response = await axiosInstance.get("/auth/stats");
     return response.data;
   },
 
@@ -1073,9 +1074,6 @@ export const adminAPI = {
   },
 
   getDashboardStats: async () => {
-    if (!getAdminAccessToken()) {
-      return {};
-    }
     const response = await axiosInstance.get("/admin/dashboard/stats");
     return response.data;
   },
@@ -1098,9 +1096,6 @@ export const adminAPI = {
   },
 
   getRecentOrders: async (limit = 10) => {
-    if (!getAdminAccessToken()) {
-      return [];
-    }
     const response = await axiosInstance.get("/admin/dashboard/recent-orders", {
       params: { limit },
     });
@@ -1108,9 +1103,6 @@ export const adminAPI = {
   },
 
   getSalesReport: async (params = {}) => {
-    if (!getAdminAccessToken()) {
-      return [];
-    }
     const response = await axiosInstance.get("/admin/reports/sales", {
       params,
     });
@@ -1118,25 +1110,16 @@ export const adminAPI = {
   },
 
   getProductSalesReport: async (params = {}) => {
-    if (!getAdminAccessToken()) {
-      return [];
-    }
     const response = await axiosInstance.get("/admin/reports/products", { params });
     return response.data;
   },
 
   getCustomers: async () => {
-    if (!getAdminAccessToken()) {
-      return [];
-    }
     const response = await axiosInstance.get("/admin/users");
     return response.data;
   },
 
   getUsers: async (params = {}) => {
-    if (!getAdminAccessToken()) {
-      return [];
-    }
     const response = await axiosInstance.get("/admin/users", { params });
     return response.data;
   },
@@ -1178,9 +1161,6 @@ export const adminAPI = {
   },
 
   getCoupons: async () => {
-    if (!getAdminAccessToken()) {
-      return [];
-    }
     const response = await axiosInstance.get("/coupons");
     return response.data;
   },
@@ -1286,34 +1266,8 @@ export const adminAPI = {
     return response.data;
   },
 
-  getPaymentAccounts: async () => {
-    const response = await axiosInstance.get("/admin/payments/accounts");
-    return response.data;
-  },
-
-  updatePaymentAccount: async (accountId, payload) => {
-    const response = await axiosInstance.put(
-      `/admin/payments/accounts/${accountId}`,
-      payload,
-    );
-    return response.data;
-  },
-
-  getPaymentVerifications: async (status = "pending", stage = null) => {
-    const params = { status };
-    if (stage) params.stage = stage;
-    const response = await axiosInstance.get(
-      "/admin/payments/verifications",
-      { params },
-    );
-    return response.data;
-  },
-
-  getPaymentVerificationScreenshot: async (verificationId) => {
-    const response = await axiosInstance.get(
-      `/admin/payments/verifications/${verificationId}/screenshot`,
-      { responseType: "blob" },
-    );
+  getPaymentGatewayStatus: async () => {
+    const response = await axiosInstance.get("/admin/payments/gateway-status");
     return response.data;
   },
 
@@ -1322,19 +1276,22 @@ export const adminAPI = {
     return response.data;
   },
 
-  approvePaymentVerification: async (verificationId, adminNote = null) => {
-    const body = adminNote ? { admin_note: adminNote } : {};
-    const response = await axiosInstance.put(
-      `/admin/payments/verifications/${verificationId}/approve`,
-      body,
-    );
+  getPaymentTransactions: async (params = {}) => {
+    const response = await axiosInstance.get("/admin/payments/transactions", {
+      params,
+    });
     return response.data;
   },
 
-  rejectPaymentVerification: async (verificationId, reason) => {
-    const response = await axiosInstance.put(
-      `/admin/payments/verifications/${verificationId}/reject`,
-      { reason },
+  getPendingCodOrders: async () => {
+    const response = await axiosInstance.get("/admin/payments/pending-cod");
+    return response.data;
+  },
+
+  markCodCollected: async (orderId, note = "") => {
+    const response = await axiosInstance.post(
+      `/admin/payments/orders/${orderId}/mark-cod-collected`,
+      note ? { note } : {},
     );
     return response.data;
   },
@@ -1345,9 +1302,6 @@ export const adminAPI = {
   },
 
   getReviews: async (params = {}) => {
-    if (!getAdminAccessToken()) {
-      return [];
-    }
     const response = await axiosInstance.get("/admin/reviews", { params });
     return response.data;
   },
@@ -1500,23 +1454,38 @@ export const adminAPI = {
   },
 };
 
-// Payment verification APIs
+// Payment gateway APIs (SafePay + COD)
 export const paymentAPI = {
   getActiveMethods: async () => {
     const response = await axiosInstance.get("/payments/methods/active");
     return response.data;
   },
 
-  getActiveAccounts: async () => {
-    const response = await axiosInstance.get("/payments/accounts/active");
+  getSafepayConfig: async () => {
+    const response = await axiosInstance.get("/payments/safepay/config");
     return response.data;
   },
 
-  submitVerification: async (formData) => {
-    const response = await axiosInstance.post(
-      "/payments/submit-verification",
-      formData,
-    );
+  createSafepaySession: async (orderId) => {
+    const response = await axiosInstance.post("/payments/safepay/create-session", {
+      order_id: orderId,
+    });
+    return response.data;
+  },
+
+  verifySafepay: async ({ order_id, tracker }) => {
+    const response = await axiosInstance.post("/payments/safepay/verify", {
+      order_id,
+      ...(tracker ? { tracker } : {}),
+    });
+    return response.data;
+  },
+
+  cancelSafepay: async ({ order_id, tracker }) => {
+    const response = await axiosInstance.post("/payments/safepay/cancel", {
+      order_id,
+      ...(tracker ? { tracker } : {}),
+    });
     return response.data;
   },
 };
@@ -1538,9 +1507,6 @@ export const orderAPI = {
   // order table forever. Status and search are applied server-side, because
   // filtering in the browser only works if the browser holds every row.
   getAdminPage: async ({ limit = 25, offset = 0, status = null, search = "" } = {}) => {
-    if (!getAdminAccessToken()) {
-      return { data: [], total: 0 };
-    }
     const response = await axiosInstance.get("/orders/admin/all", {
       params: {
         limit,
@@ -1553,9 +1519,13 @@ export const orderAPI = {
     if (Array.isArray(payload)) {
       // Tolerated so a browser holding a cached bundle keeps working against a
       // server that has not been redeployed yet.
-      return { data: payload, total: payload.length };
+      return { data: payload, total: payload.length, statusCounts: null };
     }
-    return { data: payload?.data || [], total: Number(payload?.total) || 0 };
+    return {
+      data: payload?.data || [],
+      total: Number(payload?.total) || 0,
+      statusCounts: payload?.statusCounts || null,
+    };
   },
 
   getById: async (id) => {
@@ -1563,7 +1533,7 @@ export const orderAPI = {
     return response.data;
   },
 
-  getUserOrders: async (userId) => {
+  getUserOrders: async () => {
     const userToken = getUserAccessToken();
     if (!userToken) {
       return [];
@@ -1734,13 +1704,13 @@ const getCategoryCacheKey = (params) =>
   );
 
 export const categoryAPI = {
-  getAll: async (params = {}) => {
+  getAll: async (params = {}, { bypassCache = false } = {}) => {
     const key = getCategoryCacheKey(params);
     const cached = categoryCache.get(key);
-    if (cached?.data && Date.now() - cached.timestamp < CATEGORY_CACHE_TTL_MS) {
+    if (!bypassCache && cached?.data && Date.now() - cached.timestamp < CATEGORY_CACHE_TTL_MS) {
       return cached.data;
     }
-    if (cached?.promise) {
+    if (!bypassCache && cached?.promise) {
       return cached.promise;
     }
 
@@ -1988,10 +1958,19 @@ export const newsletterAPI = {
   },
 
   broadcast: async ({ subject, message }) => {
-    const response = await axiosInstance.post("/admin/newsletter/broadcast", {
-      subject,
-      message,
-    });
+    const response = await axiosInstance.post(
+      "/admin/newsletter/broadcast",
+      {
+        subject,
+        message,
+      },
+      { timeout: 120000 },
+    );
+    return response.data;
+  },
+
+  getWelcomePromo: async () => {
+    const response = await axiosInstance.get("/admin/newsletter/welcome-promo");
     return response.data;
   },
 

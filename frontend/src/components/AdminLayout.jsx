@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   RotateCcw,
   Settings,
+  SlidersHorizontal,
   ShieldCheck,
   Tag,
   ShieldUser,
@@ -68,6 +69,7 @@ const navItems = [
   { path: "/admin/shipping-cities", label: "Shipping Cities", icon: MapPin },
   { path: "/admin/returns", label: "Returns", icon: RotateCcw },
   { path: "/admin/reports", label: "Reports", icon: Grid3X3 },
+  { path: "/admin/operations", label: "Operations", icon: SlidersHorizontal },
   { path: "/admin/settings", label: "Settings", icon: Settings },
   { path: "/admin/security", label: "Security", icon: ShieldCheck },
   { path: "/admin/admins", label: "Admin", icon: ShieldUser },
@@ -116,7 +118,7 @@ export function AdminLayout({ children }) {
 function AdminLayoutShell({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { admin, adminLogout, canAccess } = useAdminAuth();
+  const { admin, adminLogout, canAccess, isSuperAdmin } = useAdminAuth();
   const { unreadCount, isMuted } = useAdminNotifications();
   const [isMobile, setIsMobile] = useState(isMobileViewport);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -257,8 +259,9 @@ function AdminLayoutShell({ children }) {
   }, []);
 
   const handleLogout = async () => {
+    const targetLogin = isSuperAdmin ? "/admin/login" : "/admin/staff-login";
     await adminLogout();
-    navigate("/admin/login");
+    navigate(targetLogin);
   };
 
   const isSidebarCollapsed = !isMobile && desktopSidebarCollapsed;

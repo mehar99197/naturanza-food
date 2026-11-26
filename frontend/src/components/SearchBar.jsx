@@ -76,8 +76,10 @@ export function SearchBar({ value, onChange, products = [], placeholder = 'Searc
  products: matchedProducts,
  categories: matchedCategories
  });
+ setSelectedIndex(-1);
  } else {
  setSuggestions({ products: [], categories: [] });
+ setSelectedIndex(-1);
  }
  }, [debouncedSearch, products]);
 
@@ -94,7 +96,9 @@ export function SearchBar({ value, onChange, products = [], placeholder = 'Searc
  };
 
  const handleKeyDown = (e) => {
- const totalSuggestions = (suggestions.products?.length || 0) + (suggestions.categories?.length || 0);
+ const categoriesLen = suggestions.categories?.length || 0;
+ const productsLen = suggestions.products?.length || 0;
+ const totalSuggestions = categoriesLen + productsLen;
  
  if (e.key === 'ArrowDown') {
  e.preventDefault();
@@ -104,13 +108,13 @@ export function SearchBar({ value, onChange, products = [], placeholder = 'Searc
  setSelectedIndex(prev => (prev > 0 ? prev - 1 : -1));
  } else if (e.key === 'Enter' && selectedIndex >= 0) {
  e.preventDefault();
- if (selectedIndex < suggestions.products?.length) {
- const product = suggestions.products[selectedIndex];
- handleSuggestionClick(product?.name || '');
- } else {
- const categoryIndex = selectedIndex - suggestions.products?.length;
- const category = suggestions.categories[categoryIndex];
+ if (selectedIndex < categoriesLen) {
+ const category = suggestions.categories[selectedIndex];
  handleSuggestionClick(category);
+ } else {
+ const productIndex = selectedIndex - categoriesLen;
+ const product = suggestions.products[productIndex];
+ handleSuggestionClick(product?.name || '');
  }
  } else if (e.key === 'Escape') {
  setIsFocused(false);
@@ -181,7 +185,7 @@ export function SearchBar({ value, onChange, products = [], placeholder = 'Searc
  key={category}
  onClick={() => handleSuggestionClick(category)}
  className={`w-full px-3 sm:px-4 py-2.5 sm:py-3 text-left hover:bg-green-50 flex items-center gap-3 ${
- selectedIndex === (suggestions.products?.length || 0) + index ? 'bg-green-50' : ''
+ selectedIndex === index ? 'bg-green-50' : ''
  }`}
  >
  <TrendingUp className="w-4 h-4 text-[#3d7a3d] flex-shrink-0" />
@@ -206,7 +210,7 @@ export function SearchBar({ value, onChange, products = [], placeholder = 'Searc
  key={product?.id || `${product?.name || 'product'}-${index}`}
  onClick={() => handleSuggestionClick(product?.name || '')}
  className={`w-full px-3 sm:px-4 py-2.5 sm:py-3 text-left hover:bg-green-50 flex items-start gap-3 sm:gap-4 ${
- selectedIndex === index ? 'bg-green-50' : ''
+ selectedIndex === (suggestions.categories?.length || 0) + index ? 'bg-green-50' : ''
  }`}
  >
 <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
@@ -257,7 +261,11 @@ export function SearchBar({ value, onChange, products = [], placeholder = 'Searc
  )}
 
  {/* No Results */}
- {isFocused && normalizedValue.length >= 2 && suggestions.products?.length === 0 && suggestions.categories?.length === 0 && (
+ {isFocused &&
+ debouncedSearch.trim().length >= 2 &&
+ debouncedSearch === normalizedValue &&
+ suggestions.products?.length === 0 &&
+ suggestions.categories?.length === 0 && (
  <div className="absolute z-50 w-full mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden">
  <div className="px-5 py-7 text-center">
  <Search className="w-12 h-12 text-gray-300 mx-auto mb-3" />

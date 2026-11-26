@@ -10,17 +10,17 @@ const EXCHANGE_RATE_POLL_INTERVAL_MS = 1000 * 60 * 10;
 const CURRENCY_STORAGE_KEY = 'naturanza_currency';
 
 const DEFAULT_SETTINGS = {
- storeName: 'Naturanza',
+ storeName: 'Naturanza Food',
  storeEmail: 'support@naturanzafood.com',
  storePhone: '+92340 9502646',
  currency: 'PKR',
- taxRate: '18',
+ taxRate: '0',
  shippingFlat: '250',
  shippingFree: '5000',
  emailNotifications: true,
  orderNotifications: true,
  lowStockAlerts: true,
- address: 'Pakistan',
+ address: 'Nizam Pura, Chunian, District Kasur, Punjab, Pakistan',
  supportHours: 'Available 24/7',
  facebookUrl: '',
  instagramUrl: '',
@@ -29,9 +29,9 @@ const DEFAULT_SETTINGS = {
  youtubeUrl: '',
  whatsappNumber: '',
  whatsappEnabled: true,
- mapLatitude: 31.5204,
- mapLongitude: 74.3587,
- mapLocationLabel: 'Pakistan, Lahore',
+ mapLatitude: 30.9716931,
+ mapLongitude: 73.8896874,
+ mapLocationLabel: 'Nizam Pura, Chunian, District Kasur, Punjab, Pakistan',
  storeDiscountActive: false,
  storeDiscountPercentage: 0,
  storeDiscountLabel: 'Store Sale',
@@ -108,7 +108,7 @@ const normalizeExchangeRates = (payload = {}) => {
 };
 
 export function SettingsProvider({ children }) {
- const { isAdminAuthenticated } = useAdminAuth();
+ const { isAdminAuthenticated, isSuperAdmin } = useAdminAuth();
  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
  const [loading, setLoading] = useState(false);
  const [error, setError] = useState('');
@@ -117,7 +117,7 @@ export function SettingsProvider({ children }) {
  const [exchangeRatesError, setExchangeRatesError] = useState('');
 
  const applySettings = useCallback((payload) => {
-  if (isAdminAuthenticated) {
+  if (isSuperAdmin) {
     setSettings(normalizeSettings(payload));
     return;
   }
@@ -125,7 +125,7 @@ export function SettingsProvider({ children }) {
   setSettings((prev) =>
     normalizeSettings({ ...payload, currency: prev.currency || DEFAULT_SETTINGS.currency }),
   );
- }, [isAdminAuthenticated]);
+ }, [isSuperAdmin]);
 
  const applyExchangeRates = useCallback((payload) => {
  const normalized = normalizeExchangeRates(payload);
@@ -139,7 +139,7 @@ export function SettingsProvider({ children }) {
   setLoading(true);
   }
 
-  const response = isAdminAuthenticated
+  const response = isSuperAdmin
   ? await adminAPI.getSettings()
   : await settingsAPI.getPublicSettings();
 
@@ -147,7 +147,7 @@ export function SettingsProvider({ children }) {
   // access to phone, address, hours, and map data without exposing them on
   // the generic /settings endpoint.
   let contactResponse = {};
-  if (!isAdminAuthenticated) {
+  if (!isSuperAdmin) {
     try {
       contactResponse = await settingsAPI.getContactSettings();
     } catch {
@@ -166,7 +166,7 @@ export function SettingsProvider({ children }) {
  setLoading(false);
  }
  }
- }, [applySettings, isAdminAuthenticated]);
+ }, [applySettings, isSuperAdmin]);
 
  const refreshExchangeRates = useCallback(async ({ silent = false } = {}) => {
  try {
@@ -311,4 +311,8 @@ export function useSettings() {
  throw new Error('useSettings must be used within a SettingsProvider');
  }
  return context;
+}
+
+export function useOptionalSettings() {
+ return useContext(SettingsContext) || { settings: DEFAULT_SETTINGS };
 }

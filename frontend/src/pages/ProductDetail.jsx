@@ -15,10 +15,7 @@ import {
   ChevronRight,
   Leaf,
   Award,
-  Zap,
   Clock,
-  Smile,
-  Moon,
 } from 'lucide-react';
 import { useProducts } from '@/context/ProductContext';
 import { useCart } from '@/context/CartContext';
@@ -28,8 +25,8 @@ import { productAPI, reviewAPI } from '@/services/api';
 import { useWishlist } from '@/context/WishlistContext';
 import { formatPrice, getProductPricing } from '@/lib/utils';
 import { convertFromPkr, hasExchangeRate } from '@/lib/exchangeRates';
-import { getAbsoluteImageUrl, getApiBaseUrl } from '@/lib/imageUtils';
-import { getProductContentDefaults, getProductContentText } from '@/lib/productContentDefaults';
+import { getAbsoluteImageUrl } from '@/lib/imageUtils';
+import { parseProductListField, resolveProductContent } from '@/lib/productDetailUtils';
 import { safeLocalStorage } from '@/lib/storage';
 import { ProductCard } from '@/components/ProductCard';
 import { ProductDetailSkeleton } from '@/components/Skeletons/ProductDetailSkeleton';
@@ -80,38 +77,12 @@ const DETAIL_SECTIONS = [
   { key: 'usage', label: 'Usage' },
 ];
 
-const toArray = (value) => {
-  if (!value) return [];
-
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => String(item || '').trim())
-      .filter(Boolean);
-  }
-
-  if (typeof value === 'string') {
-    const normalized = value.replace(/\r\n/g, '\n').trim();
-    if (!normalized) return [];
-
-    if (normalized.startsWith('[') && normalized.endsWith(']')) {
-      try {
-        const parsed = JSON.parse(normalized);
-        if (Array.isArray(parsed)) {
-          return parsed
-            .map((item) => String(item || '').trim())
-            .filter(Boolean);
-        }
-      } catch { /* ignored: not fatal to this flow */ }
-    }
-
-    return normalized
-      .split(/\n+|,|•|\u2022/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
-  return [];
-};
+const BENEFIT_BADGE_STYLES = [
+  { Icon: Leaf, bg: 'bg-emerald-50', color: 'text-emerald-600' },
+  { Icon: Shield, bg: 'bg-blue-50', color: 'text-blue-600' },
+  { Icon: Check, bg: 'bg-green-50', color: 'text-green-600' },
+  { Icon: Award, bg: 'bg-amber-50', color: 'text-amber-600' },
+];
 
 const toParagraphs = (value) => {
   const text = String(value || '').replace(/\r\n/g, '\n').trim();
@@ -147,7 +118,7 @@ const toImageArray = (value) => {
     return candidate ? [candidate] : [];
   }
 
-  return toArray(value);
+  return parseProductListField(value, { allowSingleLineComma: true });
 };
 
 const normalizeImageSource = (value) => {
@@ -208,11 +179,15 @@ export function ProductDetail() {
   const [activeMobileSection, setActiveMobileSection] = useState('description');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const toastTimerRef = useRef(null);
 
-  const defaultProductContent = useMemo(
-    () => getProductContentDefaults(product),
-    [product],
-  );
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   // Clear mock reviews from localStorage on component mount
   useEffect(() => {
@@ -263,7 +238,7 @@ export function ProductDetail() {
         }
 
         const nextRelated = (Array.isArray(pool) ? pool : [])
-          .filter((item) => String(item.id) !== String(id))
+          .filter((item) => String(item.id) !== String(currentProduct.id ?? id))
           .slice(0, 8);
 
         setRelatedProducts(nextRelated);
@@ -305,53 +280,26 @@ export function ProductDetail() {
     }
   }, [activeImage, productImages.length]);
 
-  const resolvedDescription = useMemo(
-    () => String(product?.description || defaultProductContent?.description || '').trim(),
-    [defaultProductContent, product],
-  );
-  const resolvedIngredients = useMemo(
-    () =>
-      String(
-        product?.ingredients ||
-          getProductContentText(defaultProductContent?.ingredients) ||
-          '',
-      ).trim(),
-    [defaultProductContent, product],
-  );
-  const resolvedBenefits = useMemo(
-    () =>
-      String(
-        product?.benefits ||
-          getProductContentText(defaultProductContent?.benefits) ||
-          '',
-      ).trim(),
-    [defaultProductContent, product],
-  );
-  const resolvedUsage = useMemo(
-    () =>
-      String(
-        product?.usage ||
-          getProductContentText(defaultProductContent?.usage) ||
-          '',
-      ).trim(),
-    [defaultProductContent, product],
-  );
-
-  const ingredientsArray = useMemo(() => toArray(resolvedIngredients), [resolvedIngredients]);
-  const benefitsArray = useMemo(() => toArray(resolvedBenefits), [resolvedBenefits]);
-  const usageArray = useMemo(() => toArray(resolvedUsage), [resolvedUsage]);
+  const {
+    description: resolvedDescription,
+    ingredients: ingredientsArray,
+    displayedBenefits,
+    keyBenefits,
+    isCompactKeyBenefits,
+    usage: usageArray,
+  } = useMemo(() => resolveProductContent(product), [product]);
   const descriptionParagraphs = useMemo(() => toParagraphs(resolvedDescription), [resolvedDescription]);
 
   // Fetch reviews from API instead of localStorage
+  const resolvedProductId = product?.id ?? id;
   const [productReviews, setProductReviews] = useState([]);
-  const [reviewsLoading, setReviewsLoading] = useState(true);
   const reviewRequestIdRef = useRef(0);
 
   const fetchProductReviews = useCallback(async () => {
+    if (!resolvedProductId) return;
     const requestId = ++reviewRequestIdRef.current;
     try {
-      setReviewsLoading(true);
-      const data = await reviewAPI.getProductReviews(id);
+      const data = await reviewAPI.getProductReviews(resolvedProductId);
       if (requestId !== reviewRequestIdRef.current) return;
       setProductReviews(
         (data || []).map((review) => ({
@@ -367,12 +315,8 @@ export function ProductDetail() {
       if (requestId !== reviewRequestIdRef.current) return;
       console.error('Error fetching reviews:', error);
       setProductReviews([]);
-    } finally {
-      if (requestId === reviewRequestIdRef.current) {
-        setReviewsLoading(false);
-      }
     }
-  }, [id]);
+  }, [resolvedProductId]);
 
   useEffect(() => {
     fetchProductReviews();
@@ -400,6 +344,9 @@ export function ProductDetail() {
   const currentPrice = pricing.salePrice;
   const originalPrice = pricing.base;
   const hasDiscount = pricing.onSale;
+  const isStoreSaleActive =
+    Boolean(settings.storeDiscountActive) &&
+    (Number(settings.storeDiscountPercentage) || 0) > 0;
   const savedAmount = pricing.saved;
   const currencyCode = String(settings.currency || 'PKR').toUpperCase();
   const hasRate = hasExchangeRate(currencyCode);
@@ -413,12 +360,12 @@ export function ProductDetail() {
       const desc = paragraphs[0].trim();
       return desc.length > 155 ? desc.substring(0, 152) + '...' : desc;
     }
-    return `Buy ${productName} at Naturanza Food. Premium organic and natural product. Order online with Cash on Delivery in Pakistan.`;
+    return `Buy ${productName} at Naturanza Food. Premium organic and natural product. Order online with SafePay or Cash on Delivery across Pakistan.`;
   };
 
   const productMetaDescription = getMetaDescription(descriptionParagraphs, product?.name || 'Product');
-  const isWishlisted = isInWishlist(id);
-  const isWishlistUpdating = isUpdating(id);
+  const isWishlisted = isInWishlist(resolvedProductId);
+  const isWishlistUpdating = isUpdating(resolvedProductId);
 
   const breadcrumbItems = useMemo(() => {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -435,7 +382,10 @@ export function ProductDetail() {
   const showFeedback = (message) => {
     setToastMessage(message);
     setShowToast(true);
-    window.setTimeout(() => setShowToast(false), 2000);
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => setShowToast(false), 2000);
   };
 
   const goToLogin = () => {
@@ -528,26 +478,27 @@ export function ProductDetail() {
       if (!isAuthenticated) {
         showFeedback('Please login to submit a review');
         goToLogin();
-        return;
+        return false;
       }
 
       // Submit review to database via API
       const data = await reviewAPI.submitReview({
-        product_id: id,
+        product_id: resolvedProductId,
         rating: Number(newReview.rating || 0),
         comment: newReview.comment || '',
       });
 
       reviewEvents.reviewSubmitted({
-        productId: id,
+        productId: resolvedProductId,
         review: data.review,
       });
       
       showFeedback('Review submitted and is awaiting approval.');
-
+      return true;
     } catch (error) {
       console.error('Error submitting review:', error);
       showFeedback(error.response?.data?.error || error.message || 'Failed to submit review. Please try again.');
+      return false;
     }
   };
 
@@ -556,7 +507,7 @@ export function ProductDetail() {
       if (descriptionParagraphs.length === 0) {
         return (
           <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-3 text-sm text-gray-700">
-            No description available for this product yet.
+            100% pure, naturally sourced organic product from Naturanza Food.
           </div>
         );
       }
@@ -574,7 +525,7 @@ export function ProductDetail() {
       if (ingredientsArray.length === 0) {
         return (
           <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-3 text-sm text-gray-700">
-            Ingredients are not provided yet.
+            100% pure, naturally sourced ingredients. See product packaging for complete ingredient and batch details.
           </div>
         );
       }
@@ -587,7 +538,7 @@ export function ProductDetail() {
               className="rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm"
             >
               <span className="inline-flex items-start gap-2">
-                <Check className="mt-0.5 h-4 w-4 text-emerald-600" />
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                 <span>{ingredient}</span>
               </span>
             </li>
@@ -597,23 +548,15 @@ export function ProductDetail() {
     }
 
     if (sectionKey === 'benefits') {
-      if (benefitsArray.length === 0) {
-        return (
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-3 text-sm text-gray-700">
-            Benefits are not provided yet.
-          </div>
-        );
-      }
-
       return (
         <ul className="grid gap-2 sm:grid-cols-2">
-          {benefitsArray.map((benefit, index) => (
+          {displayedBenefits.map((benefit, index) => (
             <li
               key={`${benefit}-${index}`}
-              className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-sm text-gray-700"
+              className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm text-gray-700"
             >
               <span className="flex items-start gap-2">
-                <Zap className="mt-0.5 h-4 w-4 text-amber-600" />
+                <Leaf className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                 <span>{benefit}</span>
               </span>
             </li>
@@ -838,7 +781,7 @@ export function ProductDetail() {
                   </>
                 ) : null}
               </div>
-              {hasDiscount && settings.storeDiscountActive ? (
+              {hasDiscount && isStoreSaleActive ? (
                 <p className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-rose-600">
                   🎉 {settings.storeDiscountLabel} — limited time
                 </p>
@@ -858,7 +801,7 @@ export function ProductDetail() {
               ) : null}
 
               <p className="mt-3 text-sm leading-relaxed text-gray-600">
-                {descriptionParagraphs[0] || 'No description added yet for this product.'}
+                {descriptionParagraphs[0] || '100% pure, naturally sourced organic product from Naturanza Food.'}
               </p>
 
               <div className="mt-4 flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
@@ -935,7 +878,7 @@ export function ProductDetail() {
               <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-emerald-100 bg-emerald-50/50 p-2.5">
                 <div className="text-center">
                   <Truck className="mx-auto h-4 w-4 text-emerald-700" />
-                  <p className="mt-1 text-[11px] font-semibold text-gray-700">Free Shipping</p>
+                  <p className="mt-1 text-[11px] font-semibold text-gray-700">Nationwide Delivery</p>
                 </div>
                 <div className="text-center">
                   <Shield className="mx-auto h-4 w-4 text-emerald-700" />
@@ -1125,61 +1068,34 @@ export function ProductDetail() {
                   ) : null}
 
                   <p className="mt-4 text-[15px] leading-relaxed text-gray-600">
-                    {descriptionParagraphs[0] || 'No description added yet for this product.'}
+                    {descriptionParagraphs[0] || '100% pure, naturally sourced organic product from Naturanza Food.'}
                   </p>
 
-                  {/* Key Benefits - Reference Design Style */}
+                  {/* Key Benefits */}
                   <div className="mt-5">
                     <h3 className="text-sm font-bold text-gray-900 mb-3">Key Benefits</h3>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="flex items-start gap-2.5">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 flex-shrink-0">
-                          <Leaf className="h-5 w-5 text-emerald-600" strokeWidth={2} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 leading-tight">Reduces Stress & Anxiety</p>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2.5">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 flex-shrink-0">
-                          <Shield className="h-5 w-5 text-blue-600" strokeWidth={2} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 leading-tight">Supports Immune Health</p>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2.5">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-50 flex-shrink-0">
-                          <Moon className="h-5 w-5 text-indigo-600" strokeWidth={2} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 leading-tight">Improves Sleep Quality</p>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2.5">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-50 flex-shrink-0">
-                          <Smile className="h-5 w-5 text-amber-600" strokeWidth={2} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 leading-tight">Balances Mood Naturally</p>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2.5">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-yellow-50 flex-shrink-0">
-                          <Zap className="h-5 w-5 text-yellow-600" strokeWidth={2} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 leading-tight">Boosts Energy & Focus</p>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2.5">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-green-50 flex-shrink-0">
-                          <Check className="h-5 w-5 text-green-600" strokeWidth={2} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 leading-tight">100% Natural & Safe</p>
-                        </div>
-                      </div>
+                    <div className={isCompactKeyBenefits ? 'grid grid-cols-2 gap-3' : 'space-y-2.5'}>
+                      {keyBenefits.map((benefit, index) => {
+                        const { Icon, bg, color } =
+                          BENEFIT_BADGE_STYLES[index % BENEFIT_BADGE_STYLES.length];
+                        return (
+                          <div
+                            key={`${benefit}-${index}`}
+                            className={`flex ${isCompactKeyBenefits ? 'items-center' : 'items-start'} gap-2.5`}
+                          >
+                            <div
+                              className={`flex h-9 w-9 items-center justify-center rounded-full ${bg} flex-shrink-0`}
+                            >
+                              <Icon className={`h-5 w-5 ${color}`} strokeWidth={2} />
+                            </div>
+                            <div className={`flex-1 min-w-0 ${isCompactKeyBenefits ? '' : 'pt-1'}`}>
+                              <p className="text-sm font-semibold text-gray-900 leading-snug">
+                                {benefit}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -1262,7 +1178,7 @@ export function ProductDetail() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Shield className="h-5 w-5 text-blue-600 flex-shrink-0" strokeWidth={2.5} />
-                      <span className="text-xs font-semibold text-gray-800 leading-tight">Cruelty-Free</span>
+                      <span className="text-xs font-semibold text-gray-800 leading-tight">Chemical-Free</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Leaf className="h-5 w-5 text-green-600 flex-shrink-0" strokeWidth={2.5} />

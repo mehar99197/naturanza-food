@@ -13,6 +13,10 @@ export const getApiBaseUrl = () => {
   }
 
   if (typeof window !== "undefined") {
+    if (import.meta.env.PROD) {
+      return window.location.origin;
+    }
+
     const protocol = String(window.location.protocol || "http:");
     const hostname = String(window.location.hostname || "localhost");
     const apiPort = Number.parseInt(
@@ -79,12 +83,12 @@ export const getAbsoluteImageUrl = (imageUrl, options = {}) => {
  * Get a placeholder image URL for products
  */
 export const getProductPlaceholder = () => {
-  return `${getApiBaseUrl()}/images/placeholder-product.png`;
+  return "/images/products/honey.webp";
 };
 
 /**
  * Get a placeholder image URL for categories
  */
 export const getCategoryPlaceholder = () => {
-  return `${getApiBaseUrl()}/images/placeholder-category.png`;
+  return "/images/categories/honey.webp";
 };

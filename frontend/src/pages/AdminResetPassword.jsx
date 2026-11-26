@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, CheckCircle2, Eye, EyeOff, Lock } from "lucide-react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { adminAPI } from "@/services/api";
 
 const AdminResetPassword = () => {
@@ -21,7 +21,7 @@ const AdminResetPassword = () => {
   const {
     register,
     handleSubmit,
-    watch,
+    control,
     formState: { errors, isSubmitting },
   } = useForm({
     mode: "onBlur",
@@ -31,7 +31,7 @@ const AdminResetPassword = () => {
     },
   });
 
-  const password = watch("password");
+  const password = useWatch({ control, name: "password", defaultValue: "" });
 
   useEffect(() => {
     if (!token) {
@@ -119,11 +119,11 @@ const AdminResetPassword = () => {
   const passwordStrength = getPasswordStrength(password);
 
   return (
-    <div className="auth-premium-font relative h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-[#f8fbf8] to-[#eef7ef] px-4 sm:px-6">
+    <div className="auth-premium-font relative min-h-screen py-6 bg-gradient-to-br from-slate-50 via-[#f8fbf8] to-[#eef7ef] px-4 sm:px-6">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_16%_18%,rgba(16,185,129,0.09),transparent_42%),radial-gradient(circle_at_84%_82%,rgba(22,163,74,0.07),transparent_42%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(22,101,52,0.28)_1px,transparent_1px),linear-gradient(90deg,rgba(22,101,52,0.2)_1px,transparent_1px)] [background-size:48px_48px]" />
 
-      <div className="relative z-10 mx-auto flex h-full w-full max-w-[30rem] flex-col items-center justify-center">
+      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[30rem] flex-col items-center justify-center">
         <div className="mb-3 text-center sm:mb-4">
           <img
             src="/images/logo.png"

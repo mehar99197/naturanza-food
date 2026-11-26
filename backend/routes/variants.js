@@ -24,9 +24,14 @@ router.get('/product/:productId', (req, res) => {
     const db = getDb();
 
     const query = `
-        SELECT * FROM product_variants 
-        WHERE product_id = ? AND is_active = TRUE
-        ORDER BY variant_name ASC
+        SELECT pv.*
+        FROM product_variants pv
+        JOIN products p ON p.id = pv.product_id
+        WHERE pv.product_id = ?
+          AND pv.is_active = TRUE
+          AND p.is_active = TRUE
+          AND p.deleted_at IS NULL
+        ORDER BY pv.variant_name ASC
     `;
 
     db.query(query, [productId], (err, results) => {
@@ -79,6 +84,15 @@ router.post('/product/:productId', authenticateToken, isAdmin, requirePermission
         return res.status(400).json({ error: 'Variant name and SKU are required' });
     }
 
+    const parsedPrice = price === undefined || price === null || price === '' ? null : Number(price);
+    if (parsedPrice !== null && (!Number.isFinite(parsedPrice) || parsedPrice < 0)) {
+        return res.status(400).json({ error: 'Price must be a non-negative number' });
+    }
+    const parsedStock = stock_quantity === undefined || stock_quantity === null || stock_quantity === '' ? 0 : Number(stock_quantity);
+    if (!Number.isInteger(parsedStock) || parsedStock < 0) {
+        return res.status(400).json({ error: 'Stock quantity must be a non-negative integer' });
+    }
+
     const db = getDb();
     const query = `
         INSERT INTO product_variants 
@@ -90,7 +104,7 @@ router.post('/product/:productId', authenticateToken, isAdmin, requirePermission
 
     db.query(
         query, 
-        [productId, variant_name, sku, price, stock_quantity || 0, attributesJson, image_url],
+        [productId, variant_name, sku, parsedPrice, parsedStock, attributesJson, image_url],
         (err, result) => {
             if (err) {
                 if (err.code === 'ER_DUP_ENTRY') {
@@ -124,12 +138,20 @@ router.put('/:variantId', authenticateToken, isAdmin, requirePermission('manage_
         values.push(sku);
     }
     if (price !== undefined) {
+        const parsedPrice = price === null || price === '' ? null : Number(price);
+        if (parsedPrice !== null && (!Number.isFinite(parsedPrice) || parsedPrice < 0)) {
+            return res.status(400).json({ error: 'Price must be a non-negative number' });
+        }
         updates.push('price = ?');
-        values.push(price);
+        values.push(parsedPrice);
     }
     if (stock_quantity !== undefined) {
+        const parsedStock = Number(stock_quantity);
+        if (!Number.isInteger(parsedStock) || parsedStock < 0) {
+            return res.status(400).json({ error: 'Stock quantity must be a non-negative integer' });
+        }
         updates.push('stock_quantity = ?');
-        values.push(stock_quantity);
+        values.push(parsedStock);
     }
     if (attributes !== undefined) {
         updates.push('attributes = ?');

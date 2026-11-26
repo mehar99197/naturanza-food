@@ -1,45 +1,58 @@
 import { HelpCircle } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
-import { BUSINESS_INFO } from '@/config/legal';
+import { BUSINESS_INFO, SHIPPING_POLICY, RETURNS_POLICY } from '@/config/legal';
 import { FAQSEO } from '@/components/SEO';
 import { useSettings } from '@/context/SettingsContext';
+import { formatPrice } from '@/lib/utils';
 
 export function FAQ() {
   const { settings } = useSettings();
   const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
   const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
+  const parsedFreeShipping = Number(settings.shippingFree);
+  const freeShippingAmount =
+    Number.isFinite(parsedFreeShipping) && parsedFreeShipping > 0
+      ? parsedFreeShipping
+      : SHIPPING_POLICY.freeShippingThresholdAmount;
+  const formattedFreeThreshold =
+    formatPrice(freeShippingAmount, settings.currency || 'PKR') ||
+    SHIPPING_POLICY.freeShippingThreshold;
   const faqs = [
     {
-    question: 'How long does delivery take?',
-    answer: 'Most orders are delivered within 2 to 5 business days across Pakistan, depending on your city. Delivery is free on orders over Rs. 5,000.',
+      question: 'How long does delivery take?',
+      answer: `Most orders are delivered within ${SHIPPING_POLICY.standardWindow} across Pakistan after dispatch, depending on your city. Prepaid online orders (via SafePay) of ${formattedFreeThreshold} or more qualify for free shipping, while Cash on Delivery orders carry standard city-specific courier charges.`,
     },
     {
-    question: 'What payment methods do you accept?',
-    answer: 'You can pay by Cash on Delivery (with a small advance shipping fee) or online via JazzCash, EasyPaisa, or bank transfer. All prices are in Pakistani Rupees (PKR).',
+      question: 'What payment methods do you accept?',
+      answer:
+        'You can pay securely online via SafePay (Visa, Mastercard, Raast, and supported mobile wallets) or choose Cash on Delivery (COD) across Pakistan. All prices are in Pakistani Rupees (PKR).',
     },
     {
-    question: 'Are your products 100% organic?',
-    answer: 'Yes, we source from trusted farms and prioritize certified organic and natural ingredients.',
+      question: 'Are your products 100% organic?',
+      answer:
+        'Yes, we source from trusted farms and prioritize pure, chemical-free organic and natural ingredients.',
     },
     {
-    question: 'Can I track my order?',
-    answer: 'Yes, you can track your order from your account order section after dispatch.',
+      question: 'Can I track my order?',
+      answer: 'Yes, you can track your order from your account Orders section after dispatch.',
     },
     {
-    question: 'Do you offer refunds?',
-    answer: 'Returns and refunds are accepted within 3 days of delivery for shipping-related issues only — orders that arrive damaged, incorrect, or with missing items. Share photos with your order ID and we will resolve it quickly.',
+      question: 'Do you offer returns and refunds?',
+      answer: `Returns and replacements are accepted within ${RETURNS_POLICY.returnWindow} of delivery for damaged, defective, or incorrect items in their original sealed packaging. Approved refunds are processed within ${RETURNS_POLICY.refundWindow} to your original payment method after quality inspection (${RETURNS_POLICY.inspectionWindow}).`,
     },
     {
-    question: 'How can I contact support quickly?',
-    answer: `You can reach us at ${supportEmail} or call ${supportPhone} during ${BUSINESS_INFO.supportHours}.`,
+      question: 'How can I contact support quickly?',
+      answer: `You can reach ${BUSINESS_INFO.brandName} (${BUSINESS_INFO.legalName}) at ${supportEmail} or call ${supportPhone} (${BUSINESS_INFO.supportHours}). Registered address: ${BUSINESS_INFO.officeAddress}.`,
     },
     {
-    question: 'Do you deliver outside Pakistan?',
-    answer: 'At the moment, we primarily serve Pakistan. International shipping availability may vary by product and destination.',
+      question: 'Do you deliver outside Pakistan?',
+      answer:
+        'At the moment, we deliver nationwide across Pakistan. International shipping availability may vary by product and destination.',
     },
     {
-    question: 'How do I change or cancel an order?',
-    answer: 'Order changes or cancellations are possible before dispatch. Contact support immediately with your order ID for assistance.',
+      question: 'How do I change or cancel an order?',
+      answer:
+        'Order changes or cancellations are possible before dispatch for a full refund. Contact support immediately with your order ID for assistance.',
     },
   ];
   const faqStructuredData = {

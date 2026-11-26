@@ -53,6 +53,10 @@ const About = named(() => import("@/pages/About"), "About");
 const ProductDetail = named(() => import("@/pages/ProductDetail"), "ProductDetail");
 const Contact = named(() => import("@/pages/Contact"), "Contact");
 const Checkout = named(() => import("@/pages/Checkout"), "Checkout");
+const SafepayPaymentResult = named(
+  () => import("@/pages/SafepayPaymentResult"),
+  "SafepayPaymentResult",
+);
 const FAQ = named(() => import("@/pages/FAQ"), "FAQ");
 const Shipping = named(() => import("@/pages/Shipping"), "Shipping");
 const Returns = named(() => import("@/pages/Returns"), "Returns");
@@ -116,15 +120,21 @@ function RoutePrefetcher() {
   return null;
 }
 
+const isShopPath = (path) => path === "/shop" || path.startsWith("/shop/");
+
 function ScrollToTop() {
   const { pathname } = useLocation();
   const prevPathnameRef = useRef(pathname);
   const isAdminPath = pathname.startsWith("/admin");
 
   useEffect(() => {
-    // Skip forced window scroll for admin route switches; admin pages manage their own layout scroll.
+    const stayedWithinShop =
+      isShopPath(prevPathnameRef.current) && isShopPath(pathname);
+
+    // Skip forced window scroll for admin route switches and intra-shop category switches.
     if (
       !isAdminPath &&
+      !stayedWithinShop &&
       prevPathnameRef.current !== pathname &&
       prevPathnameRef.current !== undefined
     ) {
@@ -199,7 +209,6 @@ function ReloadScrollRestoration() {
 
 function RequireSuperAdmin({ children }) {
   const { admin } = useAdminAuth();
-  const location = useLocation();
 
   if (!admin || admin.admin_role !== 'super_admin') {
     return <Navigate to="/admin/dashboard" replace />;
@@ -263,6 +272,12 @@ function AdminRouteShell() {
 function AppContent() {
   const location = useLocation();
   const isAdminRoute = location.pathname.startsWith("/admin");
+  const isShopRoute = isShopPath(location.pathname);
+  const routeTransitionKey = isAdminRoute
+    ? "/admin"
+    : isShopRoute
+      ? "/shop"
+      : location.pathname;
   const authRoutesWithoutChrome = [
     "/login",
     "/register",
@@ -319,8 +334,8 @@ function AppContent() {
             and the fallback is reached only on a genuine cold start. */}
         <Suspense fallback={<RouteFallback />}>
         <AnimatePresence mode={isAdminRoute ? "sync" : "wait"} initial={false}>
-          <RouteErrorBoundary key={location.key || location.pathname}>
-          <Routes location={location} key={isAdminRoute ? "/admin" : location.pathname}>
+          <RouteErrorBoundary key={routeTransitionKey}>
+          <Routes location={location} key={routeTransitionKey}>
             {/* Public Routes */}
             <Route
               path="/"
@@ -331,15 +346,7 @@ function AppContent() {
               }
             />
             <Route
-              path="/shop"
-              element={
-                <motion.div {...pageTransition}>
-                  <Shop />
-                </motion.div>
-              }
-            />
-            <Route
-              path="/shop/:category"
+              path="/shop/:category?"
               element={
                 <motion.div {...pageTransition}>
                   <Shop />
@@ -376,6 +383,22 @@ function AppContent() {
               element={
                 <ProtectedRoute>
                   <Checkout />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/payment/safepay/result"
+              element={
+                <ProtectedRoute>
+                  <SafepayPaymentResult mode="result" />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/payment/safepay/cancel"
+              element={
+                <ProtectedRoute>
+                  <SafepayPaymentResult mode="cancel" />
                 </ProtectedRoute>
               }
             />

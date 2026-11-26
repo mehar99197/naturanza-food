@@ -5,8 +5,16 @@ const notFoundHandler = (req, res, next) => {
 };
 
 const errorHandler = (error, req, res, next) => {
-  const statusCode = error.statusCode || 500;
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  const statusCode = error.statusCode || error.status || 500;
   const isProduction = process.env.NODE_ENV === "production";
+
+  if (statusCode >= 500) {
+    console.error("[errorHandler]", error?.stack || error?.message || error);
+  }
 
   let message;
   if (isProduction) {

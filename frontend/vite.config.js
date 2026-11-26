@@ -1,21 +1,35 @@
 import path from "path"
 import { fileURLToPath } from "url"
 import react from "@vitejs/plugin-react-swc"
-import { defineConfig } from "vite"
+import { defineConfig, loadEnv } from "vite"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const exposeToNetwork = process.env.VITE_HOST_NETWORK === 'true'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, __dirname, '')
+  const resolvedGoogleClientId = String(
+    env.VITE_GOOGLE_CLIENT_ID ||
+      process.env.VITE_GOOGLE_CLIENT_ID ||
+      process.env.GOOGLE_CLIENT_ID ||
+      '',
+  ).trim()
+
+  return {
   base: '/',
   plugins: [react()],
+  define: resolvedGoogleClientId
+    ? {
+        'import.meta.env.VITE_GOOGLE_CLIENT_ID': JSON.stringify(resolvedGoogleClientId),
+      }
+    : undefined,
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
   },
   server: {
-    host: exposeToNetwork ? true : '0.0.0.0',
+    host: exposeToNetwork ? true : '127.0.0.1',
     port: 5173,
     strictPort: true, // Keep frontend fixed to 5173
     open: false,
@@ -57,4 +71,5 @@ export default defineConfig({
     },
     chunkSizeWarningLimit: 1000,
   },
+}
 })

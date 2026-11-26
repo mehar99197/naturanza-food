@@ -15,7 +15,7 @@ const getEncryptionKey = () => {
     return crypto.createHash("sha256").update(explicit).digest();
   }
 
-  const jwtSecret = String(process.env.JWT_SECRET || "");
+  const jwtSecret = String(process.env.JWT_SECRET || "").trim();
   if (jwtSecret) {
     return crypto.createHash("sha256").update(`admin-2fa:${jwtSecret}`).digest();
   }
@@ -106,14 +106,16 @@ const generateRecoveryCodes = () => {
 
 const consumeRecoveryCode = async ({ db: database, userId, code }) => {
   const normalizedHash = hashRecoveryCode(code);
-  const supportsTransactions = typeof database.beginTransaction === "function";
+  const isPool = typeof database.getConnection === "function" && typeof database.beginTransaction !== "function";
+  const conn = isPool ? await database.getConnection() : database;
+  const supportsTransactions = typeof conn.beginTransaction === "function";
 
   if (supportsTransactions) {
-    await database.beginTransaction();
+    await conn.beginTransaction();
   }
 
   try {
-    const [rows] = await database.query(
+    const [rows] = await conn.query(
       `SELECT two_fa_recovery_codes
        FROM users
        WHERE id = ? AND two_fa_enabled = TRUE
@@ -128,26 +130,30 @@ const consumeRecoveryCode = async ({ db: database, userId, code }) => {
 
     if (!codes.includes(normalizedHash)) {
       if (supportsTransactions) {
-        await database.rollback();
+        await conn.rollback();
       }
       return false;
     }
 
     const remaining = codes.filter((value) => value !== normalizedHash);
-    await database.query(
+    await conn.query(
       "UPDATE users SET two_fa_recovery_codes = ? WHERE id = ? AND two_fa_enabled = TRUE",
       [JSON.stringify(remaining), userId],
     );
 
     if (supportsTransactions) {
-      await database.commit();
+      await conn.commit();
     }
     return true;
   } catch (error) {
     if (supportsTransactions) {
-      await database.rollback();
+      try { await conn.rollback(); } catch {}
     }
     throw error;
+  } finally {
+    if (isPool && typeof conn.release === "function") {
+      conn.release();
+    }
   }
 };
 

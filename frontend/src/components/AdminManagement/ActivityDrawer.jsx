@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { X, Activity } from "lucide-react";
 import { adminAPI } from "@/services/api";
 import { formatDistanceToNow } from "date-fns";
@@ -6,24 +6,26 @@ import { formatDistanceToNow } from "date-fns";
 export function ActivityDrawer({ admin, onClose }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const adminId = admin?.id;
 
-  useEffect(() => {
-    if (admin?.id) {
-      loadLogs();
-    }
-  }, [admin?.id]);
-
-  const loadLogs = async () => {
+  const loadLogs = useCallback(async () => {
+    if (!adminId) return;
     try {
       setLoading(true);
-      const data = await adminAPI.getAdminLogs(admin.id, 20);
+      const data = await adminAPI.getAdminLogs(adminId, 20);
       setLogs(data);
     } catch (error) {
       console.error("Failed to load activity logs:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [adminId]);
+
+  useEffect(() => {
+    if (adminId) {
+      void loadLogs();
+    }
+  }, [adminId, loadLogs]);
 
   if (!admin) return null;
 

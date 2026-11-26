@@ -143,7 +143,6 @@ router.get('/currency', async (req, res) => {
       country_name: 'Pakistan',
       currency: 'PKR',
       source: 'fallback',
-      error: error.message
     });
   }
 });
@@ -184,7 +183,13 @@ router.get('/info', async (req, res) => {
       `https://ipapi.co/${encodeURIComponent(userIP)}/json/`,
       { signal: AbortSignal.timeout(4000) },
     );
+    if (!response.ok) {
+      throw new Error('Geolocation provider error');
+    }
     const data = await response.json();
+    if (!data || data.error || !data.country_code) {
+      throw new Error('Geolocation lookup failed');
+    }
     
     res.json({
       ...data,
@@ -193,9 +198,14 @@ router.get('/info', async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({ 
-      message: 'Failed to detect location',
-      error: error.message 
+    res.json({
+      country_code: 'PK',
+      country_name: 'Pakistan',
+      region: 'Punjab',
+      city: 'Lahore',
+      currency: 'PKR',
+      timezone: 'Asia/Karachi',
+      source: 'fallback',
     });
   }
 });

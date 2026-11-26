@@ -47,7 +47,11 @@ const withTransaction = async (workFn) => {
     await connection.commit();
     return result;
   } catch (error) {
-    await connection.rollback();
+    try {
+      await connection.rollback();
+    } catch {
+      // Preserve the original error if rollback fails on a dropped connection.
+    }
     throw error;
   } finally {
     connection.release();

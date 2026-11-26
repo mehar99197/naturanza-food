@@ -178,13 +178,14 @@ Honey is still natural sugar, so it's about *better*, not *unlimited*. Used in p
     const [tables] = await pool.query("SHOW TABLES LIKE 'blog_posts'");
     if (!tables.length) {
       console.error("blog_posts does not exist — run `npm run migrate` first.");
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     const [[{ count }]] = await pool.query("SELECT COUNT(*) AS count FROM blog_posts");
     if (count > 0) {
       console.log(`blog_posts already has ${count} rows — skipping seed (safe).`);
-      process.exit(0);
+      return;
     }
 
     for (const post of SEED_POSTS) {
@@ -208,9 +209,10 @@ Honey is still natural sugar, so it's about *better*, not *unlimited*. Used in p
 
     const [[{ total }]] = await pool.query("SELECT COUNT(*) AS total FROM blog_posts");
     console.log(`Done. blog_posts now has ${total} posts.`);
-    process.exit(0);
   } catch (error) {
     console.error("BLOG SEED ERROR:", error.message);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    await pool.end();
   }
 })();

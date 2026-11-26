@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   AlertCircle,
   CheckCircle,
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
 import { useSettings } from "@/context/SettingsContext";
-import { newsletterAPI, adminAPI } from "@/services/api";
+import { newsletterAPI } from "@/services/api";
 
 const formatDateTime = (value) => {
   if (!value) return "-";
@@ -91,27 +92,22 @@ export function AdminSubscribers() {
     void loadSubscribers();
   }, [loadSubscribers]);
 
-  // Load promo code from admin settings and resolve the linked coupon
+  // Load promo code and linked coupon via the newsletter-scoped endpoint
   useEffect(() => {
+    let active = true;
     (async () => {
       try {
-        const settings = await adminAPI.getSettings();
-        const code = String(settings?.newsletterWelcomePromoCode || "");
+        const data = await newsletterAPI.getWelcomePromo();
+        if (!active) return;
+        const code = String(data?.code || "");
         setPromoCode(code);
         setPromoOriginal(code);
-
-        if (code) {
-          try {
-            const coupons = await adminAPI.getCoupons();
-            const arr = Array.isArray(coupons) ? coupons : coupons?.coupons || [];
-            const match = arr.find(
-              (c) => String(c.code || "").toUpperCase() === code,
-            );
-            setPromoCoupon(match || null);
-          } catch { /* ignored: not fatal to this flow */ }
-        }
+        setPromoCoupon(data?.coupon || null);
       } catch { /* ignored: not fatal to this flow */ }
     })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const promoDiscountLabel = useMemo(() => {
@@ -325,12 +321,12 @@ export function AdminSubscribers() {
                 Linked coupon — {promoDiscountLabel}
                 {promoCoupon.is_active ? "" : " (inactive)"}
               </span>
-              <a
-                href="/admin/coupons"
+              <Link
+                to="/admin/coupons"
                 className="text-emerald-700 underline-offset-2 hover:underline font-semibold"
               >
                 Edit coupon details →
-              </a>
+              </Link>
             </div>
           )}
 

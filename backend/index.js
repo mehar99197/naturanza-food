@@ -5,7 +5,6 @@ const cookieParser = require("cookie-parser");
 const path = require("path");
 const helmet = require("helmet");
 const { rateLimit } = require("express-rate-limit");
-const hpp = require("hpp");
 require("dotenv").config();
 const { dbPool, db, testDatabaseConnection } = require("./config/db");
 const { ensureProductionSchema } = require("./utils/schemaCompatibility");
@@ -14,7 +13,11 @@ const {
   getJwtRuntimeInfo,
   getCookieDomain,
   getRefreshCookieOptions,
+  getSessionHintCookieOptions,
   getAccessCookieOptions,
+  shouldUseSecureCookies,
+  resolveSameSite,
+  SESSION_HINT_COOKIE_NAME,
 } = require("./utils/jwtTokens");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const {
@@ -51,7 +54,7 @@ const CONTENT_SECURITY_POLICY = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
   "style-src-attr 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
-  "connect-src 'self' https://accounts.google.com https://apis.google.com https://www.google-analytics.com",
+  "connect-src 'self' https://accounts.google.com https://apis.google.com https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com",
   "font-src 'self' https://fonts.gstatic.com data:",
   "media-src 'self'",
   "frame-src 'self' https://accounts.google.com https://www.openstreetmap.org",
@@ -99,18 +102,49 @@ if (TRUST_PROXY_ENABLED) {
   app.set("trust proxy", 1);
 }
 
+const CANONICAL_PUBLIC_HOST = (() => {
+  try {
+    const raw = String(process.env.PUBLIC_SITE_URL || "https://naturanzafood.com").trim();
+    return new URL(raw).host.toLowerCase();
+  } catch {
+    return "naturanzafood.com";
+  }
+})();
+const ALLOWED_REDIRECT_HOSTS = new Set(
+  [
+    CANONICAL_PUBLIC_HOST,
+    CANONICAL_PUBLIC_HOST.startsWith("www.")
+      ? CANONICAL_PUBLIC_HOST.slice(4)
+      : `www.${CANONICAL_PUBLIC_HOST}`,
+    ...ALLOWED_CORS_ORIGINS.map((origin) => {
+      try {
+        return new URL(origin).host.toLowerCase();
+      } catch {
+        return "";
+      }
+    }),
+  ].filter(Boolean),
+);
+const safeRedirectPath = (originalUrl) => {
+  const pathStr = String(originalUrl || "/");
+  // Prevent protocol-relative redirects like "//evil.com"
+  return pathStr.startsWith("/") && !pathStr.startsWith("//") ? pathStr : "/";
+};
+
 if (ENFORCE_HTTPS && process.env.NODE_ENV === "production") {
   app.use((req, res, next) => {
     const forwardedProto = String(req.headers["x-forwarded-proto"] || "")
+      .split(",")[0]
       .trim()
       .toLowerCase();
     if (req.secure || forwardedProto === "https") {
       return next();
     }
 
-    // Redirect HTTP → HTTPS with a permanent redirect
-    const host = req.headers["x-forwarded-host"] || req.headers.host || "";
-    return res.redirect(301, `https://${host}${req.originalUrl}`);
+    // Redirect HTTP → HTTPS with a permanent redirect to an allowlisted host only
+    const rawHost = String(req.headers.host || "").trim().toLowerCase();
+    const targetHost = ALLOWED_REDIRECT_HOSTS.has(rawHost) ? rawHost : CANONICAL_PUBLIC_HOST;
+    return res.redirect(301, `https://${targetHost}${safeRedirectPath(req.originalUrl)}`);
   });
 }
 
@@ -144,6 +178,8 @@ app.use(
           "https://accounts.google.com",
           "https://apis.google.com",
           "https://www.google-analytics.com",
+          "https://*.google-analytics.com",
+          "https://*.analytics.google.com",
         ],
         fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
         mediaSrc: ["'self'"],
@@ -283,8 +319,13 @@ const refreshLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
-// 4. Prevent parameter pollution
-app.use(hpp());
+// 4. Prevent parameter pollution (Express 5-compatible; see middleware/security.js)
+const {
+  sanitizeRequestBody,
+  sanitizeQueryParams,
+  preventParamPollution,
+} = require("./middleware/security");
+app.use(preventParamPollution);
 
 // Basic Middleware
 app.use(cookieParser());
@@ -324,6 +365,7 @@ const corsOptions = {
       }
       const error = new Error("Not allowed by CORS");
       error.statusCode = 403;
+      error.expose = true;
       return callback(error);
     }
 
@@ -332,6 +374,7 @@ const corsOptions = {
     }
     const error = new Error("Not allowed by CORS");
     error.statusCode = 403;
+    error.expose = true;
     return callback(error);
   },
   credentials: true,
@@ -347,6 +390,17 @@ const corsOptions = {
   exposedHeaders: ["Content-Disposition", "Content-Type", "Content-Length"],
 };
 app.use(cors(corsOptions));
+
+// SafePay server-to-server webhook: mounted BEFORE express.json(), sanitizer,
+// and CSRF middleware so the exact raw Buffer body is preserved for HMAC-SHA256
+// `X-SFPY-SIGNATURE` verification.
+const paymentRoutes = require("./routes/payments");
+app.post(
+  "/api/payments/safepay/webhook",
+  express.raw({ type: "application/json", limit: "256kb" }),
+  paymentRoutes.safepayWebhookHandler,
+);
+
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
@@ -438,9 +492,10 @@ app.use("/images", (req, res, next) => {
     return next();
   }
 
+  res.setHeader("Cache-Control", "no-store");
   return res.sendFile(
     path.join(__dirname, "..", "frontend", "public", "images", fallbackRelativePath),
-    { maxAge: "1h" },
+    { cacheControl: false },
     (error) => {
       if (error && !res.headersSent) {
         next(error);
@@ -585,11 +640,7 @@ const ensureDatabaseCompatibility = async () => {
 global.db = db;
 app.locals.db = db;
 
-// Security Middleware
-const {
-  sanitizeRequestBody,
-  sanitizeQueryParams,
-} = require("./middleware/security");
+// Security Middleware (imported above with preventParamPollution)
 const { ensurePasswordHistoryTable } = require("./utils/passwordHistory");
 
 // Initialize password history table on startup
@@ -637,7 +688,6 @@ const adminRoutes = require("./routes/admin");
 const adminSecurityRoutes = require("./routes/adminSecurity");
 const adminManagementRoutes = require("./routes/adminManagement");
 const adminPaymentsRoutes = require("./routes/adminPayments");
-const paymentRoutes = require("./routes/payments");
 const geolocationRoutes = require("./routes/geolocation");
 const variantRoutes = require("./routes/variants");
 const couponRoutes = require("./routes/coupons");
@@ -713,10 +763,12 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/about", aboutRoutes);
 app.use("/api/payments", paymentRoutes);
-// Mounted before /api/admin so the security router always wins its own prefix.
+// Mounted before /api/admin so sub-prefix routers handle their own auth once
+// instead of passing through /api/admin's router-level middleware first.
 app.use("/api/admin/security", adminSecurityRoutes);
-app.use("/api/admin", adminRoutes);
 app.use("/api/admin/payments", adminPaymentsRoutes);
+app.use("/api/admin/shipping", adminShippingRoutes);
+app.use("/api/admin", adminRoutes);
 app.use("/api/admin-management", adminManagementRoutes);
 app.use("/api/geolocation", geolocationRoutes);
 app.use("/api/shipping", shippingRoutes);
@@ -735,7 +787,6 @@ app.use("/api", merchantFeedRoutes);
 // before the production static/SPA-fallback block below so it always wins
 // over the pre-built frontend/dist/sitemap.xml.
 app.get("/sitemap.xml", sitemapRoutes.fullSitemapHandler);
-app.use("/api/admin/shipping", adminShippingRoutes);
 
 // Health check route
 app.get("/api/health", (req, res) => {
@@ -748,8 +799,8 @@ app.get("/api/csrf-token", (req, res) => {
   const cookieDomain = getCookieDomain(req);
   const cookieOptions = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+    secure: shouldUseSecureCookies(),
+    sameSite: resolveSameSite(),
     maxAge: CSRF_COOKIE_MAX_AGE,
     path: "/",
   };
@@ -789,8 +840,8 @@ const frontendDist = path.join(__dirname, "..", "frontend", "dist");
 if (process.env.NODE_ENV === "production") {
   // Canonical host: 301 www -> apex so the two don't compete as duplicate content.
   app.use((req, res, next) => {
-    const host = req.headers.host || "";
-    if (host.startsWith("www.")) {
+    const host = String(req.headers.host || "").trim().toLowerCase();
+    if (host.startsWith("www.") && ALLOWED_REDIRECT_HOSTS.has(host)) {
       const cookieDomain = getCookieDomain(req);
       if (cookieDomain) {
         const refreshToken = req.cookies?.[jwtRuntime.refreshCookieName];
@@ -799,6 +850,11 @@ if (process.env.NODE_ENV === "production") {
             jwtRuntime.refreshCookieName,
             refreshToken,
             getRefreshCookieOptions(req),
+          );
+          res.cookie(
+            SESSION_HINT_COOKIE_NAME,
+            "1",
+            getSessionHintCookieOptions(req),
           );
         }
 
@@ -811,15 +867,15 @@ if (process.env.NODE_ENV === "production") {
         if (csrfToken) {
           res.cookie(CSRF_COOKIE_NAME, csrfToken, {
             httpOnly: true,
-            secure: true,
-            sameSite: "strict",
+            secure: shouldUseSecureCookies(),
+            sameSite: resolveSameSite(),
             maxAge: CSRF_COOKIE_MAX_AGE,
             path: "/",
             domain: cookieDomain,
           });
         }
       }
-      return res.redirect(301, `https://${host.slice(4)}${req.originalUrl}`);
+      return res.redirect(301, `https://${host.slice(4)}${safeRedirectPath(req.originalUrl)}`);
     }
     next();
   });
@@ -864,6 +920,7 @@ app.use(errorHandler);
 let server;
 
 const { startReservationSweeper } = require("./utils/stockReservations");
+const { startSafepayAbandonedOrderSweeper } = require("./utils/safepay");
 
 const startServer = () => {
   server = app.listen(PORT, () => {
@@ -872,11 +929,13 @@ const startServer = () => {
     );
     console.log(`Server is running on port ${PORT}`);
 
-    // Release expired stock reservations every 5 minutes. The sweeper guards
-    // against orphan reservations (customer abandons screenshot upload, admin
-    // never reaches the queue) permanently blocking inventory.
+    // Release expired stock reservations every 5 minutes.
     startReservationSweeper({ intervalMs: 5 * 60_000 });
     console.log("Stock reservation sweeper running (5-minute interval).");
+
+    // Cancel abandoned unpaid SafePay orders and restore stock/coupons every 15 minutes.
+    startSafepayAbandonedOrderSweeper({ dbPool, intervalMs: 15 * 60_000 });
+    console.log("SafePay abandoned-order sweeper running (15-minute interval).");
 
     startBlacklistCleanup(dbPool, 60 * 60_000);
     console.log("Token blacklist cleanup running (hourly interval).");

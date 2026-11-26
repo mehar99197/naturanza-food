@@ -1,7 +1,7 @@
 const newsletterModel = require("../models/newsletterModel");
 const couponModel = require("../models/couponModel");
 const { dbPool } = require("../config/db");
-const { getAdminSettings } = require("../utils/adminSettings");
+const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
 const {
   sendNewsletterVerificationEmail,
   sendNewsletterWelcomeEmail,
@@ -156,6 +156,10 @@ const unsubscribe = async (req, res) => {
       }),
     );
   } catch (error) {
+    const safeMessage =
+      error.expose || (error.statusCode && error.statusCode < 500 && error.message)
+        ? error.message
+        : "Something went wrong. Please try again later.";
     return res
       .status(error.statusCode || 500)
       .type("html")
@@ -163,7 +167,7 @@ const unsubscribe = async (req, res) => {
         renderMessagePage({
           title: "Unsubscribe failed",
           heading: "Could not unsubscribe",
-          message: error.message || "Something went wrong. Please try again later.",
+          message: escapeHtml(safeMessage),
           accent: "#dc2626",
         }),
       );
@@ -216,6 +220,10 @@ const verify = async (req, res) => {
       }),
     );
   } catch (error) {
+    const safeMessage =
+      error.expose || (error.statusCode && error.statusCode < 500 && error.message)
+        ? error.message
+        : "Something went wrong. Please try again later.";
     return res
       .status(error.statusCode || 500)
       .type("html")
@@ -223,7 +231,7 @@ const verify = async (req, res) => {
         renderMessagePage({
           title: "Verification failed",
           heading: "Could not confirm subscription",
-          message: error.message || "Something went wrong. Please try again later.",
+          message: escapeHtml(safeMessage),
           accent: "#dc2626",
         }),
       );
@@ -298,6 +306,13 @@ const broadcast = async (req, res) => {
   });
 };
 
+const getWelcomePromo = async (req, res) => {
+  const settings = await getAdminSettings();
+  const code = String(settings.newsletterWelcomePromoCode || "").trim().toUpperCase();
+  const coupon = code ? await couponModel.findByCode(code) : null;
+  return res.json({ code, coupon });
+};
+
 /**
  * Save the welcome promo code and, if a matching coupon does not yet exist,
  * create one with sensible defaults so the code actually works at checkout.
@@ -341,5 +356,6 @@ module.exports = {
   listSubscribers,
   deleteSubscriber,
   broadcast,
+  getWelcomePromo,
   setWelcomePromo,
 };

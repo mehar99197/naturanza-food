@@ -60,9 +60,26 @@ const PieChart = ({
  ],
  };
 
+ const mergedOptions = {
+ ...defaultOptions,
+ ...options,
+ plugins: {
+ ...defaultOptions.plugins,
+ ...options?.plugins,
+ legend: {
+ ...defaultOptions.plugins.legend,
+ ...options?.plugins?.legend,
+ },
+ title: {
+ ...defaultOptions.plugins.title,
+ ...options?.plugins?.title,
+ },
+ },
+ };
+
  return (
  <div style={{ position: 'relative', height: `${height}px`, width: '100%' }}>
- <Pie data={chartData} options={{ ...defaultOptions, ...options }} />
+ <Pie data={chartData} options={mergedOptions} />
  </div>
  );
 };

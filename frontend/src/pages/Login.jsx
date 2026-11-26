@@ -10,8 +10,8 @@ import { NoIndexSEO } from "@/components/SEO";
 
 const leftPoints = [
   "100% Certified Organic Products",
-  "Free Delivery on Orders Over Rs. 5,000",
-  "3-Day Returns for Shipping Issues",
+  "Free Delivery on Prepaid Online Orders Over Rs. 5,000",
+  "7-Day Returns for Damaged or Incorrect Items",
   "24/7 Customer Support",
 ];
 
@@ -149,7 +149,9 @@ const Login = () => {
   };
 
   return (
-    <div className="auth-premium-font min-h-screen bg-green-50 overflow-y-auto lg:h-screen lg:overflow-hidden">
+    <>
+      <NoIndexSEO title="Login" />
+      <div className="auth-premium-font min-h-screen bg-green-50 overflow-y-auto lg:h-screen lg:overflow-hidden">
       <div className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:block lg:w-[42%] xl:w-[44%]">
         <LeftPanel
           heading="Continue Your Wellness Journey"
@@ -294,6 +296,7 @@ const Login = () => {
         </div>
       </main>
     </div>
+    </>
 );
 }
 

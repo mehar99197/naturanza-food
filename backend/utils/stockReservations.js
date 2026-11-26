@@ -28,17 +28,34 @@ const RESERVATION_TTL_MINUTES = 60;
 // scripts / one-off operations.
 // ---------------------------------------------------------------------------
 
+// Aggregate duplicate product_id entries so multi-line/variant orders cannot
+// pass per-line checks while exceeding available stock in total.
+function aggregateReservationItems(items) {
+  const qtyByProduct = new Map();
+  for (const item of items) {
+    const productId = Number(item.product_id);
+    const quantity = Number(item.quantity);
+    if (!Number.isInteger(productId) || productId <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
+      const err = new Error(`Invalid reservation item for product ${item.product_id}`);
+      err.code = "INVALID_RESERVATION_ITEM";
+      throw err;
+    }
+    qtyByProduct.set(productId, (qtyByProduct.get(productId) || 0) + quantity);
+  }
+  return [...qtyByProduct.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([product_id, quantity]) => ({ product_id, quantity }));
+}
+
 async function reserveStockOnConnection(conn, orderId, items, ttlMinutes = RESERVATION_TTL_MINUTES) {
   if (!Array.isArray(items) || items.length === 0) return;
 
-  const sorted = [...items].sort(
-    (a, b) => Number(a.product_id) - Number(b.product_id),
-  );
-  const ids = sorted.map((i) => Number(i.product_id));
+  const sorted = aggregateReservationItems(items);
+  const ids = sorted.map((i) => i.product_id);
   const byId = await lockProductsForUpdate(conn, ids);
 
   for (const item of sorted) {
-    const row = byId.get(Number(item.product_id));
+    const row = byId.get(item.product_id);
     if (!row) {
       const err = new Error(`Product ${item.product_id} not found`);
       err.code = "PRODUCT_NOT_FOUND";
@@ -46,12 +63,12 @@ async function reserveStockOnConnection(conn, orderId, items, ttlMinutes = RESER
       throw err;
     }
     const available = Number(row.stock_quantity) - Number(row.reserved_stock);
-    if (available < Number(item.quantity)) {
+    if (available < item.quantity) {
       const err = new Error(`Insufficient stock for product ${item.product_id}`);
       err.code = "INSUFFICIENT_STOCK";
       err.productId = item.product_id;
       err.available = available;
-      err.requested = Number(item.quantity);
+      err.requested = item.quantity;
       throw err;
     }
   }
@@ -60,12 +77,12 @@ async function reserveStockOnConnection(conn, orderId, items, ttlMinutes = RESER
   for (const item of sorted) {
     await conn.query(
       `UPDATE products SET reserved_stock = reserved_stock + ? WHERE id = ?`,
-      [Number(item.quantity), Number(item.product_id)],
+      [item.quantity, item.product_id],
     );
     await conn.query(
       `INSERT INTO stock_reservations (order_id, product_id, quantity, state, expires_at)
        VALUES (?, ?, ?, 'held', ?)`,
-      [orderId, Number(item.product_id), Number(item.quantity), expiresAt],
+      [orderId, item.product_id, item.quantity, expiresAt],
     );
   }
 }
@@ -89,8 +106,8 @@ async function consumeReservationsOnConnection(conn, orderId, createdByUserId = 
     const newStock = previousStock - Number(r.quantity);
     await conn.query(
       `UPDATE products
-          SET stock_quantity = stock_quantity - ?,
-              reserved_stock = reserved_stock - ?
+          SET stock_quantity = GREATEST(0, stock_quantity - ?),
+              reserved_stock = GREATEST(0, reserved_stock - ?)
         WHERE id = ?`,
       [r.quantity, r.quantity, r.product_id],
     );
@@ -127,7 +144,7 @@ async function releaseReservationsOnConnection(conn, orderId) {
 
   for (const r of resvs) {
     await conn.query(
-      `UPDATE products SET reserved_stock = reserved_stock - ? WHERE id = ?`,
+      `UPDATE products SET reserved_stock = GREATEST(0, reserved_stock - ?) WHERE id = ?`,
       [r.quantity, r.product_id],
     );
   }
@@ -162,47 +179,7 @@ async function reserveStockForOrder(orderId, items) {
   const conn = await db.promise().getConnection();
   try {
     await conn.beginTransaction();
-
-    const ids = items.map((i) => Number(i.product_id));
-    const byId = await lockProductsForUpdate(conn, ids);
-
-    for (const item of items) {
-      const row = byId.get(Number(item.product_id));
-      if (!row) {
-        const err = new Error(`Product ${item.product_id} not found`);
-        err.code = "PRODUCT_NOT_FOUND";
-        err.productId = item.product_id;
-        throw err;
-      }
-      const available = Number(row.stock_quantity) - Number(row.reserved_stock);
-      if (available < Number(item.quantity)) {
-        const err = new Error(`Insufficient stock for product ${item.product_id}`);
-        err.code = "INSUFFICIENT_STOCK";
-        err.productId = item.product_id;
-        err.available = available;
-        err.requested = Number(item.quantity);
-        throw err;
-      }
-    }
-
-    const expiresAt = new Date(Date.now() + RESERVATION_TTL_MINUTES * 60_000);
-
-    // Apply in sorted order (matches the lock order) for clean ordering on replicas.
-    const sorted = [...items].sort(
-      (a, b) => Number(a.product_id) - Number(b.product_id),
-    );
-    for (const item of sorted) {
-      await conn.query(
-        `UPDATE products SET reserved_stock = reserved_stock + ? WHERE id = ?`,
-        [Number(item.quantity), Number(item.product_id)],
-      );
-      await conn.query(
-        `INSERT INTO stock_reservations (order_id, product_id, quantity, state, expires_at)
-         VALUES (?, ?, ?, 'held', ?)`,
-        [orderId, Number(item.product_id), Number(item.quantity), expiresAt],
-      );
-    }
-
+    await reserveStockOnConnection(conn, orderId, items);
     await conn.commit();
   } catch (err) {
     try { await conn.rollback(); } catch {}
@@ -236,8 +213,8 @@ async function consumeReservationsForOrder(orderId, createdByUserId = null) {
       const newStock = previousStock - Number(r.quantity);
       await conn.query(
         `UPDATE products
-            SET stock_quantity = stock_quantity - ?,
-                reserved_stock = reserved_stock - ?
+            SET stock_quantity = GREATEST(0, stock_quantity - ?),
+                reserved_stock = GREATEST(0, reserved_stock - ?)
           WHERE id = ?`,
         [r.quantity, r.quantity, r.product_id],
       );
@@ -290,7 +267,7 @@ async function releaseReservationsForOrder(orderId) {
 
     for (const r of resvs) {
       await conn.query(
-        `UPDATE products SET reserved_stock = reserved_stock - ? WHERE id = ?`,
+        `UPDATE products SET reserved_stock = GREATEST(0, reserved_stock - ?) WHERE id = ?`,
         [r.quantity, r.product_id],
       );
     }
@@ -319,27 +296,16 @@ async function sweepExpiredReservations() {
   try {
     await conn.beginTransaction();
 
-    // Skip reservations whose order has a pending stage-1 (advance_shipping)
-    // verification: COD orders often sit waiting for admin approval longer
-    // than the 60-minute TTL. If we released their stock here, the subsequent
-    // stage-1 approve would have nothing to consume and stock would silently
-    // not be deducted. The exclusion keeps inventory honest until admin acts.
+    // Release any held reservations whose 60-minute checkout window has expired.
     const [expired] = await conn.query(
       `SELECT id, product_id, quantity FROM stock_reservations
-        WHERE state='held' AND expires_at < NOW()
-          AND order_id NOT IN (
-            SELECT order_id
-             FROM advance_payment_verifications
-             WHERE verification_stage = 'advance_shipping'
-               AND status = 'pending'
-               AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
-           )
+        WHERE state = 'held' AND expires_at < NOW()
         ORDER BY product_id FOR UPDATE`,
     );
 
     for (const r of expired) {
       await conn.query(
-        `UPDATE products SET reserved_stock = reserved_stock - ? WHERE id = ?`,
+        `UPDATE products SET reserved_stock = GREATEST(0, reserved_stock - ?) WHERE id = ?`,
         [r.quantity, r.product_id],
       );
       await conn.query(
@@ -358,9 +324,111 @@ async function sweepExpiredReservations() {
   }
 }
 
+// Reconcile any drift between products.reserved_stock and the authoritative sum
+// of active ('held') rows in stock_reservations. Drift can occur if orders or
+// reservation rows are removed out-of-band (e.g. ON DELETE CASCADE on orders).
+// Uses a non-locking pre-check so the steady state acquires zero row locks.
+async function reconcileOrphanedReservedStock(dbClient = db) {
+  const promisePool =
+    typeof dbClient?.promise === "function" ? dbClient.promise() : dbClient;
+
+  const [drifted] = await promisePool.query(
+    `SELECT p.id, p.reserved_stock, COALESCE(sr.held_qty, 0) AS expected_reserved
+       FROM products p
+       LEFT JOIN (
+         SELECT product_id, SUM(quantity) AS held_qty
+           FROM stock_reservations
+          WHERE state = 'held'
+          GROUP BY product_id
+       ) sr ON sr.product_id = p.id
+      WHERE COALESCE(p.reserved_stock, 0) <> COALESCE(sr.held_qty, 0)
+      ORDER BY p.id ASC`,
+  );
+
+  if (!Array.isArray(drifted) || drifted.length === 0) {
+    return { reconciledCount: 0, releasedUnits: 0, products: [] };
+  }
+
+  const candidateIds = drifted
+    .map((row) => Number(row.id))
+    .filter((id) => Number.isInteger(id) && id > 0)
+    .sort((a, b) => a - b);
+
+  if (candidateIds.length === 0) {
+    return { reconciledCount: 0, releasedUnits: 0, products: [] };
+  }
+
+  const conn = await promisePool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [lockedProducts] = await conn.query(
+      `SELECT id, reserved_stock
+         FROM products
+        WHERE id IN (?)
+        ORDER BY id ASC
+        FOR UPDATE`,
+      [candidateIds],
+    );
+
+    const [heldRows] = await conn.query(
+      `SELECT product_id, COALESCE(SUM(quantity), 0) AS held_qty
+         FROM stock_reservations
+        WHERE product_id IN (?) AND state = 'held'
+        GROUP BY product_id`,
+      [candidateIds],
+    );
+
+    const heldByProduct = new Map(
+      (heldRows || []).map((row) => [
+        Number(row.product_id),
+        Math.max(0, Number(row.held_qty) || 0),
+      ]),
+    );
+
+    const reconciledProducts = [];
+    let releasedUnits = 0;
+
+    for (const product of lockedProducts || []) {
+      const productId = Number(product.id);
+      const currentReserved = Number(product.reserved_stock) || 0;
+      const expectedReserved = heldByProduct.get(productId) || 0;
+      if (currentReserved === expectedReserved) {
+        continue;
+      }
+
+      await conn.query(
+        `UPDATE products SET reserved_stock = ? WHERE id = ?`,
+        [expectedReserved, productId],
+      );
+
+      if (currentReserved > expectedReserved) {
+        releasedUnits += currentReserved - expectedReserved;
+      }
+      reconciledProducts.push({
+        id: productId,
+        previousReserved: currentReserved,
+        nextReserved: expectedReserved,
+      });
+    }
+
+    await conn.commit();
+    return {
+      reconciledCount: reconciledProducts.length,
+      releasedUnits,
+      products: reconciledProducts,
+    };
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 // Convenience: launch the sweeper on a fixed interval. Call once from index.js.
 // Avoids overlapping runs if a sweep takes longer than the interval.
-function startReservationSweeper({ intervalMs = 5 * 60_000 } = {}) {
+function startReservationSweeper({ intervalMs = 5 * 60_000, runOnStart = true } = {}) {
   let running = false;
   const tick = async () => {
     if (running) return;
@@ -368,14 +436,25 @@ function startReservationSweeper({ intervalMs = 5 * 60_000 } = {}) {
     try {
       const n = await sweepExpiredReservations();
       if (n > 0) console.log(`[stock-sweeper] released ${n} expired reservation(s)`);
+
+      const reconciled = await reconcileOrphanedReservedStock();
+      if (reconciled.reconciledCount > 0) {
+        console.log(
+          `[stock-sweeper] reconciled reserved_stock on ${reconciled.reconciledCount} product(s) (${reconciled.releasedUnits} orphaned unit(s) released)`,
+        );
+      }
     } catch (err) {
+      console.warn('[stock-sweeper] sweep failed:', err?.message || err);
     } finally {
       running = false;
     }
   };
-  // setInterval alone: a setTimeout at the same delay fired a duplicate first
-  // tick at the same moment (harmless only because of the `running` guard).
-  setInterval(tick, intervalMs).unref();
+  if (runOnStart) {
+    setImmediate(tick);
+  }
+  const timer = setInterval(tick, intervalMs);
+  timer.unref();
+  return timer;
 }
 
 module.exports = {
@@ -384,6 +463,7 @@ module.exports = {
   consumeReservationsForOrder,
   releaseReservationsForOrder,
   sweepExpiredReservations,
+  reconcileOrphanedReservedStock,
   startReservationSweeper,
   // Connection-aware variants for callers that already hold a transaction
   reserveStockOnConnection,

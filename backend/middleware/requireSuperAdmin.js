@@ -1,3 +1,5 @@
+const { enforceSuperAdminIpAllowlist } = require('./adminIpAllowlist');
+
 // Middleware to ensure only super_admin can access certain routes
 function requireSuperAdmin(req, res, next) {
   // Check if user is authenticated and is a super admin
@@ -5,15 +7,11 @@ function requireSuperAdmin(req, res, next) {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
-  }
-
-  if (req.user.admin_role !== 'super_admin') {
+  if (String(req.user.admin_role || '').toLowerCase() !== 'super_admin') {
     return res.status(403).json({ error: 'Super admin access required' });
   }
 
-  next();
+  return enforceSuperAdminIpAllowlist(req, res, next);
 }
 
 module.exports = requireSuperAdmin;

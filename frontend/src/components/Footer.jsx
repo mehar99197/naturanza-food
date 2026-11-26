@@ -3,6 +3,7 @@ import { Mail, Phone, MapPin, Facebook, Instagram, Music2, Twitter, Youtube, Arr
 import { useState, useEffect } from 'react';
 import { categoryAPI, newsletterAPI } from '@/services/api';
 import { useSettings } from '@/context/SettingsContext';
+import { BUSINESS_INFO } from '@/config/legal';
 
 const normalizePhoneLink = (value) => String(value || '').replace(/[^\d+]/g, '');
 
@@ -16,8 +17,8 @@ export function Footer({ variant = 'full' }) {
  const [openSection, setOpenSection] = useState(null);
  const [categories, setCategories] = useState([]);
 
- const supportEmail = settings.storeEmail || 'support@naturanzafood.com';
- const supportPhone = settings.storePhone || '+92340 9502646';
+ const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
+ const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
  const phoneLink = normalizePhoneLink(supportPhone);
  
  // Slim version - compact footer for non-home pages
@@ -105,7 +106,7 @@ export function Footer({ variant = 'full' }) {
  { label: 'YouTube', href: settings.youtubeUrl, icon: Youtube }
  ].filter((item) => item.href);
 
- const locationLabel = settings.mapLocationLabel || 'Pakistan, Lahore';
+ const locationLabel = settings.address || settings.mapLocationLabel || BUSINESS_INFO.officeAddress;
 
  // Slim Footer Version - Minimal design for non-home pages
  if (isSlim) {
@@ -184,11 +185,39 @@ export function Footer({ variant = 'full' }) {
  </div>
  </div>
  
- {/* Copyright */}
- <div className="mt-6 pt-6 border-t border-white/10 text-center">
- <p className="text-white/70 text-xs md:text-sm font-medium">
- © 2026 Naturanza Food. All rights reserved.
+ {/* Compliance Links & Copyright */}
+ <div className="mt-6 pt-5 border-t border-white/10 pb-14 md:pb-0">
+ <div className="flex flex-col md:flex-row items-center justify-between gap-3 text-center md:text-left">
+ <div className="space-y-1">
+ <p className="text-white/80 text-xs md:text-sm font-medium">
+ © 2026 {BUSINESS_INFO.brandName} ({BUSINESS_INFO.legalName}). All rights reserved.
  </p>
+ <p className="text-white/65 text-xs">
+ {locationLabel} ·{' '}
+ <a href={`mailto:${supportEmail}`} className="hover:text-white underline">
+ {supportEmail}
+ </a>{' '}
+ ·{' '}
+ <a href={`tel:${phoneLink}`} className="hover:text-white underline">
+ {supportPhone}
+ </a>
+ </p>
+ </div>
+ <div className="flex flex-wrap justify-center gap-3 md:gap-5 md:pr-16 lg:pr-20">
+ <Link to="/shipping" className="text-white/75 md:hover:text-white text-xs md:text-sm font-medium transition-colors">
+ Shipping Policy
+ </Link>
+ <Link to="/returns" className="text-white/75 md:hover:text-white text-xs md:text-sm font-medium transition-colors">
+ Returns &amp; Refunds
+ </Link>
+ <Link to="/terms" className="text-white/75 md:hover:text-white text-xs md:text-sm font-medium transition-colors">
+ Terms of Service
+ </Link>
+ <Link to="/privacy" className="text-white/75 md:hover:text-white text-xs md:text-sm font-medium transition-colors">
+ Privacy Policy
+ </Link>
+ </div>
+ </div>
  </div>
  </div>
  </footer>
@@ -234,7 +263,7 @@ export function Footer({ variant = 'full' }) {
  <button
  type="submit"
  disabled={isSubscribing || !email.trim()}
- className="btn-3d px-4 md:px-5 py-1.5 md:py-2 bg-gradient-to-r from-green-500 via-green-600 to-emerald-600 md:hover:from-green-600 md:hover:to-emerald-700 rounded-lg font-semibold text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shadow-2xl shadow-green-900/50 md:hover:shadow-green-900/70 active:scale-95 transition-all duration-300 md:hover:-translate-y-0.5 md:hover:ring-1 md:hover:ring-emerald-200/70 disabled:opacity-60 disabled:cursor-not-allowed"
+ className="btn-3d px-4 md:px-5 py-1.5 md:py-2 bg-gradient-to-r from-green-500 via-green-600 to-emerald-600 md:hover:from-green-600 md:hover:to-emerald-700 text-white rounded-lg font-semibold text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shadow-2xl shadow-green-900/50 md:hover:shadow-green-900/70 active:scale-95 transition-all duration-300 md:hover:-translate-y-0.5 md:hover:ring-1 md:hover:ring-emerald-200/70 disabled:opacity-60 disabled:cursor-not-allowed"
  >
  {isSubscribing ? 'Subscribing...' : 'Subscribe'}
  <ArrowRight className="w-3.5 h-3.5" />
@@ -555,7 +584,7 @@ export function Footer({ variant = 'full' }) {
  <div className="container-custom py-3 md:py-5 pb-20 md:pb-5">
  <div className="flex flex-col md:flex-row items-center justify-between gap-3 md:gap-4">
   <p className="text-white/80 text-xs md:text-sm font-medium">
-  © 2026 Naturanza Food. All rights reserved.
+  © 2026 {BUSINESS_INFO.brandName} ({BUSINESS_INFO.legalName}). All rights reserved.
   </p>
   <div className="flex flex-wrap justify-center gap-3 md:gap-6 md:pr-16 lg:pr-20">
  <Link to="/terms" className="text-white/80 md:hover:text-white text-xs md:text-sm font-medium md:hover:translate-x-1 inline-block">

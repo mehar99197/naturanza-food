@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   ShoppingCart,
@@ -28,9 +28,19 @@ import {
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { useWishlist } from "@/context/WishlistContext";
+import { useProducts } from "@/context/ProductContext";
 import { userAPI } from "@/services/api";
 import { playNotificationChime, primeNotificationSound } from "@/lib/notificationSound";
 import { safeLocalStorage } from "@/lib/storage";
+import { buildPopularSearchTerms } from "@/lib/searchSuggestions";
+
+const NAV_LINKS = [
+  { path: "/", label: "Home", icon: Home },
+  { path: "/shop", label: "Shop", icon: ShoppingBag },
+  { path: "/about", label: "About", icon: Info },
+  { path: "/blog", label: "Blog", icon: Newspaper },
+  { path: "/contact", label: "Contact", icon: MessageCircle },
+];
 
 const resolveUserImage = (user, fallbackImage) => {
   return (
@@ -72,9 +82,15 @@ export function Navigation() {
   const hasInitializedWishlistCountRef = useRef(false);
   const { totalItems, setIsCartOpen } = useCart();
   const { totalItems: wishlistTotalItems } = useWishlist();
+  const { products } = useProducts();
   const { user, loading, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const currentPathnameRef = useRef(location.pathname);
+
+  useEffect(() => {
+    currentPathnameRef.current = location.pathname;
+  }, [location.pathname]);
 
   const resolvedProfileImage = imageLoadFailed
     ? null
@@ -88,13 +104,10 @@ export function Navigation() {
     wishlistTotalItems > 99 ? "99+" : String(wishlistTotalItems);
   const isAuthHydrating = loading && !user;
 
-  const popularSearches = [
-    "Honey",
-    "Herbal Oil",
-    "Green Tea",
-    "Turmeric",
-    "Organic",
-  ];
+  const popularSearches = useMemo(
+    () => buildPopularSearchTerms(products, { limit: 5 }),
+    [products],
+  );
 
   useEffect(() => {
     if (isAuthHydrating) {
@@ -145,6 +158,7 @@ export function Navigation() {
     if (!isMobileMenuOpen) return undefined;
 
     const scrollY = window.scrollY;
+    const openedPathname = currentPathnameRef.current;
     document.body.style.overflow = "hidden";
     document.body.style.position = "fixed";
     document.body.style.top = `-${scrollY}px`;
@@ -155,7 +169,9 @@ export function Navigation() {
       document.body.style.position = "";
       document.body.style.top = "";
       document.body.style.width = "";
-      window.scrollTo(0, scrollY);
+      if (currentPathnameRef.current === openedPathname) {
+        window.scrollTo(0, scrollY);
+      }
     };
   }, [isMobileMenuOpen]);
 
@@ -192,10 +208,12 @@ export function Navigation() {
 
     fetchUnread();
     const intervalId = window.setInterval(fetchUnread, 45000);
+    window.addEventListener("notificationsUpdated", fetchUnread);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      window.removeEventListener("notificationsUpdated", fetchUnread);
     };
   }, [loading, user?.id, location.pathname]);
 
@@ -302,13 +320,7 @@ export function Navigation() {
     navigate("/profile/wishlist");
   };
 
-  const navLinks = [
-    { path: "/", label: "Home", icon: Home },
-    { path: "/shop", label: "Shop", icon: ShoppingBag },
-    { path: "/about", label: "About", icon: Info },
-    { path: "/blog", label: "Blog", icon: Newspaper },
-    { path: "/contact", label: "Contact", icon: MessageCircle },
-  ];
+  const navLinks = NAV_LINKS;
 
   const mobileQuickLinks = [
     { key: "home", path: "/", label: "Home", icon: Home, theme: "shop" },
@@ -391,7 +403,7 @@ export function Navigation() {
   const isActive = (path) => location.pathname === path;
 
   const updateActiveNavIndicator = useCallback(() => {
-    const activePath = navLinks.some((link) => link.path === location.pathname)
+    const activePath = NAV_LINKS.some((link) => link.path === location.pathname)
       ? location.pathname
       : null;
     const targetPath = hoveredNavPath || activePath;
@@ -420,9 +432,7 @@ export function Navigation() {
       opacity: 1,
     });
 
-    if (!isNavIndicatorReady) {
-      setIsNavIndicatorReady(true);
-    }
+    setIsNavIndicatorReady((prev) => (prev ? prev : true));
   }, [hoveredNavPath, location.pathname]);
 
   useEffect(() => {
@@ -540,7 +550,7 @@ export function Navigation() {
                   isScrolled
                     ? "h-8 w-auto sm:h-9 sm:w-auto md:h-9 md:w-auto"
                     : "h-9 w-auto sm:h-10 sm:w-auto md:h-11 md:w-auto"
-                } transition-all duration-300 ease-out md:group-`}
+                } transition-all duration-300 ease-out`}
               >
                 <img
                   src="/images/logo.png"
@@ -706,7 +716,7 @@ export function Navigation() {
                       <button
                         onClick={() => navigate("/profile")}
                         aria-label="Go to profile"
-                        className={`flex items-center justify-center md:hover:bg-green-50/80 rounded-full shadow-sm md:hover:shadow-md group overflow-hidden transition-all duration-300 ${
+                        className={`relative flex items-center justify-center md:hover:bg-green-50/80 rounded-full shadow-sm md:hover:shadow-md group overflow-hidden transition-all duration-300 ${
                           isScrolled ? "p-1" : "p-1.5"
                         }`}
                       >

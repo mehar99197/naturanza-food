@@ -2,6 +2,7 @@ const { db } = require("../config/db");
 const { touchSessionByToken } = require("../utils/sessionManager");
 const { verifyAccessToken } = require("../utils/jwtTokens");
 const { isAccessTokenBlacklisted } = require("../utils/tokenStore");
+const { enforceSuperAdminIpAllowlist } = require("./adminIpAllowlist");
 
 const ADMIN_ROLES = new Set(["admin", "super_admin", "staff_admin", "moderator"]);
 const isAdminUser = (user) =>
@@ -173,12 +174,14 @@ const optionalAuthenticateToken = async (req, res, next) => {
     }
 };
 
-// Middleware to check if user is admin
+// Middleware to check if user is admin (and enforce super-admin IP allowlist
+// uniformly across every admin router — including /api/admin-management,
+// /api/products, /api/orders, /api/admin/verify, etc.).
 const isAdmin = (req, res, next) => {
     if (!isAdminUser(req.user)) {
         return res.status(403).json({ error: "Admin access required" });
     }
-    next();
+    return enforceSuperAdminIpAllowlist(req, res, next);
 };
 
 module.exports = { authenticateToken, optionalAuthenticateToken, isAdmin, isAdminUser };

@@ -80,13 +80,14 @@ export function Orders() {
  setOrders(sortedOrders);
  }, [allOrders, user]);
 
+ const selectedOrderId = selectedOrder?.id;
  useEffect(() => {
- if (!selectedOrder) {
+ if (!selectedOrderId) {
  return;
  }
  setInvoiceError('');
  setInvoiceSuccess('');
- }, [selectedOrder?.id]);
+ }, [selectedOrderId]);
 
  // Filter orders
  const filteredOrders = orders.filter(order => {
@@ -111,13 +112,33 @@ export function Orders() {
  };
 
  const formatDate = (dateString) => {
+ if (!dateString) return '-';
+ const parsed = new Date(dateString);
+ if (Number.isNaN(parsed.getTime())) return '-';
  return new Intl.DateTimeFormat('en-US', {
  year: 'numeric',
  month: 'long',
  day: 'numeric',
  hour: '2-digit',
  minute: '2-digit'
- }).format(new Date(dateString));
+ }).format(parsed);
+ };
+
+ const formatStatusLabel = (status) => {
+  const s = String(status || 'pending');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+ };
+
+ const formatPaymentMethodLabel = (method) => {
+  const normalized = String(method || '').trim().toLowerCase();
+  if (normalized === 'safepay') return '💳 SafePay';
+  if (normalized === 'cod') return '💵 Cash on Delivery';
+  if (normalized === 'easypaisa') return '📱 EasyPaisa';
+  if (normalized === 'jazzcash') return '📱 JazzCash';
+  if (normalized === 'bank') return '🏦 Bank Transfer';
+  if (normalized === 'card' || normalized === 'creditcard') return '💳 Credit Card';
+  if (normalized === 'online') return '💳 Online Payment';
+  return method || 'N/A';
  };
 
  const handleDownloadInvoice = async () => {
@@ -206,7 +227,7 @@ if (selectedOrder) {
  </p>
  </div>
  <span className={`self-start md:self-center px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold border-2 ${getStatusColor(selectedOrder.status)}`}>
- {selectedOrder.status.charAt(0).toUpperCase() + selectedOrder.status.slice(1)}
+ {formatStatusLabel(selectedOrder.status)}
  </span>
  </div>
 
@@ -216,12 +237,14 @@ if (selectedOrder) {
  <h3 className="text-xs sm:text-sm font-semibold text-gray-500 mb-1.5 sm:mb-2">Customer Information</h3>
  <p className="text-sm sm:text-base text-gray-900 font-medium">{selectedOrder.customer_name}</p>
  <p className="text-xs sm:text-sm text-gray-600">{selectedOrder.customer_email}</p>
- <p className="text-xs sm:text-sm text-gray-600">{selectedOrder.customer_phone}</p>
+ <p className="text-xs sm:text-sm text-gray-600">{selectedOrder.phone || selectedOrder.customer_phone || '-'}</p>
  </div>
  <div>
  <h3 className="text-xs sm:text-sm font-semibold text-gray-500 mb-1.5 sm:mb-2">Delivery Address</h3>
  <p className="text-sm sm:text-base text-gray-900">{selectedOrder.shipping_address}</p>
- <p className="text-xs sm:text-sm text-gray-600">{selectedOrder.city}, {selectedOrder.postal_code}</p>
+ <p className="text-xs sm:text-sm text-gray-600">
+  {[selectedOrder.city, selectedOrder.postal_code].filter(Boolean).join(', ')}
+ </p>
  </div>
 
  <div className="mt-4 sm:mt-6 flex flex-col gap-2">
@@ -263,11 +286,23 @@ if (selectedOrder) {
  </div>
 
  {/* Order Tracker */}
- <OrderTracker 
- currentStatus={selectedOrder.status}
-  trackingNumber={selectedOrder.tracking_number || `TRK-${selectedOrder.id.toString().padStart(10, '0')}`}
- estimatedDelivery={selectedOrder.estimated_delivery || 'Calculating...'}
- />
+ {String(selectedOrder.status || '').toLowerCase() === 'cancelled' ? (
+  <div className="bg-red-50 border border-red-200 rounded-xl p-4 sm:p-5">
+   <p className="text-sm sm:text-base text-red-700 font-medium">
+    This order has been cancelled. Tracking is no longer available.
+   </p>
+  </div>
+ ) : (
+  <OrderTracker
+   currentStatus={selectedOrder.status}
+   trackingNumber={
+    selectedOrder.shipment?.tracking_number ||
+    selectedOrder.tracking_number ||
+    `TRK-${selectedOrder.id.toString().padStart(10, '0')}`
+   }
+   estimatedDelivery={selectedOrder.estimated_delivery || 'Calculating...'}
+  />
+ )}
 
  {/* Order Items */}
  <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-6 md:p-8 mt-4 sm:mt-6">
@@ -306,9 +341,9 @@ if (selectedOrder) {
  </div>
  <div className="flex justify-between text-sm sm:text-base text-gray-600">
  <span>Shipping</span>
- <span>{selectedOrder.shipping_cost === 0 ? 'Free' : formatPrice(selectedOrder.shipping_cost, settings.currency)}</span>
+ <span>{Number(selectedOrder.shipping_cost || 0) === 0 ? 'Free' : formatPrice(Number(selectedOrder.shipping_cost || 0), settings.currency)}</span>
  </div>
- {selectedOrder.discount_amount > 0 && (
+ {Number(selectedOrder.discount_amount || 0) > 0 && (
  <div className="flex justify-between text-sm sm:text-base text-green-600">
  <span>Discount {selectedOrder.coupon_code && `(${selectedOrder.coupon_code})`}</span>
  <span>-{formatPrice(selectedOrder.discount_amount, settings.currency)}</span>
@@ -324,10 +359,7 @@ if (selectedOrder) {
  <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-blue-50 rounded-lg">
  <p className="text-xs sm:text-sm text-gray-700">
  <span className="font-semibold">Payment Method:</span>{' '}
- {selectedOrder.payment_method === 'cod' && '💵 Cash on Delivery'}
- {selectedOrder.payment_method === 'easypaisa' && '📱 EasyPaisa'}
- {selectedOrder.payment_method === 'jazzcash' && '📱 JazzCash'}
- {selectedOrder.payment_method === 'creditCard' && '💳 Credit Card'}
+ {formatPaymentMethodLabel(selectedOrder.payment_method)}
  </p>
  </div>
  </div>
@@ -397,7 +429,7 @@ if (selectedOrder) {
   {ordersLoading ? (
  <div className="flex items-center justify-center py-16 sm:py-20">
  <div className="text-center">
- <div className="w-12 h-12 sm:w-16 sm:h-16 border-4 border-green-600 border-t-transparent rounded-full mx-auto mb-3 sm:mb-4" />
+ <div className="w-12 h-12 sm:w-16 sm:h-16 border-4 border-green-600 border-t-transparent rounded-full animate-spin mx-auto mb-3 sm:mb-4" />
  <p className="text-sm sm:text-base text-gray-600">Loading orders...</p>
  </div>
  </div>
@@ -447,7 +479,7 @@ if (selectedOrder) {
  
  <div className="flex flex-wrap gap-2 mt-3">
  <span className={`px-2.5 sm:px-3 py-1 rounded-full text-xs font-semibold border-2 ${getStatusColor(order.status)}`}>
- {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+ {formatStatusLabel(order.status)}
  </span>
  <span className="px-2.5 sm:px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">
  {order.items?.length || 0} Items

@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Heart, Loader2, ShoppingCart, Trash2, Star } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useCart } from "@/context/CartContext";
 import { useSettings } from "@/context/SettingsContext";
 import { useWishlist } from "@/context/WishlistContext";
-import { formatPrice } from "@/lib/utils";
+import { formatPrice, getProductPricing } from "@/lib/utils";
 import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 import { getProductContentDefaults } from "@/lib/productContentDefaults";
 
@@ -32,6 +32,23 @@ export function ProfileWishlist() {
   const [success, setSuccess] = useState("");
   const [movingId, setMovingId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
+  const successTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) {
+        clearTimeout(successTimerRef.current);
+      }
+    };
+  }, []);
+
+  const showTemporarySuccess = (message) => {
+    setSuccess(message);
+    if (successTimerRef.current) {
+      clearTimeout(successTimerRef.current);
+    }
+    successTimerRef.current = setTimeout(() => setSuccess(""), 2500);
+  };
 
   useEffect(() => {
     setError(wishlistError || "");
@@ -47,8 +64,7 @@ export function ProfileWishlist() {
         return;
       }
 
-      setSuccess("Item removed from wishlist.");
-      setTimeout(() => setSuccess(""), 2500);
+      showTemporarySuccess("Item removed from wishlist.");
     } catch (err) {
       setError(err.response?.data?.error || "Failed to remove wishlist item");
     } finally {
@@ -56,12 +72,16 @@ export function ProfileWishlist() {
     }
   };
 
-  const handleMoveToCart = async (productId) => {
+  const handleMoveToCart = async (item) => {
+    const productId = item?.product_id || item?.id;
     try {
       setMovingId(productId);
       setError("");
 
-      const addResult = await addToCart({ id: productId }, 1);
+      const addResult = await addToCart(
+        { ...item, id: productId, product_id: productId },
+        1,
+      );
       if (!addResult?.success) {
         setError(addResult?.error || "Could not move item to cart");
         return;
@@ -74,8 +94,7 @@ export function ProfileWishlist() {
       }
 
       await refreshWishlist({ silent: true });
-      setSuccess("Moved to cart successfully.");
-      setTimeout(() => setSuccess(""), 2500);
+      showTemporarySuccess("Moved to cart successfully.");
     } catch (err) {
       setError(err.response?.data?.error || "Could not move item to cart");
     } finally {
@@ -137,7 +156,8 @@ export function ProfileWishlist() {
             const shortDescription = String(
               item.description || contentDefaults?.description || "",
             ).trim();
-            const discount = Number(item.discount_percentage || 0);
+            const pricing = getProductPricing(item, settings);
+            const discount = pricing.discountPct;
 
             return (
               <article
@@ -209,16 +229,23 @@ export function ProfileWishlist() {
                       </p>
                     )}
 
-                    <p className="mt-1.5 sm:mt-2 text-base sm:text-lg font-bold text-green-700">
-                      {formatPrice(Number(item.price || 0), settings.currency)}
-                    </p>
+                    <div className="mt-1.5 sm:mt-2 flex items-baseline gap-2">
+                      <p className="text-base sm:text-lg font-bold text-green-700">
+                        {formatPrice(pricing.salePrice, settings.currency)}
+                      </p>
+                      {pricing.onSale && (
+                        <span className="text-xs sm:text-sm text-gray-400 line-through">
+                          {formatPrice(pricing.base, settings.currency)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 <div className="mt-3 sm:mt-4 flex gap-2 sm:px-4 sm:pb-4">
                   <button
                     type="button"
-                    onClick={() => handleMoveToCart(productId)}
+                    onClick={() => handleMoveToCart(item)}
                     disabled={movingId === productId}
                     className="flex-1 inline-flex min-h-[40px] sm:min-h-[42px] items-center justify-center gap-2 px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-70"
                   >

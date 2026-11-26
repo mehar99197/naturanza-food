@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect, useRef } from"react";
-import { useParams, useSearchParams } from"react-router-dom";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { 
  Grid3X3, 
  LayoutList, 
@@ -19,12 +19,11 @@ import { ProductCardSkeleton } from"@/components/Skeletons/ProductCardSkeleton";
 import { SearchBar } from"@/components/SearchBar";
 import { useSettings } from"@/context/SettingsContext";
 import { useProducts } from"@/context/ProductContext";
-import { formatCurrency } from"@/lib/utils";
-import { convertFromPkr, hasExchangeRate } from"@/lib/exchangeRates";
-import { categoryAPI } from"@/services/api";
+import { formatCurrency, getProductPricing } from "@/lib/utils";
+import { convertFromPkr, hasExchangeRate } from "@/lib/exchangeRates";
+import { categoryAPI } from "@/services/api";
 import { ShopSEO } from "@/components/SEO";
 import { ShopBreadcrumbStructuredData } from "@/components/StructuredData";
-import { Helmet } from "react-helmet-async";
 import { useScrollReveal } from "@/hooks/useScrollReveal";
 
 export function Shop() {
@@ -37,6 +36,7 @@ export function Shop() {
  } = useProducts();
  const { category: pathCategory } = useParams();
  const [searchParams, setSearchParams] = useSearchParams();
+ const navigate = useNavigate();
  const [viewMode, setViewMode] = useState("grid");
  const [sortBy, setSortBy] = useState("featured");
  const [isLoading, setIsLoading] = useState(true);
@@ -48,16 +48,37 @@ export function Shop() {
  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
+ const products = useMemo(() => getActiveProducts(), [getActiveProducts]);
  const currencyCode = String(settings.currency || "PKR").toUpperCase();
- const hasRate = hasExchangeRate(currencyCode);
- const baseMaxPrice = 10000;
+ const activeRate =
+  currencyCode === "PKR" ? 1 : Number(exchangeRates?.rates?.[currencyCode]);
+ const hasRate =
+  currencyCode === "PKR" ||
+  Number.isFinite(activeRate) ||
+  hasExchangeRate(currencyCode);
+ const baseMaxPrice = useMemo(() => {
+  const highestProductPrice = products.reduce((highest, product) => {
+   const effectivePrice = Number(
+    getProductPricing(product, settings).salePrice ?? product.price ?? 0,
+   );
+   return Number.isFinite(effectivePrice) && effectivePrice > highest
+    ? effectivePrice
+    : highest;
+  }, 0);
+  return Math.max(10000, Math.ceil(highestProductPrice / 100) * 100);
+ }, [products, settings]);
  const computedMaxPrice = hasRate
- ? Math.round(convertFromPkr(baseMaxPrice, currencyCode) || baseMaxPrice)
+ ? Math.round(
+  (Number.isFinite(activeRate)
+   ? baseMaxPrice * activeRate
+   : convertFromPkr(baseMaxPrice, currencyCode)) || baseMaxPrice,
+ )
  : baseMaxPrice;
  const maxPrice = Math.max(1, computedMaxPrice);
  const priceRangeCurrency = hasRate ? currencyCode : "PKR";
  const [priceRange, setPriceRange] = useState([0, maxPrice]);
  const currencyRef = useRef(currencyCode);
+ const prevMaxPriceRef = useRef(maxPrice);
  const [searchQuery, setSearchQuery] = useState("");
 
  const selectedCategory = pathCategory || searchParams.get("category") ||"all";
@@ -119,29 +140,48 @@ export function Shop() {
   };
  }, []);
 
- const products = useMemo(() => getActiveProducts(), [getActiveProducts]);
-
  useEffect(() => {
  if (currencyRef.current !== currencyCode) {
  setPriceRange([0, maxPrice]);
  currencyRef.current = currencyCode;
+ prevMaxPriceRef.current = maxPrice;
  return;
  }
 
- if (priceRange[1] > maxPrice) {
- setPriceRange([priceRange[0], maxPrice]);
- }
- }, [currencyCode, maxPrice, priceRange]);
- const selectedCategoryName = useMemo(() => {
- return (
-  categories.find(
+ setPriceRange((prev) => {
+  if (prev[1] > maxPrice) {
+   return [prev[0], maxPrice];
+  }
+  if (prev[1] === prevMaxPriceRef.current && maxPrice > prevMaxPriceRef.current) {
+   return [prev[0], maxPrice];
+  }
+  return prev;
+ });
+ prevMaxPriceRef.current = maxPrice;
+ }, [currencyCode, maxPrice]);
+ const selectedCategoryEntry = useMemo(() => {
+  if (selectedCategory === "all") return null;
+  return (
+   categories.find(
     (cat) =>
-      String(cat.id) === String(selectedCategory) ||
-      String(cat.slug || '').toLowerCase() === String(selectedCategory).toLowerCase(),
-  )?.name ||
-"All Products"
- );
+     String(cat.id) === String(selectedCategory) ||
+     (Boolean(cat.slug) &&
+      String(cat.slug).toLowerCase() === String(selectedCategory).toLowerCase()),
+   ) || null
+  );
  }, [selectedCategory, categories]);
+
+ const selectedCategoryName = selectedCategoryEntry?.name || "All Products";
+
+ const selectedCategorySlug = useMemo(() => {
+  if (selectedCategory === "all") return null;
+  if (selectedCategoryEntry?.slug) {
+   return String(selectedCategoryEntry.slug).trim().toLowerCase();
+  }
+  const raw = String(selectedCategory || "").trim().toLowerCase();
+  if (!raw || /^\d+$/.test(raw)) return null;
+  return raw;
+ }, [selectedCategory, selectedCategoryEntry]);
 
  const categoryCounts = useMemo(() => {
  const counts = {
@@ -249,9 +289,11 @@ export function Shop() {
 
  // Filter by price
  result = result.filter((p) => {
- const basePrice = Number(p.price);
+ const basePrice = Number(getProductPricing(p, settings).salePrice ?? p.price ?? 0);
  const convertedPrice = hasRate
- ? convertFromPkr(basePrice, currencyCode)
+ ? (Number.isFinite(activeRate)
+  ? basePrice * activeRate
+  : convertFromPkr(basePrice, currencyCode))
  : basePrice;
  const priceValue = Number.isFinite(convertedPrice) ? convertedPrice : basePrice;
  return priceValue >= priceRange[0] && priceValue <= priceRange[1];
@@ -260,10 +302,18 @@ export function Shop() {
  // Sort
  switch (sortBy) {
  case"price-low":
- result.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
+ result.sort(
+  (a, b) =>
+   Number(getProductPricing(a, settings).salePrice ?? a.price ?? 0) -
+   Number(getProductPricing(b, settings).salePrice ?? b.price ?? 0),
+ );
  break;
  case"price-high":
- result.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
+ result.sort(
+  (a, b) =>
+   Number(getProductPricing(b, settings).salePrice ?? b.price ?? 0) -
+   Number(getProductPricing(a, settings).salePrice ?? a.price ?? 0),
+ );
  break;
  case"rating":
  result.sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0));
@@ -282,31 +332,53 @@ export function Shop() {
  return result;
  }, [
  selectedCategory,
+ categories,
  sortBy,
  priceRange,
  searchQuery,
  products,
- settings.currency,
- exchangeRates.updatedAt,
+ settings,
+ activeRate,
  hasRate,
  currencyCode,
  ]);
 
  const handleCategoryChange = (category) => {
- const value = String(category);
+  setMobileDrawerOpen(false);
+  const value = String(category);
  const nextParams = new URLSearchParams(searchParams);
- if (value ==="all") {
  nextParams.delete("category");
- } else {
- nextParams.set("category", value);
+ const queryString = nextParams.toString();
+
+ if (value === "all") {
+  navigate(queryString ? `/shop?${queryString}` : "/shop", { replace: true });
+  return;
  }
- setSearchParams(nextParams, { replace: true });
+
+ const matchedCategory = categories.find(
+  (cat) =>
+   String(cat.id) === value ||
+   (Boolean(cat.slug) && String(cat.slug).toLowerCase() === value.toLowerCase()),
+ );
+ const slug = String(matchedCategory?.slug || "").trim().toLowerCase();
+ if (slug) {
+  navigate(
+   queryString
+    ? `/shop/${encodeURIComponent(slug)}?${queryString}`
+    : `/shop/${encodeURIComponent(slug)}`,
+   { replace: true },
+  );
+  return;
+ }
+
+ nextParams.set("category", value);
+ navigate(`/shop?${nextParams.toString()}`, { replace: true });
  };
 
  return (
 <>
-  <ShopSEO category={selectedCategory !== 'all' ? selectedCategory : null} />
-  <ShopBreadcrumbStructuredData category={selectedCategory !== 'all' ? selectedCategory : null} />
+  <ShopSEO category={selectedCategorySlug} categoryName={selectedCategoryEntry?.name || null} />
+  <ShopBreadcrumbStructuredData category={selectedCategorySlug} />
   <main className="shop-mobile-shell pt-24 pb-12 sm:pb-16 min-h-screen bg-green-50 overflow-x-hidden">
  {/* Mobile Overlay */}
  {mobileDrawerOpen && (
@@ -366,7 +438,10 @@ export function Shop() {
  <div className="space-y-1">
  {categories.map((cat) => {
  const Icon = cat.icon || ShoppingBag;
- const isActive = String(selectedCategory) === String(cat.id);
+ const isActive =
+  String(selectedCategory) === String(cat.id) ||
+  (Boolean(cat.slug) &&
+   String(cat.slug).toLowerCase() === String(selectedCategory).toLowerCase());
  const categoryCount = categoryCounts[cat.id] || 0;
  
  return (
@@ -502,7 +577,7 @@ export function Shop() {
  )}
  {selectedCategory !=="all" && (
  <span className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-500 text-white text-sm rounded-full shadow-sm capitalize whitespace-nowrap">
- {categories.find(c => String(c.id) === String(selectedCategory))?.name}
+ {selectedCategoryName}
  <button
  onClick={() => handleCategoryChange("all")}
  className="hover:bg-white/20 rounded-full p-0.5"
@@ -617,7 +692,7 @@ export function Shop() {
  :"grid-cols-1"
  }`}
  >
- {filteredProducts.map((product, index) => (
+ {filteredProducts.map((product) => (
  <div
  key={product.id}
  className={viewMode === "grid" ? "h-full min-w-0 w-full max-w-[15.75rem] mx-auto" : "h-full min-w-0"}

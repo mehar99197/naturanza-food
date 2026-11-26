@@ -1,5 +1,5 @@
 import React from 'react';
-import { Package, Truck, MapPin, CheckCircle2, Clock } from 'lucide-react';
+import { Package, Truck, MapPin, CheckCircle2, Clock, XCircle } from 'lucide-react';
 
 const orderStatuses = [
  { 
@@ -45,11 +45,36 @@ const orderStatuses = [
 ];
 
 export const OrderTracker = ({ currentStatus, trackingNumber, estimatedDelivery }) => {
+ const rawLower = String(currentStatus || '').trim().toLowerCase();
+ if (rawLower === 'cancelled') {
+  return (
+   <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg p-3.5 sm:p-6 md:p-8">
+    <div className="mb-3.5 sm:mb-6">
+     <h2 className="text-[1.9rem] sm:text-2xl font-bold text-gray-900 mb-1.5 sm:mb-2 leading-tight">Order Tracking</h2>
+     {trackingNumber && (
+      <p className="text-sm text-gray-600 leading-snug">
+       Tracking Number: <span className="font-semibold text-gray-900">{trackingNumber}</span>
+      </p>
+     )}
+    </div>
+    <div className="flex items-center gap-3 p-3.5 sm:p-4 bg-red-50 rounded-xl border border-red-200 text-red-700">
+     <XCircle className="w-5 h-5 flex-shrink-0" />
+     <p className="text-sm font-medium">This order has been cancelled. Tracking is no longer available.</p>
+    </div>
+   </div>
+  );
+ }
+
  const normalizedStatus = {
+  pending: 'pending',
   confirmed: 'processing',
+  processing: 'processing',
+  shipped: 'shipped',
   in_transit: 'shipped',
   out_for_delivery: 'outForDelivery',
- }[String(currentStatus || '').toLowerCase()] || currentStatus;
+  outfordelivery: 'outForDelivery',
+  delivered: 'delivered',
+ }[rawLower] || 'pending';
  const currentIndex = orderStatuses.findIndex(status => status.key === normalizedStatus);
  const safeIndex = currentIndex < 0 ? 0 : currentIndex;
  const progressWidth = (safeIndex / (orderStatuses.length - 1)) * 100;

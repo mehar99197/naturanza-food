@@ -49,6 +49,7 @@ const fetchProductUrls = async () => {
       SELECT id, name, image_url, updated_at
         FROM products
        WHERE is_active = 1
+         AND deleted_at IS NULL
     ORDER BY updated_at DESC
        LIMIT 1000
   `);

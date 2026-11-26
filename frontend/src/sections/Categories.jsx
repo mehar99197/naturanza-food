@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Tag } from 'lucide-react';
 import { categoryAPI } from '@/services/api';
 import { getAbsoluteImageUrl } from '@/lib/imageUtils';
+import { getCategoryDescription } from '@/lib/categoryDefaults';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
 
 const normalizeImageUrl = (value) => {
@@ -17,11 +18,28 @@ const normalizeImageUrl = (value) => {
 
 const CATEGORY_FALLBACK_IMAGE = '/images/og-image.jpg';
 
+const toCategoryPath = (category) => {
+  const slug = String(category?.slug || '').trim().toLowerCase();
+  if (slug) {
+    return `/shop/${encodeURIComponent(slug)}`;
+  }
+
+  const fallbackSlug = String(category?.name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return fallbackSlug ? `/shop/${encodeURIComponent(fallbackSlug)}` : '/shop';
+};
+
 const mapCategoryCard = (category) => {
   return {
     id: category.id,
     name: String(category?.name || '').trim(),
-    description: String(category?.description || '').trim(),
+    slug: String(category?.slug || '').trim(),
+    path: toCategoryPath(category),
+    description: getCategoryDescription(category),
     image: normalizeImageUrl(category?.image_url || category?.image),
   };
 };
@@ -163,7 +181,7 @@ export function Categories() {
             categoryCards.map((category, index) => (
               <Link
                 key={category.id}
-                to={`/shop?category=${category.id}`}
+                to={category.path}
                 style={{ animationDelay: `${index * 100}ms` }}
                 className="group snap-center flex-shrink-0 w-full min-w-full md:w-auto md:min-w-0 relative overflow-hidden rounded-lg md:rounded-xl bg-white border-2 border-green-100 shadow-md md:hover:shadow-2xl md:hover:-translate-y-2 md:hover:border-green-300 transition-all duration-500 ease-out animate-fade-in-up opacity-0 [animation-fill-mode:forwards]"
               >
@@ -192,7 +210,7 @@ export function Categories() {
                     {category.name}
                   </h3>
                   <p className="text-gray-600 mb-2 md:mb-2.5 leading-relaxed text-xs line-clamp-2">
-                    {category.description || 'No description added yet.'}
+                    {category.description}
                   </p>
                   <span className="inline-flex items-center gap-1 md:gap-1.5 text-green-700 font-bold text-xs group-hover:gap-2 transition-all duration-300">
                     Explore Collection

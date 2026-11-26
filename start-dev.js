@@ -103,7 +103,7 @@ function startService(name, cwd) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-const pollHealth = (retries = 30, interval = 500) =>
+const pollHealth = (retries = 180, interval = 500) =>
   new Promise((resolve, reject) => {
     let attempts = 0;
 

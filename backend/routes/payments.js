@@ -3,22 +3,370 @@ const router = express.Router();
 const { db } = require("../config/db");
 const { authenticateToken } = require("../middleware/auth");
 const { restrictBody } = require("../middleware/security");
-const { toNullableString } = require("../utils/helpers");
-const { uploadAndCompress } = require("../middleware/upload");
+const { consumeReservationsOnConnection } = require("../utils/stockReservations");
+const { getAdminSettings } = require("../utils/adminSettings");
+const { insertAdminNotifications } = require("../utils/adminNotifications");
+const { sendPaymentStatusEmail } = require("../utils/emailService");
+const {
+  getSafepayConfig,
+  getPublicSafepayStatus,
+  createSafepaySession,
+  fetchSafepayTrackerStatus,
+  verifySafepayWebhookSignature,
+} = require("../utils/safepay");
 
-const ALLOWED_PAYMENT_METHODS = new Set(["jazzcash", "easypaisa", "bank"]);
-const WALLET_METHODS = new Set(["jazzcash", "easypaisa"]);
-const CHECKOUT_PAYMENT_METHODS = new Set(["cod", "easypaisa", "jazzcash", "bank"]);
+const CHECKOUT_PAYMENT_METHODS = new Set(["safepay", "cod"]);
 const DEFAULT_CHECKOUT_METHODS = [
-  { code: "cod", label: "Cash on Delivery", description: "Cash collection at delivery", sort_order: 1 },
-  { code: "easypaisa", label: "EasyPaisa", description: "EasyPaisa wallet payments", sort_order: 4 },
-  { code: "jazzcash", label: "JazzCash", description: "JazzCash wallet payments", sort_order: 5 },
-  { code: "bank", label: "Bank Transfer", description: "Manual bank transfer", sort_order: 6 },
+  {
+    code: "safepay",
+    label: "SafePay",
+    description: "Pay securely online with Cards, Raast, or Mobile Wallets via SafePay",
+    sort_order: 1,
+    supports_online: 1,
+  },
+  {
+    code: "cod",
+    label: "Cash on Delivery",
+    description: "Pay on delivery (delivery fee advance via SafePay when applicable)",
+    sort_order: 2,
+    supports_online: 0,
+  },
 ];
-const TID_REGEX = /^\d{11}$/;
 
-// Keep the checkout's choices aligned with the methods enforced by orders.js.
+const getFrontendBaseUrl = (req) => {
+  const configured = String(
+    process.env.FRONTEND_URL ||
+      process.env.PUBLIC_SITE_URL ||
+      process.env.CLIENT_URL ||
+      "",
+  )
+    .trim()
+    .replace(/\/+$/, "");
+
+  if (configured) {
+    return configured;
+  }
+
+  const origin = String(req?.headers?.origin || "").trim().replace(/\/+$/, "");
+  if (origin && /^https?:\/\//i.test(origin)) {
+    return origin;
+  }
+
+  return "http://localhost:5173";
+};
+
+const isOrderOwnerOrPaymentAdmin = (order, user) => {
+  if (!order || !user) return false;
+  if (Number(order.user_id) === Number(user.id)) return true;
+  const role = String(user.role || "").trim().toLowerCase();
+  const adminRole = String(user.admin_role || "").trim().toLowerCase();
+  const perms = Array.isArray(user.admin_permissions)
+    ? user.admin_permissions.map((value) => String(value).trim())
+    : [];
+  return (
+    role === "admin" &&
+    (adminRole === "super_admin" || perms.includes("manage_payments"))
+  );
+};
+
+const resolveSafepayChargeForOrder = (order) => {
+  const method = String(order?.payment_method || "").trim().toLowerCase();
+  if (method === "cod") {
+    return {
+      stage: "advance_shipping",
+      amount: Number(order.shipping_cost) || 0,
+      stageLabel: "Delivery Fee Advance (SafePay)",
+    };
+  }
+  return {
+    stage: "full_payment",
+    amount: Number(order.total_amount) || 0,
+    stageLabel: "Full Online Payment (SafePay)",
+  };
+};
+
+// Atomically settle a verified SafePay payment. Idempotent across both the
+// customer redirect verification call and SafePay's server-to-server webhook.
+const settleSafepayPayment = async ({
+  orderId,
+  tracker,
+  trackerStatus,
+  source = "verify",
+}) => {
+  const numericOrderId = Number.parseInt(orderId, 10);
+  if (!Number.isInteger(numericOrderId) || numericOrderId <= 0) {
+    const err = new Error("Invalid order id");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const conn = await db.promise().getConnection();
+  let emailContext = null;
+
+  try {
+    await conn.beginTransaction();
+
+    const [[order]] = await conn.query(
+      `SELECT id, user_id, customer_name, customer_email, status, payment_method,
+              payment_status, total_amount, shipping_cost, transaction_id
+         FROM orders
+        WHERE id = ?
+        FOR UPDATE`,
+      [numericOrderId],
+    );
+
+    if (!order) {
+      await conn.rollback();
+      const err = new Error("Order not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const { stage, amount: expectedAmount, stageLabel } = resolveSafepayChargeForOrder(order);
+    const expectedAmountMinor = Math.round(expectedAmount * 100);
+    const currentPaymentStatus = String(order.payment_status || "").toLowerCase();
+    const currentOrderStatus = String(order.status || "").toLowerCase();
+
+    // Idempotent exit if already settled for this stage
+    if (
+      (stage === "full_payment" && currentPaymentStatus === "paid") ||
+      (stage === "advance_shipping" &&
+        (currentPaymentStatus === "partial" || currentPaymentStatus === "paid"))
+    ) {
+      await conn.commit();
+      return {
+        alreadySettled: true,
+        orderId: order.id,
+        orderStatus: order.status,
+        paymentStatus: order.payment_status,
+        stage,
+        amount: expectedAmount,
+        tracker,
+      };
+    }
+
+    if (currentOrderStatus === "cancelled") {
+      await conn.rollback();
+      const err = new Error("This order has been cancelled and cannot be paid.");
+      err.statusCode = 409;
+      throw err;
+    }
+
+    // Verify amount returned by SafePay matches authoritative DB amount (1 PKR tolerance)
+    if (
+      trackerStatus.amountMinor > 0 &&
+      Math.abs(trackerStatus.amountMinor - expectedAmountMinor) > 100
+    ) {
+      await conn.rollback();
+      const err = new Error("SafePay payment amount does not match the order total.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const consumedCount = await consumeReservationsOnConnection(
+      conn,
+      order.id,
+      order.user_id || null,
+    );
+    const stockWarning = consumedCount === 0;
+
+    const nextPaymentStatus = stage === "advance_shipping" ? "partial" : "paid";
+    const nextOrderStatus =
+      currentOrderStatus === "pending" ? "confirmed" : order.status;
+
+    await conn.query(
+      `UPDATE orders
+          SET payment_status = ?,
+              status = ?,
+              transaction_id = ?,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [nextPaymentStatus, nextOrderStatus, tracker, order.id],
+    );
+
+    const txPayload = JSON.stringify({
+      gateway: "safepay",
+      tracker,
+      state: trackerStatus.state || "TRACKER_ENDED",
+      amount_minor: trackerStatus.amountMinor || expectedAmountMinor,
+      currency: trackerStatus.currency || "PKR",
+      source,
+      stage,
+      stock_warning: stockWarning,
+      processed_at: new Date().toISOString(),
+    });
+
+    const [[existingTx]] = await conn.query(
+      `SELECT id
+         FROM payment_transactions
+        WHERE order_id = ? AND provider = 'safepay' AND gateway_reference = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [order.id, tracker],
+    );
+
+    if (existingTx) {
+      await conn.query(
+        `UPDATE payment_transactions
+            SET status = 'paid',
+                amount = ?,
+                currency = ?,
+                external_id = ?,
+                payload = ?,
+                processed_at = NOW(),
+                updated_at = NOW()
+          WHERE id = ?`,
+        [
+          expectedAmount,
+          trackerStatus.currency || "PKR",
+          tracker,
+          txPayload,
+          existingTx.id,
+        ],
+      );
+    } else {
+      await conn.query(
+        `INSERT INTO payment_transactions
+           (order_id, user_id, transaction_type, provider, amount, currency, status,
+            gateway_reference, external_id, payload, processed_at)
+         VALUES (?, ?, 'payment', 'safepay', ?, ?, 'paid', ?, ?, ?, NOW())`,
+        [
+          order.id,
+          order.user_id || null,
+          expectedAmount,
+          trackerStatus.currency || "PKR",
+          tracker,
+          tracker,
+          txPayload,
+        ],
+      );
+    }
+
+    if (currentOrderStatus === "pending") {
+      await conn.query(
+        `INSERT INTO order_status_history
+           (order_id, from_status, to_status, changed_by_user_id, note)
+         VALUES (?, 'pending', 'confirmed', ?, ?)`,
+        [
+          order.id,
+          order.user_id || null,
+          `SafePay ${stage === "advance_shipping" ? "delivery fee advance" : "payment"} confirmed (${tracker})`,
+        ],
+      );
+    }
+
+    if (Number.isInteger(order.user_id)) {
+      await conn
+        .query(
+          `INSERT INTO notifications (user_id, type, title, message, payload)
+           VALUES (?, 'payment_verified', ?, ?, ?)`,
+          [
+            order.user_id,
+            "Payment Confirmed via SafePay",
+            `Your ${stageLabel} of PKR ${expectedAmount.toFixed(2)} for Order #${order.id} was verified via SafePay.`,
+            JSON.stringify({
+              order_id: order.id,
+              tracker,
+              stage,
+              amount: expectedAmount,
+              provider: "safepay",
+            }),
+          ],
+        )
+        .catch(() => {});
+    }
+
+    await insertAdminNotifications(conn, {
+      type: "admin_payment_received",
+      title: "SafePay Payment Received",
+      message: `Order #${order.id} paid PKR ${expectedAmount.toFixed(2)} via SafePay (${stage === "advance_shipping" ? "COD Advance" : "Full Payment"}).`,
+      payload: {
+        order_id: order.id,
+        tracker,
+        stage,
+        amount: expectedAmount,
+        provider: "safepay",
+      },
+      excludeUserId: order.user_id || null,
+    }).catch(() => {});
+
+    emailContext = {
+      email: order.customer_email,
+      customerName: order.customer_name || "Customer",
+      orderId: order.id,
+      amount: expectedAmount,
+      stageLabel,
+    };
+
+    await conn.commit();
+
+    if (emailContext.email) {
+      setImmediate(async () => {
+        try {
+          const settings = await getAdminSettings();
+          await sendPaymentStatusEmail({
+            email: emailContext.email,
+            storeName: settings.storeName,
+            customerName: emailContext.customerName,
+            orderId: emailContext.orderId,
+            amount: emailContext.amount,
+            currency: settings.currency || "PKR",
+            stageLabel: emailContext.stageLabel,
+            isApproved: true,
+          });
+        } catch (emailErr) {
+          console.warn("[safepay] confirmation email failed:", emailErr?.message || emailErr);
+        }
+      });
+    }
+
+    return {
+      alreadySettled: false,
+      orderId: order.id,
+      orderStatus: nextOrderStatus,
+      paymentStatus: nextPaymentStatus,
+      stage,
+      amount: expectedAmount,
+      tracker,
+    };
+  } catch (error) {
+    try {
+      await conn.rollback();
+    } catch {
+      // preserve original error
+    }
+    throw error;
+  } finally {
+    conn.release();
+  }
+};
+
+// GET /api/payments/methods/active — SafePay + COD only (no manual wallet/bank methods)
 router.get("/methods/active", authenticateToken, async (req, res) => {
+  const safepayStatus = getPublicSafepayStatus();
+
+  const enrichMethods = (methods) =>
+    methods.map((method) => {
+      const code = String(method.code || "").trim().toLowerCase();
+      if (code === "safepay") {
+        return {
+          ...method,
+          code: "safepay",
+          supports_online: 1,
+          gateway_configured: safepayStatus.configured,
+          gateway_environment: safepayStatus.environment,
+        };
+      }
+      if (code === "cod") {
+        return {
+          ...method,
+          code: "cod",
+          safepay_advance_enabled: safepayStatus.configured,
+        };
+      }
+      return method;
+    });
+
   try {
     const [rows] = await db.promise().query(
       `SELECT code, label, description, sort_order, supports_online
@@ -27,254 +375,458 @@ router.get("/methods/active", authenticateToken, async (req, res) => {
         ORDER BY sort_order ASC, created_at ASC`,
     );
 
-    // An older database may not have been seeded yet. Preserve the same
-    // fallback as order creation in that case, while ignoring unsupported
-    // gateway methods that cannot complete checkout.
     if (rows.length === 0) {
-      return res.json(DEFAULT_CHECKOUT_METHODS);
+      return res.json(enrichMethods(DEFAULT_CHECKOUT_METHODS));
     }
 
     const checkoutMethods = rows.filter((row) =>
       CHECKOUT_PAYMENT_METHODS.has(String(row.code || "").trim().toLowerCase()),
     );
-    if (!checkoutMethods.some((row) => String(row.code || "").trim().toLowerCase() === "cod")) {
-      checkoutMethods.unshift(DEFAULT_CHECKOUT_METHODS[0]);
+
+    if (checkoutMethods.length === 0) {
+      return res.json(enrichMethods(DEFAULT_CHECKOUT_METHODS));
     }
 
-    return res.json(checkoutMethods);
-  } catch (error) {
-    return res.json(DEFAULT_CHECKOUT_METHODS);
+    return res.json(enrichMethods(checkoutMethods));
+  } catch {
+    return res.json(enrichMethods(DEFAULT_CHECKOUT_METHODS));
   }
 });
 
-// Checkout is authenticated, so keep receiving account details off the public
-// internet and out of unauthenticated catalog scraping.
-router.get("/accounts/active", authenticateToken, async (req, res) => {
-  try {
-    const [rows] = await db
-      .promise()
-      .query(
-        `SELECT type, account_number, account_name
-         FROM payment_accounts
-         WHERE is_active = TRUE
-         ORDER BY FIELD(type, 'jazzcash', 'easypaisa', 'bank'), id`,
-      );
-
-    return res.json(rows);
-  } catch (error) {
-    return res
-      .status(500)
-      .json({ error: "Failed to fetch active payment accounts" });
-  }
+// GET /api/payments/safepay/config
+router.get("/safepay/config", authenticateToken, (req, res) => {
+  return res.json(getPublicSafepayStatus());
 });
 
-// POST /api/payments/submit-verification
+// POST /api/payments/safepay/create-session
 router.post(
-  "/submit-verification",
+  "/safepay/create-session",
   authenticateToken,
-  uploadAndCompress("verification_screenshot", "payment-verifications", {
-    width: 900,
-    height: 900,
-    quality: 82,
-    fit: "inside",
-  }),
-  restrictBody(
-    "order_id",
-    "customer_name",
-    "customer_phone",
-    "amount",
-    "payment_method",
-    "screenshot_url",
-    "transaction_id",
-    "verification_screenshot",
-  ),
+  restrictBody("order_id"),
   async (req, res) => {
     try {
-      const orderId = String(req.body.order_id || "").trim();
-      const customerName = String(req.body.customer_name || "").trim();
-      const customerPhone = toNullableString(req.body.customer_phone);
-      const paymentMethod = String(req.body.payment_method || "")
-        .trim()
-        .toLowerCase();
-      // Never trust a client-supplied URL for a payment document. Only the
-      // file processed by this request may become the stored screenshot path.
-      const screenshotUrl = req.file?.url || null;
-
-      const rawTid = toNullableString(req.body.transaction_id);
-      const transactionId = rawTid ? rawTid.replace(/[\s-]/g, "") : null;
-
-      if (!orderId || !customerName) {
-        return res
-          .status(400)
-          .json({ success: false, message: "Order id and customer name are required" });
+      const orderId = Number.parseInt(req.body?.order_id, 10);
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: "A valid order_id is required" });
       }
 
-      if (!ALLOWED_PAYMENT_METHODS.has(paymentMethod)) {
-        return res.status(400).json({ success: false, message: "Invalid payment method" });
-      }
-
-      if (!screenshotUrl) {
-        return res.status(400).json({ success: false, message: "Screenshot is required" });
-      }
-
-      if (WALLET_METHODS.has(paymentMethod) && (!transactionId || !TID_REGEX.test(transactionId))) {
-        return res.status(400).json({
-          success: false,
-          message: "A valid 11-digit Transaction ID is required for JazzCash/EasyPaisa.",
-        });
-      }
-
-      // Derive verification_stage + authoritative amount from the order itself.
-      // Customer-supplied amount is ignored — for COD the stage-1 amount must
-      // equal shipping_cost; for prepaid it must equal total_amount.
       const [[order]] = await db.promise().query(
-        `SELECT user_id, payment_method AS order_payment_method, total_amount, shipping_cost
+        `SELECT id, user_id, status, payment_method, payment_status, total_amount, shipping_cost
            FROM orders
-          WHERE id = ?`,
-        [Number(orderId)],
+          WHERE id = ?
+          LIMIT 1`,
+        [orderId],
       );
 
       if (!order) {
-        return res.status(404).json({ success: false, message: "Order not found" });
+        return res.status(404).json({ error: "Order not found" });
       }
 
-      // Ownership: a customer may only submit verification for their own order.
-      const adminPermissions = Array.isArray(req.user.admin_permissions)
-        ? req.user.admin_permissions.map((value) => String(value).trim())
-        : [];
-      const canManagePayments =
-        String(req.user.role || "").toLowerCase() === "admin" &&
-        (String(req.user.admin_role || "").toLowerCase() === "super_admin" ||
-          adminPermissions.includes("manage_payments"));
-      if (order.user_id !== req.user.id && !canManagePayments) {
-        return res.status(403).json({ success: false, message: "You do not have access to this order" });
+      if (!isOrderOwnerOrPaymentAdmin(order, req.user)) {
+        return res.status(403).json({ error: "You do not have access to this order" });
       }
 
-      const isCodOrder = String(order.order_payment_method || "").toLowerCase() === "cod";
-      const verificationStage = isCodOrder ? "advance_shipping" : "full_payment";
-      const enforcedAmount = isCodOrder
-        ? Number(order.shipping_cost)
-        : Number(order.total_amount);
+      const orderStatus = String(order.status || "").toLowerCase();
+      const paymentStatus = String(order.payment_status || "").toLowerCase();
+      const orderMethod = String(order.payment_method || "").toLowerCase();
 
-      if (!Number.isFinite(enforcedAmount) || enforcedAmount <= 0) {
+      if (orderStatus === "cancelled") {
+        return res.status(409).json({ error: "Cannot pay for a cancelled order" });
+      }
+
+      if (!CHECKOUT_PAYMENT_METHODS.has(orderMethod)) {
         return res.status(400).json({
-          success: false,
-          message: isCodOrder
-            ? "Order has no shipping fee configured; cannot create advance verification."
-            : "Order total is invalid; cannot create verification.",
+          error: "This order uses an unsupported payment method for SafePay",
         });
       }
 
-      const connection = await db.promise().getConnection();
-      try {
-        await connection.beginTransaction();
-        const [[existing]] = await connection.query(
-          `SELECT id, status
-             FROM advance_payment_verifications
-            WHERE order_id = ? AND verification_stage = ?
-            FOR UPDATE`,
-          [orderId, verificationStage],
-        );
+      const { stage, amount } = resolveSafepayChargeForOrder(order);
 
-        let verificationId;
-        if (existing) {
-          if (String(existing.status).toLowerCase() !== "rejected") {
-            await connection.rollback();
-            return res.status(409).json({
-              success: false,
-              message: "A verification for this stage is already pending or approved.",
-            });
-          }
-
-          const [updated] = await connection.query(
-            `UPDATE advance_payment_verifications
-                SET customer_name = ?, customer_phone = ?, amount = ?,
-                    payment_method = ?, transaction_id = ?, screenshot_url = ?,
-                    status = 'pending', rejection_reason = NULL,
-                    admin_note = NULL, verified_by = NULL, verified_at = NULL,
-                    created_at = CURRENT_TIMESTAMP
-              WHERE id = ? AND status = 'rejected'`,
-            [
-              customerName,
-              customerPhone,
-              enforcedAmount,
-              paymentMethod,
-              transactionId,
-              screenshotUrl,
-              existing.id,
-            ],
-          );
-          if (updated.affectedRows !== 1) {
-            await connection.rollback();
-            return res.status(409).json({
-              success: false,
-              message: "This verification was changed by another request.",
-            });
-          }
-          verificationId = existing.id;
-        } else {
-          const [inserted] = await connection.query(
-            `INSERT INTO advance_payment_verifications
-             (order_id, customer_name, customer_phone, amount, payment_method,
-              verification_stage, transaction_id, screenshot_url, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-            [
-              orderId,
-              customerName,
-              customerPhone,
-              enforcedAmount,
-              paymentMethod,
-              verificationStage,
-              transactionId,
-              screenshotUrl,
-            ],
-          );
-          verificationId = inserted.insertId;
-        }
-        await connection.commit();
-
-        return res.status(existing ? 200 : 201).json({
-          success: true,
-          message: existing
-            ? "Verification resubmitted successfully"
-            : "Verification submitted successfully",
-          id: verificationId,
-          verification_stage: verificationStage,
-          amount: enforcedAmount,
+      if (
+        (stage === "full_payment" && paymentStatus === "paid") ||
+        (stage === "advance_shipping" &&
+          (paymentStatus === "partial" || paymentStatus === "paid"))
+      ) {
+        return res.status(409).json({
+          error: "Payment for this order has already been completed.",
         });
-      } catch (error) {
-        await connection.rollback();
-        throw error;
-      } finally {
-        connection.release();
       }
-    } catch (error) {
-      if (error && (error.code === "ER_DUP_ENTRY" || error.errno === 1062)) {
-        // Distinguish duplicate-stage (uq_apv_order_stage) from duplicate-TID
-        // (uq_apv_transaction_id) using the constraint name in sqlMessage.
-        const sqlMsg = String(error.sqlMessage || "");
-        if (sqlMsg.includes("uq_apv_order_stage")) {
-          return res.status(409).json({
-            success: false,
-            message: "A verification for this stage has already been submitted for this order.",
-          });
-        }
+
+      if (!Number.isFinite(amount) || amount <= 0) {
         return res.status(400).json({
-          success: false,
-          message: "This Transaction ID has already been verified or used for another order.",
+          error:
+            stage === "advance_shipping"
+              ? "No delivery advance fee is due for this order."
+              : "Order total is invalid for SafePay checkout.",
         });
       }
-      console.error("[payments] submit-verification failed", {
-        code: error?.code,
-        errno: error?.errno,
-        sqlMessage: error?.sqlMessage,
-        message: error?.message,
+
+      const frontendBase = getFrontendBaseUrl(req);
+      const redirectUrl = `${frontendBase}/payment/safepay/result?order_id=${order.id}`;
+      const cancelUrl = `${frontendBase}/payment/safepay/cancel?order_id=${order.id}`;
+
+      const session = await createSafepaySession({
+        amountPkr: amount,
+        orderId: order.id,
+        stage,
+        redirectUrl,
+        cancelUrl,
       });
-      return res
-        .status(500)
-        .json({ success: false, message: "Failed to submit payment verification" });
+
+      const payload = JSON.stringify({
+        gateway: "safepay",
+        tracker: session.tracker,
+        amount_minor: session.amountMinor,
+        currency: session.currency,
+        environment: session.environment,
+        stage,
+        source: "create_session",
+      });
+
+      await db.promise().query(
+        `UPDATE orders SET transaction_id = ?, updated_at = NOW() WHERE id = ?`,
+        [session.tracker, order.id],
+      );
+
+      await db.promise().query(
+        `INSERT INTO payment_transactions
+           (order_id, user_id, transaction_type, provider, amount, currency, status,
+            gateway_reference, external_id, payload)
+         VALUES (?, ?, 'payment', 'safepay', ?, ?, 'pending', ?, ?, ?)`,
+        [
+          order.id,
+          order.user_id || req.user.id,
+          session.amountPkr,
+          session.currency,
+          session.tracker,
+          session.tracker,
+          payload,
+        ],
+      );
+
+      return res.json({
+        success: true,
+        order_id: order.id,
+        order_number: `ORD-${String(order.id).padStart(6, "0")}`,
+        tracker: session.tracker,
+        checkout_url: session.checkoutUrl,
+        stage,
+        amount: session.amountPkr,
+        currency: session.currency,
+        environment: session.environment,
+      });
+    } catch (error) {
+      if (error?.code === "SAFEPAY_NOT_CONFIGURED") {
+        return res.status(503).json({ error: error.message });
+      }
+      if (error?.code === "SAFEPAY_TIMEOUT") {
+        return res.status(504).json({ error: error.message });
+      }
+      console.error("[safepay] create-session failed:", error?.message || error);
+      return res.status(502).json({
+        error: error?.message || "Failed to initialize SafePay checkout session",
+      });
     }
   },
 );
+
+// POST /api/payments/safepay/verify
+router.post(
+  "/safepay/verify",
+  authenticateToken,
+  restrictBody("order_id", "tracker"),
+  async (req, res) => {
+    try {
+      const orderId = Number.parseInt(req.body?.order_id, 10);
+      const requestedTracker = String(req.body?.tracker || "").trim();
+
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: "A valid order_id is required" });
+      }
+
+      const [[order]] = await db.promise().query(
+        `SELECT id, user_id, status, payment_method, payment_status,
+                total_amount, shipping_cost, transaction_id, city, customer_email
+           FROM orders
+          WHERE id = ?
+          LIMIT 1`,
+        [orderId],
+      );
+
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      if (!isOrderOwnerOrPaymentAdmin(order, req.user)) {
+        return res.status(403).json({ error: "You do not have access to this order" });
+      }
+
+      const tracker = requestedTracker || String(order.transaction_id || "").trim();
+      if (!tracker) {
+        return res.status(400).json({
+          error: "Missing SafePay payment tracker for this order.",
+        });
+      }
+
+      // Verify the tracker belongs to this order (prevents cross-order replay)
+      const [[knownTx]] = await db.promise().query(
+        `SELECT id
+           FROM payment_transactions
+          WHERE order_id = ? AND provider = 'safepay' AND gateway_reference = ?
+          LIMIT 1`,
+        [order.id, tracker],
+      );
+      if (!knownTx && String(order.transaction_id || "").trim() !== tracker) {
+        return res.status(400).json({
+          error: "This SafePay tracker does not belong to the specified order.",
+        });
+      }
+
+      const trackerStatus = await fetchSafepayTrackerStatus(tracker);
+
+      if (!trackerStatus.isPaid) {
+        return res.status(200).json({
+          success: false,
+          verified: false,
+          state: trackerStatus.state || "PENDING",
+          order_id: order.id,
+          order_number: `ORD-${String(order.id).padStart(6, "0")}`,
+          payment_status: order.payment_status,
+          message: trackerStatus.isFailed
+            ? "SafePay payment was cancelled or failed."
+            : "Payment is still being confirmed by SafePay. Please check again shortly.",
+        });
+      }
+
+      const settled = await settleSafepayPayment({
+        orderId: order.id,
+        tracker,
+        trackerStatus,
+        source: "verify",
+      });
+
+      return res.json({
+        success: true,
+        verified: true,
+        already_settled: settled.alreadySettled,
+        order_id: order.id,
+        order_number: `ORD-${String(order.id).padStart(6, "0")}`,
+        order_status: settled.orderStatus,
+        payment_status: settled.paymentStatus,
+        payment_method: order.payment_method,
+        stage: settled.stage,
+        amount_paid: settled.amount,
+        total_amount: Number(order.total_amount) || 0,
+        shipping_cost: Number(order.shipping_cost) || 0,
+        remaining_cod:
+          settled.stage === "advance_shipping"
+            ? Math.max(0, (Number(order.total_amount) || 0) - (Number(order.shipping_cost) || 0))
+            : 0,
+        city: order.city || "",
+        customer_email: order.customer_email || "",
+        tracker,
+      });
+    } catch (error) {
+      const status = error?.statusCode || (error?.code === "SAFEPAY_NOT_CONFIGURED" ? 503 : 500);
+      return res.status(status).json({
+        error: error?.message || "Failed to verify SafePay payment",
+      });
+    }
+  },
+);
+
+// POST /api/payments/safepay/cancel
+router.post(
+  "/safepay/cancel",
+  authenticateToken,
+  restrictBody("order_id", "tracker"),
+  async (req, res) => {
+    try {
+      const orderId = Number.parseInt(req.body?.order_id, 10);
+      const tracker = String(req.body?.tracker || "").trim();
+
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: "A valid order_id is required" });
+      }
+
+      const [[order]] = await db.promise().query(
+        `SELECT id, user_id, payment_status, transaction_id
+           FROM orders
+          WHERE id = ?
+          LIMIT 1`,
+        [orderId],
+      );
+
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      if (!isOrderOwnerOrPaymentAdmin(order, req.user)) {
+        return res.status(403).json({ error: "You do not have access to this order" });
+      }
+
+      const effectiveTracker = tracker || String(order.transaction_id || "").trim();
+      if (effectiveTracker) {
+        await db.promise().query(
+          `UPDATE payment_transactions
+              SET status = 'cancelled', updated_at = NOW()
+            WHERE order_id = ? AND provider = 'safepay' AND gateway_reference = ? AND status = 'pending'`,
+          [order.id, effectiveTracker],
+        );
+      }
+
+      return res.json({
+        success: true,
+        order_id: order.id,
+        order_number: `ORD-${String(order.id).padStart(6, "0")}`,
+        message: "SafePay payment session cancelled. You can retry payment anytime before expiry.",
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: error?.message || "Failed to record cancelled payment",
+      });
+    }
+  },
+);
+
+// Server-to-server SafePay Webhook Handler — mounted in index.js with express.raw()
+// BEFORE express.json() and BEFORE CSRF so raw-body HMAC verification works cleanly.
+const safepayWebhookHandler = async (req, res) => {
+  try {
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(
+          typeof req.body === "string" ? req.body : JSON.stringify(req.body || {}),
+          "utf8",
+        );
+
+    let event = null;
+    try {
+      event = JSON.parse(rawBody.toString("utf8") || "{}");
+    } catch {
+      return res.status(400).json({ error: "Invalid JSON payload" });
+    }
+
+    const data = event?.data || event || {};
+    const tracker = String(
+      data?.tracker?.token ||
+        data?.tracker ||
+        data?.notification?.tracker ||
+        event?.tracker ||
+        "",
+    ).trim();
+
+    const sigCheck = verifySafepayWebhookSignature({
+      rawBody,
+      parsedBody: event,
+      signature: req.headers["x-sfpy-signature"],
+      timestamp: req.headers["x-sfpy-timestamp"],
+      tracker,
+    });
+
+    if (!sigCheck.valid) {
+      return res.status(401).json({ error: sigCheck.reason || "Invalid webhook signature" });
+    }
+
+    const eventType = String(
+      req.headers["x-sfpy-event-type"] ||
+        event?.type ||
+        event?.event_type ||
+        data?.state ||
+        "",
+    )
+      .trim()
+      .toLowerCase();
+
+    if (!tracker) {
+      return res.status(200).json({ received: true, ignored: "No tracker in payload" });
+    }
+
+    const [[txRow]] = await db.promise().query(
+      `SELECT order_id
+         FROM payment_transactions
+        WHERE provider = 'safepay' AND gateway_reference = ?
+        ORDER BY id DESC
+        LIMIT 1`,
+      [tracker],
+    );
+
+    let orderId = txRow?.order_id || null;
+    if (!orderId) {
+      const metadataOrderId = Number.parseInt(
+        data?.metadata?.order_id || data?.tracker?.metadata?.order_id || "",
+        10,
+      );
+      if (Number.isInteger(metadataOrderId) && metadataOrderId > 0) {
+        orderId = metadataOrderId;
+      }
+    }
+    if (!orderId) {
+      const [[orderRow]] = await db.promise().query(
+        `SELECT id FROM orders WHERE transaction_id = ? LIMIT 1`,
+        [tracker],
+      );
+      orderId = orderRow?.id || null;
+    }
+
+    if (!orderId) {
+      return res.status(200).json({ received: true, ignored: "Order not found for tracker" });
+    }
+
+    const isSuccessEvent =
+      eventType.includes("succeed") ||
+      eventType.includes("completed") ||
+      eventType.includes("tracker_ended") ||
+      eventType === "payment.paid";
+
+    const isFailureEvent =
+      eventType.includes("fail") ||
+      eventType.includes("cancel") ||
+      eventType.includes("expire");
+
+    if (isSuccessEvent) {
+      // Authoritatively verify tracker state with SafePay API when credentials are present
+      let trackerStatus = {
+        tracker,
+        state: "TRACKER_ENDED",
+        isPaid: true,
+        amountMinor: Number(data?.amount || data?.tracker?.amount || 0) || 0,
+        currency: String(data?.currency || getSafepayConfig().currency || "PKR").toUpperCase(),
+      };
+
+      if (getSafepayConfig().configured) {
+        const fetched = await fetchSafepayTrackerStatus(tracker);
+        if (!fetched.isPaid) {
+          return res.status(200).json({
+            received: true,
+            ignored: `Tracker state is ${fetched.state}`,
+          });
+        }
+        trackerStatus = fetched;
+      }
+
+      await settleSafepayPayment({
+        orderId,
+        tracker,
+        trackerStatus,
+        source: "webhook",
+      });
+    } else if (isFailureEvent) {
+      await db.promise().query(
+        `UPDATE payment_transactions
+            SET status = ?, updated_at = NOW()
+          WHERE order_id = ? AND provider = 'safepay' AND gateway_reference = ? AND status = 'pending'`,
+        [eventType.includes("cancel") ? "cancelled" : "failed", orderId, tracker],
+      );
+    }
+
+    return res.status(200).json({ received: true });
+  } catch (error) {
+    console.error("[safepay] webhook error:", error?.message || error);
+    return res.status(500).json({ error: "Webhook processing failed" });
+  }
+};
+
+router.safepayWebhookHandler = safepayWebhookHandler;
 
 module.exports = router;

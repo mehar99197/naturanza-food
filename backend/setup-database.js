@@ -10,6 +10,7 @@ const fs = require("fs");
 const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 const { ensureProductionSchema } = require("./utils/schemaCompatibility");
+const { splitSqlStatements } = require("./run-migration");
 
 const config = {
     host: process.env.DB_HOST || "localhost",
@@ -19,25 +20,18 @@ const config = {
     database: process.env.DB_NAME || "naturanza_food",
 };
 
-if (!config.user || !config.password) {
-    console.error("DB_USER and DB_PASSWORD must be set in .env");
+if (!config.user) {
+    console.error("DB_USER must be set in .env");
     process.exit(1);
 }
 
 const seedRequestedExplicitly = process.argv.includes("--with-seed");
 const shouldSeed = seedRequestedExplicitly || process.argv.length <= 2;
 
-const parseSqlStatements = (sqlText) => {
-    const withoutLineComments = sqlText
-        .split("\n")
-        .filter((line) => !line.trim().startsWith("--"))
-        .join("\n");
-
-    return withoutLineComments
-        .split(";")
-        .map((statement) => statement.trim())
-        .filter(Boolean);
-};
+const parseSqlStatements = (sqlText) =>
+    splitSqlStatements(sqlText).filter(
+        (statement) => !/^(CREATE\s+DATABASE|USE)\b/i.test(statement.trim()),
+    );
 
 const runSqlFile = async (connection, filePath, options = {}) => {
     const sql = fs.readFileSync(filePath, "utf8");
@@ -91,7 +85,7 @@ async function setupDatabase() {
         await connection.query(
             `CREATE DATABASE IF NOT EXISTS \`${config.database}\`
              CHARACTER SET utf8mb4
-             COLLATE utf8mb4_0900_ai_ci`,
+             COLLATE utf8mb4_unicode_ci`,
         );
 
         await connection.changeUser({ database: config.database });

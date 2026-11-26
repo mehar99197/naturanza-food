@@ -8,7 +8,7 @@ import {
   EyeOff,
   Lock,
 } from "lucide-react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { useAuth } from "@/context/AuthContext";
 import LeftPanel from "@/components/auth/LeftPanel";
 import { NoIndexSEO } from "@/components/SEO";
@@ -59,7 +59,7 @@ const ResetPassword = () => {
   const {
     register,
     handleSubmit,
-    watch,
+    control,
     formState: { errors, isSubmitting },
   } = useForm({
     mode: "onBlur",
@@ -74,8 +74,8 @@ const ResetPassword = () => {
   const [generalError, setGeneralError] = useState("");
   const [success, setSuccess] = useState(false);
 
-  const passwordValue = watch("password", "");
-  const confirmPasswordValue = watch("confirmPassword", "");
+  const passwordValue = useWatch({ control, name: "password", defaultValue: "" });
+  const confirmPasswordValue = useWatch({ control, name: "confirmPassword", defaultValue: "" });
   const strength = getStrength(passwordValue);
 
   useEffect(() => {

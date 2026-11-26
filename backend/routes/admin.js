@@ -3,7 +3,7 @@ const express = require("express");
 // off req.path, so route matching must not accept casings that table won't see.
 const router = express.Router({ caseSensitive: true });
 const bcrypt = require("bcryptjs");
-const { db } = require("../config/db");
+const { db, withTransaction } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
 const requirePermission = require("../middleware/requirePermission");
 const requireSuperAdmin = require("../middleware/requireSuperAdmin");
@@ -20,7 +20,8 @@ const { getAdminSettings, updateAdminSettings } = require("../utils/adminSetting
 const { getAboutContent, updateAboutContent } = require("../utils/aboutContent");
 const { getClientIp } = require("../utils/clientIp");
 const { getTrustedClientIp } = require("../utils/rateLimitKey");
-const { logAdminAction } = require("../utils/adminHelpers");
+const { logAdminAction, generateSecurePassword } = require("../utils/adminHelpers");
+const { escapeHtml } = require("../utils/htmlEscape");
 
 // Admin records are managed only through /api/admin-management. Anything on the
 // Customers screen operates on customer rows, never on an admin row.
@@ -68,7 +69,7 @@ const adminLoginLocationCache = new Map();
 // utils/clientIp.js.
 // Use the same proxy-trusted source for both the allowlist decision and the
 // stored login IP. X-Forwarded-For is display-only and must not control access.
-const getRequestIp = (req) => getTrustedClientIp(req) || getClientIp(req);
+const getRequestIp = (req) => getTrustedClientIp(req);
 
 const isPrivateOrLocalIp = (ipAddress) => {
   const ip = String(ipAddress || "").trim().toLowerCase();
@@ -333,17 +334,17 @@ const getBearerToken = (req) => {
 };
 
 const ALLOWED_PAYMENT_METHOD_CODES = new Set([
+  "safepay",
   "cod",
-  "card",
-  "online",
-  "easypaisa",
-  "jazzcash",
-  "bank",
 ]);
 const ADMIN_ACCOUNT_ROLES = new Set(["admin", "super_admin", "staff_admin", "moderator"]);
 const isAdminRecord = (user) =>
   ADMIN_ACCOUNT_ROLES.has(String(user?.role || "").trim().toLowerCase()) ||
   ADMIN_ACCOUNT_ROLES.has(String(user?.admin_role || "").trim().toLowerCase());
+
+const ADMIN_FORGOT_PASSWORD_COOLDOWN_MS = 90 * 1000;
+const adminForgotPasswordCooldowns = new Map();
+const SIMPLE_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Shared login handler — parameterized so the super-admin route and the
 // staff-admin route can enforce their own admin_role allowlist without
@@ -353,6 +354,12 @@ const isAdminRecord = (user) =>
 // gateLabel         : string         used in failure-reason logs ('super_admin' | 'staff')
 async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
   const connection = await db.promise().getConnection();
+  let connectionReleased = false;
+  const releaseConnection = () => {
+    if (connectionReleased) return;
+    connectionReleased = true;
+    connection.release();
+  };
 
   try {
     const { email, password } = req.body;
@@ -365,7 +372,6 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         status: "failed",
         failureReason: "Missing credentials",
       });
-      connection.release();
       return res.status(400).json({
         success: false,
         error: "Email and password are required",
@@ -384,7 +390,6 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         status: "failed",
         failureReason: "Email not found",
       });
-      connection.release();
       return res.status(401).json({
         success: false,
         error: "Invalid email or password",
@@ -392,6 +397,45 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
     }
 
     const user = results[0];
+
+    const lockStatus = await checkAccountLockout(connection, user.id, true);
+    if (lockStatus.locked) {
+      // Return the same generic error as a non-existent email / wrong password
+      // so an attacker cannot use the lockout response to enumerate accounts.
+      return res.status(401).json({
+        success: false,
+        error: "Invalid email or password",
+      });
+    }
+
+    // Verify password BEFORE exposing disabled/role/gate/IP status so an
+    // unauthenticated attacker cannot enumerate admin accounts or roles.
+    const isValidPassword = Boolean(user.password) && (await bcrypt.compare(password, user.password));
+    if (!isValidPassword) {
+      await recordFailedLoginAtomic(connection, user.id, user.email, true);
+
+      void recordAdminLoginHistorySafely({
+        req,
+        userId: user.id,
+        attemptedEmail: user.email,
+        status: "failed",
+        failureReason: "Invalid password",
+      });
+      if (isAdminRecord(user)) {
+        sendAdminLoginAlertSafely({
+          req,
+          user,
+          status: "blocked",
+          reason: "Invalid password",
+        });
+      }
+
+      // Uniform generic response prevents account enumeration via lockout.
+      return res.status(401).json({
+        success: false,
+        error: "Invalid email or password",
+      });
+    }
 
     if (!user.is_active) {
       void recordAdminLoginHistorySafely({
@@ -401,21 +445,9 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         status: "failed",
         failureReason: "Account disabled",
       });
-      connection.release();
       return res.status(403).json({
         success: false,
         error: "Account is disabled. Contact super admin.",
-      });
-    }
-
-    const lockStatus = await checkAccountLockout(connection, user.id, true);
-    if (lockStatus.locked) {
-      // Return the same generic error as a non-existent email / wrong password
-      // so an attacker cannot use the lockout response to enumerate accounts.
-      connection.release();
-      return res.status(401).json({
-        success: false,
-        error: "Invalid email or password",
       });
     }
 
@@ -427,7 +459,6 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         status: "failed",
         failureReason: "Not an admin",
       });
-      connection.release();
       return res.status(403).json({
         success: false,
         error: "Access denied. Admin privileges required.",
@@ -446,7 +477,6 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         status: "failed",
         failureReason: `Wrong gate: ${user.admin_role || 'none'} not allowed via ${gateLabel}`,
       });
-      connection.release();
       // Generic 403 — don't leak which gate the user belongs to.
       return res.status(403).json({
         success: false,
@@ -463,7 +493,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       let ipAllowed = false;
       try {
         ipAllowed = await isSuperAdminIpAllowed({
-          ipAddress: getRequestIp(req),
+          ipAddress: getTrustedClientIp(req),
           database: connection,
         });
       } catch (allowlistError) {
@@ -484,39 +514,11 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
           status: "blocked",
           reason: "IP address is not in the super-admin allowlist",
         });
-        connection.release();
         return res.status(403).json({
           success: false,
           error: "Access denied: this network is not permitted for super admin sign-in.",
         });
       }
-    }
-
-    const isValidPassword = await bcrypt.compare(password, user.password);
-    if (!isValidPassword) {
-      await recordFailedLoginAtomic(connection, user.id, user.email, true);
-
-      void recordAdminLoginHistorySafely({
-        req,
-        userId: user.id,
-        attemptedEmail: user.email,
-        status: "failed",
-        failureReason: "Invalid password",
-      });
-      sendAdminLoginAlertSafely({
-        req,
-        user,
-        status: "blocked",
-        reason: "Invalid password",
-      });
-
-      connection.release();
-
-      // Uniform generic response prevents account enumeration via lockout.
-      return res.status(401).json({
-        success: false,
-        error: "Invalid email or password",
-      });
     }
 
     // Second factor: verified after the password but before any session or
@@ -525,7 +527,6 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       const otpCode = String(req.body?.otpCode || "").trim();
 
       if (!otpCode) {
-        connection.release();
         // HTTP 200 + flag so the login page can switch to the code step
         // without axios treating the response as a transport failure.
         return res.json({
@@ -548,6 +549,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       }
 
       if (!twoFactorOk) {
+        await recordFailedLoginAtomic(connection, user.id, user.email, true);
         void recordAdminLoginHistorySafely({
           req,
           userId: user.id,
@@ -561,7 +563,6 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
           status: "blocked",
           reason: "Invalid two-factor authentication code",
         });
-        connection.release();
         return res.status(401).json({
           success: false,
           requiresTwoFactor: true,
@@ -571,7 +572,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
     }
 
     await resetLoginFailuresAtomic(connection, user.id);
-    connection.release();
+    releaseConnection();
 
     const accessToken = issueAccessToken(user);
     const token = accessToken.token;
@@ -644,7 +645,6 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       },
     });
   } catch (error) {
-    try { connection.release(); } catch {}
     void recordAdminLoginHistorySafely({
       req,
       attemptedEmail: String(req.body?.email || "")
@@ -657,6 +657,8 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       success: false,
       error: "Login failed due to a server error.",
     });
+  } finally {
+    releaseConnection();
   }
 }
 
@@ -691,7 +693,7 @@ router.get("/verify", authenticateToken, isAdmin, (req, res) => {
 
 // Admin Logout - Requires authentication
 router.post("/logout", authenticateToken, isAdmin, restrictBody(), (req, res) => {
-  const token = getBearerToken(req);
+  const token = req.token || getBearerToken(req) || req.cookies?.adminAccessToken || null;
 
   const finalizeLogout = () => {
     clearAccessCookie(res, req);
@@ -778,32 +780,45 @@ router.post("/forgot-password", restrictBody('email'), async (req, res) => {
       return res.json(genericSuccess);
     }
 
-    const tokenData = await createPasswordResetToken(
-      db.promise(),
-      admin.id,
-      admin.email,
-    );
-
-    if (!tokenData || !tokenData.token) {
-      return res.status(500).json({
-        success: false,
-        error: "Failed to generate password reset link. Please try again.",
-      });
+    // Per-email cooldown prevents reset-email bombing on an admin address.
+    const now = Date.now();
+    const lastSentAt = adminForgotPasswordCooldowns.get(normalizedEmail) || 0;
+    if (now - lastSentAt < ADMIN_FORGOT_PASSWORD_COOLDOWN_MS) {
+      return res.json(genericSuccess);
     }
-
-    const emailResult = await sendPasswordResetEmail(
-      admin.email,
-      admin.name,
-      tokenData.token,
-      true,
-    );
-
-    if (!emailResult.success) {
-      return res.status(500).json({
-        success: false,
-        error: "Failed to send password reset email. Please try again later.",
-      });
+    if (adminForgotPasswordCooldowns.size > 2000) {
+      for (const [key, ts] of adminForgotPasswordCooldowns.entries()) {
+        if (now - ts >= ADMIN_FORGOT_PASSWORD_COOLDOWN_MS) {
+          adminForgotPasswordCooldowns.delete(key);
+        }
+      }
     }
+    adminForgotPasswordCooldowns.set(normalizedEmail, now);
+
+    // Dispatch token creation & SMTP asynchronously so response timing and
+    // transient SMTP failures never act as an account-enumeration oracle.
+    setImmediate(() => {
+      (async () => {
+        try {
+          const tokenData = await createPasswordResetToken(
+            db.promise(),
+            admin.id,
+            admin.email,
+          );
+          if (!tokenData || !tokenData.token) {
+            return;
+          }
+          await sendPasswordResetEmail(
+            admin.email,
+            admin.name,
+            tokenData.token,
+            true,
+          );
+        } catch (dispatchError) {
+          console.error("[admin] forgot-password email dispatch failed:", dispatchError?.message);
+        }
+      })();
+    });
 
     return res.json(genericSuccess);
   } catch (error) {
@@ -873,6 +888,9 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
       connectionReleased = true;
       connection.release();
     };
+    let userRow = null;
+    let userAdminRole = "";
+    let inTransaction = false;
 
     try {
       await ensurePasswordHistoryTable(connection);
@@ -882,8 +900,8 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
         [tokenValidation.userId]
       );
 
-      const userRow = users[0];
-      const userAdminRole = String(userRow?.admin_role || "").toLowerCase();
+      userRow = users[0] || null;
+      userAdminRole = String(userRow?.admin_role || "").toLowerCase();
       // Match the forgot-password gate: any admin record (role OR admin_role in
       // the admin set) may complete a reset. This also lets legacy rows that
       // carry only an admin_role value finish a reset they were emailed.
@@ -897,8 +915,8 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
         });
       }
 
-      if (users[0].password) {
-        const isSamePassword = await bcrypt.compare(password, users[0].password);
+      if (userRow.password) {
+        const isSamePassword = await bcrypt.compare(password, userRow.password);
         if (isSamePassword) {
           return res.status(400).json({
             success: false,
@@ -915,20 +933,38 @@ router.post("/reset-password", restrictBody('token', 'password', 'confirmPasswor
         });
       }
 
+      const hashedPassword = await bcrypt.hash(password, 12);
+
+      await connection.beginTransaction();
+      inTransaction = true;
+
       if (!(await claimPasswordResetToken(connection, tokenValidation.tokenId))) {
+        await connection.rollback();
+        inTransaction = false;
         return res.status(400).json({
+          success: false,
           error: "This reset link has already been used or expired.",
         });
       }
 
-      const hashedPassword = await bcrypt.hash(password, 12);
-
       await connection.query(
-        "UPDATE users SET password = ?, updated_at = NOW() WHERE id = ?",
+        `UPDATE users
+            SET password = ?,
+                admin_failed_login_attempts = 0,
+                admin_locked_until = NULL,
+                updated_at = NOW()
+          WHERE id = ?`,
         [hashedPassword, tokenValidation.userId]
       );
 
       await addPasswordToHistory(connection, tokenValidation.userId, password);
+      await connection.commit();
+      inTransaction = false;
+    } catch (txError) {
+      if (inTransaction) {
+        await connection.rollback().catch(() => {});
+      }
+      throw txError;
     } finally {
       releaseConnection();
     }
@@ -983,7 +1019,7 @@ const ADMIN_PERMISSION_RULES = [
   { prefix: "/coupons", permission: "manage_coupons" },
   { prefix: "/reviews", permission: "manage_reviews" },
   { prefix: "/users", permission: "manage_customers" },
-  { prefix: "/reports", permission: "view_reports" },
+  { prefix: "/reports", permission: "view_reports", altPermissions: ["view_analytics"] },
   { prefix: "/inventory", permission: "manage_products" },
   { prefix: "/payment-methods", permission: "manage_payments" },
   { prefix: "/returns", permission: "manage_returns" },
@@ -1022,6 +1058,13 @@ const requireAdminRoutePermission = (req, res, next) => {
     return next();
   }
 
+  if (Array.isArray(rule.altPermissions) && Array.isArray(req.user?.admin_permissions)) {
+    const granted = req.user.admin_permissions.map((value) => String(value).trim());
+    if (rule.altPermissions.some((permission) => granted.includes(permission))) {
+      return next();
+    }
+  }
+
   return requirePermission(rule.permission)(req, res, next);
 };
 
@@ -1030,75 +1073,117 @@ router.use(requireAdminRoutePermission);
 // Dashboard statistics
 router.get("/dashboard/stats", async (req, res) => {
   try {
-    const [[userStats]] = await db.promise().query(
-      `SELECT
-                COUNT(*) AS totalUsers,
-                SUM(CASE WHEN is_active = TRUE THEN 1 ELSE 0 END) AS activeUsers
-             FROM users
-             WHERE role = 'customer'`,
+    const isSuper = isSuperAdminUser(req.user);
+    const permissions = new Set(
+      Array.isArray(req.user?.admin_permissions)
+        ? req.user.admin_permissions.map((value) => String(value).trim())
+        : [],
     );
 
-    const [[productStats]] = await db.promise().query(
-      `SELECT
-                COUNT(*) AS totalProducts,
-                SUM(CASE WHEN stock_quantity < 10 THEN 1 ELSE 0 END) AS lowStockProducts
-             FROM products
-             WHERE deleted_at IS NULL`,
-    );
+    const canUsers = isSuper || permissions.has("manage_customers");
+    const canProducts = isSuper || permissions.has("manage_products");
+    const canOrders =
+      isSuper ||
+      permissions.has("manage_orders") ||
+      permissions.has("manage_shipping") ||
+      permissions.has("view_reports") ||
+      permissions.has("view_analytics");
+    const canRevenue =
+      isSuper ||
+      permissions.has("view_reports") ||
+      permissions.has("view_analytics") ||
+      permissions.has("manage_payments") ||
+      permissions.has("manage_orders");
+    const canContacts = isSuper || permissions.has("manage_messages");
+    const canReturns = isSuper || permissions.has("manage_returns");
 
-    const [[orderStats]] = await db.promise().query(
-      `SELECT
-                COUNT(*) AS totalOrders,
-                SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END) AS totalRevenue,
-                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pendingOrders,
-                SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processingOrders,
-                SUM(CASE WHEN status = 'shipped' THEN 1 ELSE 0 END) AS shippedOrders,
-                SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) AS deliveredOrders,
-                SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelledOrders
-              FROM orders`,
-    );
+    let userStats = null;
+    if (canUsers) {
+      [[userStats]] = await db.promise().query(
+        `SELECT
+                  COUNT(*) AS totalUsers,
+                  SUM(CASE WHEN is_active = TRUE THEN 1 ELSE 0 END) AS activeUsers
+               FROM users
+               WHERE role = 'customer'`,
+      );
+    }
 
-    const [[contactStats]] = await db
-      .promise()
-      .query(
-        'SELECT COUNT(*) AS newContacts FROM contacts WHERE status = "new"',
+    let productStats = null;
+    if (canProducts) {
+      [[productStats]] = await db.promise().query(
+        `SELECT
+                  COUNT(*) AS totalProducts,
+                  SUM(CASE WHEN stock_quantity < 10 THEN 1 ELSE 0 END) AS lowStockProducts
+               FROM products
+               WHERE deleted_at IS NULL`,
+      );
+    }
+
+    let orderStats = null;
+    if (canOrders || canRevenue) {
+      [[orderStats]] = await db.promise().query(
+        `SELECT
+                  COUNT(*) AS totalOrders,
+                  SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END) AS totalRevenue,
+                  SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pendingOrders,
+                  SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) AS confirmedOrders,
+                  SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processingOrders,
+                  SUM(CASE WHEN status = 'shipped' THEN 1 ELSE 0 END) AS shippedOrders,
+                  SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) AS deliveredOrders,
+                  SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelledOrders
+                FROM orders`,
+      );
+    }
+
+    let contactStats = null;
+    if (canContacts) {
+      [[contactStats]] = await db
+        .promise()
+        .query(
+          'SELECT COUNT(*) AS newContacts FROM contacts WHERE status = "new"',
+        );
+    }
+
+    let returnStats = null;
+    let refundStats = null;
+    if (canReturns) {
+      [[returnStats]] = await db.promise().query(
+        `SELECT
+                  COUNT(*) AS totalReturns,
+                  SUM(CASE WHEN status = 'requested' THEN 1 ELSE 0 END) AS pendingReturns,
+                  SUM(CASE WHEN status = 'refunded' THEN 1 ELSE 0 END) AS refundedReturns
+               FROM returns_requests`,
       );
 
-    const [[returnStats]] = await db.promise().query(
-      `SELECT
-                COUNT(*) AS totalReturns,
-                SUM(CASE WHEN status = 'requested' THEN 1 ELSE 0 END) AS pendingReturns,
-                SUM(CASE WHEN status = 'refunded' THEN 1 ELSE 0 END) AS refundedReturns
-             FROM returns_requests`,
-    );
-
-    const [[refundStats]] = await db.promise().query(
-      `SELECT
-                COUNT(*) AS totalRefundTransactions,
-                SUM(CASE WHEN status = 'processed' THEN amount ELSE 0 END) AS totalRefundAmount
-             FROM refund_transactions`,
-    );
+      [[refundStats]] = await db.promise().query(
+        `SELECT
+                  COUNT(*) AS totalRefundTransactions,
+                  SUM(CASE WHEN status = 'processed' THEN amount ELSE 0 END) AS totalRefundAmount
+               FROM refund_transactions`,
+      );
+    }
 
     res.json({
-      totalUsers: Number(userStats?.totalUsers || 0),
-      activeUsers: Number(userStats?.activeUsers || 0),
-      totalProducts: Number(productStats?.totalProducts || 0),
-      lowStockProducts: Number(productStats?.lowStockProducts || 0),
-      totalOrders: Number(orderStats?.totalOrders || 0),
-      totalRevenue: Number(orderStats?.totalRevenue || 0),
-      pendingOrders: Number(orderStats?.pendingOrders || 0),
-      processingOrders: Number(orderStats?.processingOrders || 0),
-      shippedOrders: Number(orderStats?.shippedOrders || 0),
-      deliveredOrders: Number(orderStats?.deliveredOrders || 0),
-      cancelledOrders: Number(orderStats?.cancelledOrders || 0),
-      newContacts: Number(contactStats?.newContacts || 0),
-      totalReturns: Number(returnStats?.totalReturns || 0),
-      pendingReturns: Number(returnStats?.pendingReturns || 0),
-      refundedReturns: Number(returnStats?.refundedReturns || 0),
-      totalRefundTransactions: Number(
-        refundStats?.totalRefundTransactions || 0,
-      ),
-      totalRefundAmount: Number(refundStats?.totalRefundAmount || 0),
+      totalUsers: canUsers ? Number(userStats?.totalUsers || 0) : 0,
+      activeUsers: canUsers ? Number(userStats?.activeUsers || 0) : 0,
+      totalProducts: canProducts ? Number(productStats?.totalProducts || 0) : 0,
+      lowStockProducts: canProducts ? Number(productStats?.lowStockProducts || 0) : 0,
+      totalOrders: canOrders ? Number(orderStats?.totalOrders || 0) : 0,
+      totalRevenue: canRevenue ? Number(orderStats?.totalRevenue || 0) : 0,
+      pendingOrders: canOrders ? Number(orderStats?.pendingOrders || 0) : 0,
+      confirmedOrders: canOrders ? Number(orderStats?.confirmedOrders || 0) : 0,
+      processingOrders: canOrders ? Number(orderStats?.processingOrders || 0) : 0,
+      shippedOrders: canOrders ? Number(orderStats?.shippedOrders || 0) : 0,
+      deliveredOrders: canOrders ? Number(orderStats?.deliveredOrders || 0) : 0,
+      cancelledOrders: canOrders ? Number(orderStats?.cancelledOrders || 0) : 0,
+      newContacts: canContacts ? Number(contactStats?.newContacts || 0) : 0,
+      totalReturns: canReturns ? Number(returnStats?.totalReturns || 0) : 0,
+      pendingReturns: canReturns ? Number(returnStats?.pendingReturns || 0) : 0,
+      refundedReturns: canReturns ? Number(returnStats?.refundedReturns || 0) : 0,
+      totalRefundTransactions: canReturns
+        ? Number(refundStats?.totalRefundTransactions || 0)
+        : 0,
+      totalRefundAmount: canReturns ? Number(refundStats?.totalRefundAmount || 0) : 0,
     });
   } catch (error) {
     res.status(500).json({ error: "Database error" });
@@ -1108,7 +1193,24 @@ router.get("/dashboard/stats", async (req, res) => {
 // Recent orders
 router.get("/dashboard/recent-orders", async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+    const isSuper = isSuperAdminUser(req.user);
+    const permissions = new Set(
+      Array.isArray(req.user?.admin_permissions)
+        ? req.user.admin_permissions.map((value) => String(value).trim())
+        : [],
+    );
+    const canViewRecentOrders =
+      isSuper ||
+      permissions.has("manage_orders") ||
+      permissions.has("manage_shipping") ||
+      permissions.has("manage_payments") ||
+      permissions.has("view_reports") ||
+      permissions.has("view_analytics");
+    if (!canViewRecentOrders) {
+      return res.json([]);
+    }
+
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
     const [results] = await db.promise().query(`
       SELECT o.*, u.name as customer_name, u.email as customer_email
       FROM orders o
@@ -1165,8 +1267,8 @@ router.post("/settings/test-email", restrictBody('email'), async (req, res) => {
     const settings = await getAdminSettings(db.promise());
     const targetEmail = String(req.body?.email || settings.storeEmail || "").trim();
 
-    if (!targetEmail) {
-      return res.status(400).json({ error: "Email address is required" });
+    if (!targetEmail || targetEmail.length > 254 || !SIMPLE_EMAIL_REGEX.test(targetEmail)) {
+      return res.status(400).json({ error: "A valid email address is required" });
     }
 
     const subject = "Naturanza Admin Test Email";
@@ -1174,7 +1276,7 @@ router.post("/settings/test-email", restrictBody('email'), async (req, res) => {
       <div style="font-family: Arial, sans-serif; color: #1f2937;">
         <h2 style="margin: 0 0 8px; color: #0f172a;">Test Email Successful</h2>
         <p style="margin: 0 0 12px;">This is a test email from your Naturanza admin settings.</p>
-        <p style="margin: 0; font-size: 12px; color: #6b7280;">Sent to ${targetEmail}</p>
+        <p style="margin: 0; font-size: 12px; color: #6b7280;">Sent to ${escapeHtml(targetEmail)}</p>
       </div>
     `;
 
@@ -1209,6 +1311,11 @@ router.post(
   "/newsletter/broadcast",
   restrictBody("subject", "message"),
   asyncHandler(newsletterController.broadcast),
+);
+
+router.get(
+  "/newsletter/welcome-promo",
+  asyncHandler(newsletterController.getWelcomePromo),
 );
 
 router.post(
@@ -1435,14 +1542,13 @@ router.post("/users", requireSuperAdmin, restrictBody('name', 'email', 'password
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
-    const passwordToHash =
-      toNullableString(password) ||
-      `Temp@${Math.random().toString(36).slice(2, 10)}`;
+    const passwordToHash = toNullableString(password) || generateSecurePassword();
     const hashedPassword = await bcrypt.hash(passwordToHash, 12);
+    const nextAdminRole = normalizedRole === "admin" ? "staff_admin" : null;
 
     const [result] = await db.promise().query(
-      `INSERT INTO users (name, email, password, phone, address, role, is_active)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (name, email, password, phone, address, role, admin_role, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(name).trim(),
         normalizedEmail,
@@ -1450,6 +1556,7 @@ router.post("/users", requireSuperAdmin, restrictBody('name', 'email', 'password
         toNullableString(phone),
         toNullableString(address),
         normalizedRole,
+        nextAdminRole,
         toBoolean(is_active, true),
       ],
     );
@@ -1611,19 +1718,45 @@ router.patch("/users/:id/status", restrictBody('is_active'), async (req, res) =>
 
 // Update user role
 router.put("/users/:id/role", requireSuperAdmin, restrictBody('role'), async (req, res) => {
-  const { role } = req.body;
+  const targetUserId = Number(req.params.id);
+  if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+    return res.status(400).json({ error: "Invalid user id" });
+  }
 
-  if (!["customer", "admin"].includes(role)) {
+  if (targetUserId === req.user.id) {
+    return res.status(400).json({ error: "Cannot change your own role" });
+  }
+
+  const normalizedRole = String(req.body?.role || "").trim().toLowerCase();
+  if (!["customer", "admin"].includes(normalizedRole)) {
     return res.status(400).json({ error: "Invalid role" });
   }
 
   try {
-    const [result] = await db
-      .promise()
-      .query("UPDATE users SET role = ? WHERE id = ?", [role, req.params.id]);
+    const [result] = normalizedRole === "customer"
+      ? await db
+          .promise()
+          .query(
+            "UPDATE users SET role = 'customer', admin_role = NULL, admin_permissions = NULL WHERE id = ?",
+            [targetUserId],
+          )
+      : await db
+          .promise()
+          .query(
+            "UPDATE users SET role = 'admin', admin_role = COALESCE(admin_role, 'staff_admin') WHERE id = ?",
+            [targetUserId],
+          );
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "User not found" });
+    }
+
+    if (normalizedRole === "customer") {
+      await Promise.allSettled([
+        revokeSessionsByUserId(db.promise(), targetUserId),
+        revokeRefreshTokensByUserId(db.promise(), targetUserId, "role_demoted"),
+        invalidateAllUserTokens(db.promise(), targetUserId),
+      ]);
     }
 
     res.json({ message: "User role updated successfully" });
@@ -1672,7 +1805,7 @@ router.get("/inventory/low-stock", async (req, res) => {
 // Inventory movement history
 router.get("/inventory/movements", async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
     const productId = req.query.product_id
       ? parseInt(req.query.product_id, 10)
       : null;
@@ -1738,40 +1871,54 @@ router.post("/tax-rates", restrictBody('name', 'rate_percent', 'country', 'state
       is_active = true,
     } = req.body || {};
 
-    if (!name || rate_percent === undefined || rate_percent === null) {
+    const normalizedName = String(name || "").trim();
+    const parsedRate = Number(rate_percent);
+    if (!normalizedName || rate_percent === undefined || rate_percent === null || rate_percent === "") {
       return res
         .status(400)
         .json({ error: "Tax rate name and rate_percent are required" });
     }
-
-    if (Number(is_default)) {
-      await db
-        .promise()
-        .query("UPDATE tax_rates SET is_default = FALSE WHERE country = ?", [
-          country,
-        ]);
+    if (!Number.isFinite(parsedRate) || parsedRate < 0 || parsedRate > 100) {
+      return res
+        .status(400)
+        .json({ error: "rate_percent must be a number between 0 and 100" });
     }
 
-    const [result] = await db.promise().query(
-      `INSERT INTO tax_rates (name, rate_percent, country, state, is_default, is_active)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        String(name).trim(),
-        Number(rate_percent),
-        country,
-        state,
-        Boolean(is_default),
-        Boolean(is_active),
-      ],
-    );
+    const normalizedDefault = toBoolean(is_default, false);
+    const normalizedActive = toBoolean(is_active, true);
+    const normalizedCountry = String(country || "Pakistan").trim() || "Pakistan";
 
-    const [rows] = await db
-      .promise()
-      .query("SELECT * FROM tax_rates WHERE id = ?", [result.insertId]);
+    const taxRate = await withTransaction(async (connection) => {
+      if (normalizedDefault) {
+        await connection.query(
+          "UPDATE tax_rates SET is_default = FALSE WHERE country = ?",
+          [normalizedCountry],
+        );
+      }
+
+      const [result] = await connection.query(
+        `INSERT INTO tax_rates (name, rate_percent, country, state, is_default, is_active)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          normalizedName,
+          parsedRate,
+          normalizedCountry,
+          toNullableString(state),
+          normalizedDefault,
+          normalizedActive,
+        ],
+      );
+
+      const [rows] = await connection.query(
+        "SELECT * FROM tax_rates WHERE id = ?",
+        [result.insertId],
+      );
+      return rows[0];
+    });
 
     res.status(201).json({
       message: "Tax rate created successfully",
-      taxRate: rows[0],
+      taxRate,
     });
   } catch (error) {
     res.status(500).json({ error: "Error creating tax rate" });
@@ -1780,6 +1927,11 @@ router.post("/tax-rates", restrictBody('name', 'rate_percent', 'country', 'state
 
 router.put("/tax-rates/:id", restrictBody('name', 'rate_percent', 'country', 'state', 'is_default', 'is_active'), async (req, res) => {
   try {
+    const taxRateId = Number(req.params.id);
+    if (!Number.isInteger(taxRateId) || taxRateId <= 0) {
+      return res.status(400).json({ error: "Invalid tax rate id" });
+    }
+
     const {
       name,
       rate_percent,
@@ -1789,47 +1941,68 @@ router.put("/tax-rates/:id", restrictBody('name', 'rate_percent', 'country', 'st
       is_active = true,
     } = req.body || {};
 
-    if (!name || rate_percent === undefined || rate_percent === null) {
+    const normalizedName = String(name || "").trim();
+    const parsedRate = Number(rate_percent);
+    if (!normalizedName || rate_percent === undefined || rate_percent === null || rate_percent === "") {
       return res
         .status(400)
         .json({ error: "Tax rate name and rate_percent are required" });
     }
-
-    if (Number(is_default)) {
-      await db
-        .promise()
-        .query(
-          "UPDATE tax_rates SET is_default = FALSE WHERE country = ? AND id != ?",
-          [country, req.params.id],
-        );
+    if (!Number.isFinite(parsedRate) || parsedRate < 0 || parsedRate > 100) {
+      return res
+        .status(400)
+        .json({ error: "rate_percent must be a number between 0 and 100" });
     }
 
-    const [result] = await db.promise().query(
-      `UPDATE tax_rates
-             SET name = ?, rate_percent = ?, country = ?, state = ?, is_default = ?, is_active = ?
-             WHERE id = ?`,
-      [
-        String(name).trim(),
-        Number(rate_percent),
-        country,
-        state,
-        Boolean(is_default),
-        Boolean(is_active),
-        req.params.id,
-      ],
-    );
+    const normalizedDefault = toBoolean(is_default, false);
+    const normalizedActive = toBoolean(is_active, true);
+    const normalizedCountry = String(country || "Pakistan").trim() || "Pakistan";
 
-    if (result.affectedRows === 0) {
+    const taxRate = await withTransaction(async (connection) => {
+      const [existing] = await connection.query(
+        "SELECT id FROM tax_rates WHERE id = ? FOR UPDATE",
+        [taxRateId],
+      );
+      if (!existing.length) {
+        return null;
+      }
+
+      if (normalizedDefault) {
+        await connection.query(
+          "UPDATE tax_rates SET is_default = FALSE WHERE country = ? AND id != ?",
+          [normalizedCountry, taxRateId],
+        );
+      }
+
+      await connection.query(
+        `UPDATE tax_rates
+               SET name = ?, rate_percent = ?, country = ?, state = ?, is_default = ?, is_active = ?
+               WHERE id = ?`,
+        [
+          normalizedName,
+          parsedRate,
+          normalizedCountry,
+          toNullableString(state),
+          normalizedDefault,
+          normalizedActive,
+          taxRateId,
+        ],
+      );
+
+      const [rows] = await connection.query(
+        "SELECT * FROM tax_rates WHERE id = ?",
+        [taxRateId],
+      );
+      return rows[0];
+    });
+
+    if (!taxRate) {
       return res.status(404).json({ error: "Tax rate not found" });
     }
 
-    const [rows] = await db
-      .promise()
-      .query("SELECT * FROM tax_rates WHERE id = ?", [req.params.id]);
-
     res.json({
       message: "Tax rate updated successfully",
-      taxRate: rows[0],
+      taxRate,
     });
   } catch (error) {
     res.status(500).json({ error: "Error updating tax rate" });
@@ -1983,6 +2156,23 @@ router.put("/payment-methods/:id", restrictBody('code', 'label', 'description', 
       });
     }
 
+    const [[existingPaymentMethod]] = await db
+      .promise()
+      .query("SELECT id, code FROM payment_methods WHERE id = ? LIMIT 1", [
+        paymentMethodId,
+      ]);
+
+    if (!existingPaymentMethod) {
+      return res.status(404).json({ error: "Payment method not found" });
+    }
+
+    const existingCode = String(existingPaymentMethod.code || "").trim().toLowerCase();
+    if (existingCode === "cod" && (normalizedCode !== "cod" || !toBoolean(is_active, true))) {
+      return res.status(400).json({
+        error: "Cash on Delivery is required by the storefront and cannot be renamed or disabled",
+      });
+    }
+
     if (normalizedCode === "cod" && !toBoolean(is_active, true)) {
       return res.status(400).json({
         error: "Cash on Delivery is required by the storefront and cannot be disabled",
@@ -2071,7 +2261,7 @@ router.delete("/payment-methods/:id", async (req, res) => {
 // Returns management
 router.get("/returns", async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
     const status = req.query.status ? String(req.query.status).trim() : null;
 
     let query = `
@@ -2177,18 +2367,21 @@ router.put("/returns/:id/status", restrictBody('status', 'note', 'refund_amount'
         });
       }
 
-      const [[orderTotals]] = await connection.query(
-        `SELECT total_amount,
-                COALESCE((SELECT SUM(amount)
-                            FROM refund_transactions
-                           WHERE return_request_id = ? AND status = 'processed'), 0) AS refunded_amount
+      const [[orderRow]] = await connection.query(
+        `SELECT total_amount
            FROM orders
           WHERE id = ?
-          LIMIT 1`,
-        [request.id, request.order_id],
+          FOR UPDATE`,
+        [request.order_id],
       );
-      const orderTotal = Number(orderTotals?.total_amount) || 0;
-      const alreadyRefunded = Number(orderTotals?.refunded_amount) || 0;
+      const [[refundTotals]] = await connection.query(
+        `SELECT COALESCE(SUM(amount), 0) AS refunded_amount
+           FROM refund_transactions
+          WHERE order_id = ? AND status = 'processed'`,
+        [request.order_id],
+      );
+      const orderTotal = Number(orderRow?.total_amount) || 0;
+      const alreadyRefunded = Number(refundTotals?.refunded_amount) || 0;
       if (refundAmount > Math.max(0, orderTotal - alreadyRefunded)) {
         await connection.rollback();
         return res.status(400).json({

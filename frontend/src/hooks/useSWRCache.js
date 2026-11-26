@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // Module-scoped cache survives component unmounts and re-mounts. This is the
 // load-bearing detail — when a user clicks from /admin/reviews back to
@@ -31,21 +31,21 @@ export function useSWRCache(key, fetcher, opts = {}) {
   const cached = cache.get(key);
 
   const [data, setData] = useState(cached?.data ?? null);
-  const [loading, setLoading] = useState(!cached);
+  const [loading, setLoading] = useState(() => Boolean(enabled && !cached));
   const [revalidating, setRevalidating] = useState(false);
   const [error, setError] = useState(null);
 
   // Capture latest fetcher in a ref so the effect dependency stays stable —
   // callers commonly pass an inline arrow that would otherwise re-fire the
   // effect on every render and undo the cache benefit. The ref update must
-  // happen inside a layout effect (not during render) to satisfy React 19.
+  // happen inside an effect (not during render) to satisfy React 19.
   const fetcherRef = useRef(fetcher);
   const requestGenerationRef = useRef(0);
   useEffect(() => {
     fetcherRef.current = fetcher;
   });
 
-  const runFetch = async () => {
+  const runFetch = useCallback(async () => {
     const requestGeneration = ++requestGenerationRef.current;
     const currentCacheGeneration = cacheGeneration;
     try {
@@ -67,10 +67,14 @@ export function useSWRCache(key, fetcher, opts = {}) {
       setError(err);
       throw err;
     }
-  };
+  }, [key]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setLoading(false);
+      setRevalidating(false);
+      return;
+    }
 
     const entry = cache.get(key);
     const isFresh = entry && Date.now() - entry.ts < ttl;
@@ -78,21 +82,29 @@ export function useSWRCache(key, fetcher, opts = {}) {
     if (!entry) {
       // First-ever load for this key → block UI on the initial fetch.
       setLoading(true);
+      setRevalidating(false);
       runFetch()
         .finally(() => setLoading(false))
         .catch(() => {});
     } else if (!isFresh) {
       // Have data but stale → render cached, fetch in background.
+      setData(entry.data);
+      setError(null);
+      setLoading(false);
       setRevalidating(true);
       runFetch()
         .finally(() => setRevalidating(false))
         .catch(() => {});
+    } else {
+      // Fresh cache: sync state immediately when switching between keys.
+      setData(entry.data);
+      setError(null);
+      setLoading(false);
+      setRevalidating(false);
     }
-    // Fresh cache: no fetch needed, data already returned synchronously above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, enabled, ttl]);
+  }, [key, enabled, ttl, runFetch]);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setRevalidating(true);
     try {
       return await runFetch();
@@ -101,7 +113,7 @@ export function useSWRCache(key, fetcher, opts = {}) {
     } finally {
       setRevalidating(false);
     }
-  };
+  }, [runFetch]);
 
   return { data, loading, revalidating, error, refresh };
 }
@@ -109,6 +121,17 @@ export function useSWRCache(key, fetcher, opts = {}) {
 // Explicitly evict a key — call after mutations so the next visit refetches.
 export function invalidateSWRKey(key) {
   cache.delete(key);
+}
+
+// Evict every cached entry whose key begins with prefix (e.g. 'admin:returns:').
+export function invalidateSWRCachePrefix(prefix) {
+  const targetPrefix = String(prefix || "");
+  if (!targetPrefix) return;
+  for (const key of cache.keys()) {
+    if (String(key).startsWith(targetPrefix)) {
+      cache.delete(key);
+    }
+  }
 }
 
 // Wipe everything — useful on admin logout to avoid leaking cached data

@@ -187,7 +187,12 @@ const verifyCode = async (
     return { valid: false, reason: "Too many attempts. Please request a new code." };
   }
 
-  if (hashCode(cleanCode) !== record.code_hash) {
+  const submittedCodeHash = Buffer.from(hashCode(cleanCode), "utf8");
+  const storedCodeHash = Buffer.from(String(record.code_hash || ""), "utf8");
+  if (
+    submittedCodeHash.length !== storedCodeHash.length ||
+    !crypto.timingSafeEqual(submittedCodeHash, storedCodeHash)
+  ) {
     await dbPool.query(
       "UPDATE email_verification_codes SET attempts = attempts + 1 WHERE id = ?",
       [record.id],

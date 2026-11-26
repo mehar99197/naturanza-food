@@ -1,12 +1,24 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ShoppingBag, Sparkles, Star, Leaf, Package, Tag } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { fadeIn, slideUp, staggerContainer } from '@/lib/animations';
-import { productAPI } from '@/services/api';
 import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 import { formatPrice, getProductPricing } from '@/lib/utils';
+import {
+  buildHeroSlides,
+  buildHeroSlideChips,
+  splitHeadlineWords,
+} from '@/lib/heroSlideUtils';
 import { useSettings } from '@/context/SettingsContext';
+import { useProducts } from '@/context/ProductContext';
+
+const CHIP_ICONS = {
+  tag: Tag,
+  star: Star,
+  leaf: Leaf,
+  package: Package,
+};
 
 const highlightedHeadlineWords = new Set([
   'nourish',
@@ -45,158 +57,58 @@ const resolveSlideImage = (image, productName) => {
   return guessed || fallbackHeroImage;
 };
 
-const normalizeProductList = (payload) => {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.data)) return payload.data;
-  return [];
-};
-
-const isHoneyProduct = (product) => {
-  const text = `${product?.name || ''} ${product?.slug || ''}`.toLowerCase();
-  return text.includes('honey');
-};
-
-const buildSlideChips = (slide, settings) => {
-  const currency = settings?.currency || 'PKR';
-  const chips = [];
-  const pricing = getProductPricing(slide, settings);
-
-  if (Number.isFinite(slide.price) && slide.price > 0) {
-    if (pricing.onSale) {
-      // Store sale active — lead with the discount, then the sale price.
-      chips.push({
-        key: 'sale',
-        label: `${pricing.effectivePct}% OFF`,
-        classes: 'border-rose-300 bg-gradient-to-r from-rose-500 to-red-600 text-white font-bold',
-        Icon: Tag,
-      });
-      chips.push({
-        key: 'price',
-        label: `Now ${formatPrice(pricing.salePrice, currency)}`,
-        classes: 'border-emerald-200 bg-white/80 text-emerald-800',
-        Icon: Tag,
-      });
-    } else {
-      chips.push({
-        key: 'price',
-        label: `From ${formatPrice(slide.price, currency)}`,
-        classes: 'border-emerald-200 bg-white/80 text-emerald-800',
-        Icon: Tag,
-      });
-    }
-  }
-
-  if (Number.isFinite(slide.rating) && slide.rating > 0) {
-    const reviewLabel = slide.reviewCount > 0 ? ` (${slide.reviewCount})` : '';
-    chips.push({
-      key: 'rating',
-      label: `${slide.rating.toFixed(1)}${reviewLabel}`,
-      classes: 'border-amber-200 bg-amber-50/80 text-amber-800',
-      Icon: Star,
-    });
-  }
-
-  if (slide.category) {
-    chips.push({
-      key: 'category',
-      label: slide.category,
-      classes: 'border-slate-200 bg-white/70 text-slate-700',
-    });
-  }
-
-  if (slide.isOrganic) {
-    chips.push({
-      key: 'organic',
-      label: 'Organic',
-      classes: 'border-emerald-200 bg-emerald-50/80 text-emerald-700',
-      Icon: Leaf,
-    });
-  }
-
-  if (slide.inStock) {
-    chips.push({
-      key: 'stock',
-      label: 'In stock',
-      classes: 'border-emerald-200 bg-emerald-50/80 text-emerald-700',
-      Icon: Package,
-    });
-  }
-
-  return chips.slice(0, 3);
-};
-
 export function Hero() {
   const { settings } = useSettings();
-  const [slides, setSlides] = useState([]);
+  const { getActiveProducts } = useProducts();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
   const [textKey, setTextKey] = useState(0);
+  const animTimerRef = useRef(null);
+
+  const slides = useMemo(
+    () => buildHeroSlides(getActiveProducts()),
+    [getActiveProducts],
+  );
 
   useEffect(() => {
-    const fetchSlides = async () => {
-      try {
-        const response = await productAPI.getAll();
-        const list = normalizeProductList(response)
-          .map((item, index) => ({ item, index }))
-          .sort((a, b) => {
-            const honeyDiff = Number(isHoneyProduct(b.item)) - Number(isHoneyProduct(a.item));
-            if (honeyDiff !== 0) return honeyDiff;
-            return a.index - b.index;
-          })
-          .map(({ item }) => item);
-
-        if (list.length > 0) {
-          const gradients = [
-            "from-green-50 via-emerald-50 to-green-100",
-            "from-emerald-50 via-green-50 to-teal-50",
-            "from-green-100 via-emerald-50 to-green-50",
-          ];
-          const accents = [
-            "from-green-600 to-emerald-600",
-            "from-emerald-600 to-green-700",
-            "from-green-700 to-emerald-600",
-          ];
-
-          const mapped = list.map((p, idx) => {
-            const numericPrice = Number(p?.price);
-            const ratingValue = Number(p?.average_rating || p?.rating || 0);
-            const reviewCount = Number(p?.review_count || p?.reviews_count || p?.reviewCount || 0);
-            const categoryLabel = String(p?.category_name || p?.category || '').trim();
-            const inStock = typeof p?.is_in_stock === "boolean"
-              ? p.is_in_stock
-              : Number(p?.stock_quantity ?? p?.stock ?? 0) > 0;
-
-            return {
-              id: p.id,
-              badge: "Featured",
-              headline: p.name,
-              description: p.description?.substring(0, 100) || "Discover our premium organic products.",
-              ctaPrimary: "Shop Now",
-              ctaSecondary: "Learn More",
-              linkPrimary: `/product/${p.id ?? p.product_id ?? p.slug}`,
-              linkSecondary: "/about",
-              image: p.image || p.image_url || "",
-              bgGradient: gradients[idx % gradients.length],
-              accentColor: accents[idx % accents.length],
-              price: Number.isFinite(numericPrice) ? numericPrice : null,
-              discount_percentage: Number(p?.discount_percentage) || 0,
-              rating: Number.isFinite(ratingValue) ? ratingValue : 0,
-              reviewCount: Number.isFinite(reviewCount) ? reviewCount : 0,
-              category: categoryLabel,
-              isOrganic: p?.is_organic === true || p?.is_organic === 1,
-              inStock,
-            };
-          });
-          setSlides(mapped);
-          setCurrentSlide(0);
-        }
-      } catch (err) {
-        console.error("Failed to fetch hero slides:", err);
+    return () => {
+      if (animTimerRef.current) {
+        clearTimeout(animTimerRef.current);
       }
     };
-    fetchSlides();
   }, []);
+
+  const scheduleAnimationReset = useCallback(() => {
+    if (animTimerRef.current) {
+      clearTimeout(animTimerRef.current);
+    }
+    animTimerRef.current = setTimeout(() => setIsAnimating(false), 700);
+  }, []);
+
+  const nextSlide = useCallback(() => {
+    if (isAnimating || slides.length === 0) return;
+    setIsAnimating(true);
+    setTextKey((k) => k + 1);
+    setCurrentSlide((prev) => (prev + 1) % slides.length);
+    scheduleAnimationReset();
+  }, [isAnimating, slides.length, scheduleAnimationReset]);
+
+  const prevSlide = useCallback(() => {
+    if (isAnimating || slides.length === 0) return;
+    setIsAnimating(true);
+    setTextKey((k) => k + 1);
+    setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
+    scheduleAnimationReset();
+  }, [isAnimating, slides.length, scheduleAnimationReset]);
+
+  const goToSlide = (index) => {
+    if (isAnimating || index === activeSlideIndex) return;
+    setIsAnimating(true);
+    setTextKey((k) => k + 1);
+    setCurrentSlide(index);
+    scheduleAnimationReset();
+  };
 
   useEffect(() => {
     if (!isHovered && !isAnimating && slides.length > 1) {
@@ -205,43 +117,16 @@ export function Hero() {
       }, 3000);
       return () => clearInterval(interval);
     }
-  }, [currentSlide, isHovered, isAnimating, slides.length]);
-
-  const nextSlide = useCallback(() => {
-    if (isAnimating || slides.length === 0) return;
-    setIsAnimating(true);
-    setTextKey(k => k + 1);
-    setCurrentSlide((prev) => (prev + 1) % slides.length);
-    setTimeout(() => setIsAnimating(false), 700);
-  }, [isAnimating, slides.length]);
-
-  const prevSlide = useCallback(() => {
-    if (isAnimating || slides.length === 0) return;
-    setIsAnimating(true);
-    setTextKey(k => k + 1);
-    setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
-    setTimeout(() => setIsAnimating(false), 700);
-  }, [isAnimating, slides.length]);
-
-  const goToSlide = (index) => {
-    if (isAnimating || index === currentSlide) return;
-    setIsAnimating(true);
-    setTextKey(k => k + 1);
-    setCurrentSlide(index);
-    setTimeout(() => setIsAnimating(false), 700);
-  };
+    return undefined;
+  }, [isHovered, isAnimating, slides.length, nextSlide]);
 
   const hasSlides = slides.length > 0;
   const shouldShowNav = slides.length > 1;
-  const currentSlideData = hasSlides ? slides[currentSlide] : null;
-  const slideChips = useMemo(
-    () => buildSlideChips(currentSlideData || {}, settings),
-    [currentSlideData, settings],
-  );
+  const activeSlideIndex = hasSlides ? currentSlide % slides.length : 0;
 
   return (
     <section
-      className="relative w-full max-w-full h-[540px] sm:h-[460px] md:h-[550px] lg:h-[600px] overflow-hidden overflow-x-hidden pt-[56px] sm:pt-[60px] md:pt-[68px]"
+      className="relative w-full max-w-full h-[560px] sm:h-[560px] md:h-[520px] lg:h-[600px] overflow-hidden overflow-x-hidden pt-[56px] sm:pt-[60px] md:pt-[68px]"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       role="region"
@@ -251,18 +136,25 @@ export function Hero() {
       <div className="relative w-full h-full">
         {hasSlides ? (
           slides.map((slide, index) => {
+            const isActiveSlide = index === activeSlideIndex;
             const slideImage = resolveSlideImage(slide.image, slide.headline);
+            const perSlideChips = buildHeroSlideChips(slide, settings, {
+              getProductPricing,
+              formatPrice,
+            });
+            const SlideHeading = index === 0 ? motion.h1 : motion.h2;
+            const headlineWords = splitHeadlineWords(slide.headline);
             return (
               <div
                 key={slide.id}
                 className={`absolute inset-0 transition-all duration-700 ease-in-out ${
-                  index === currentSlide
+                  isActiveSlide
                     ? 'opacity-100 translate-x-0 z-10'
-                    : index < currentSlide
-                    ? 'opacity-0 -translate-x-full z-0'
-                    : 'opacity-0 translate-x-full z-0'
+                    : index < activeSlideIndex
+                    ? 'opacity-0 -translate-x-full z-0 pointer-events-none'
+                    : 'opacity-0 translate-x-full z-0 pointer-events-none'
                 }`}
-                aria-hidden={index !== currentSlide}
+                aria-hidden={!isActiveSlide}
               >
                 {/* Background Gradient */}
                 <div className={`absolute inset-0 bg-gradient-to-br ${slide.bgGradient}`} />
@@ -287,14 +179,14 @@ export function Hero() {
                 {/* Content Container */}
                 <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-4 h-full relative z-20">
                   {/*
-                    Mobile: flex-col — Image top, text+CTA below, dots directly after buttons.
-                    Desktop (lg+): 2-column grid, dots absolute at bottom.
+                    Mobile & sm (<768px): flex-col — Image top, text+CTA below, with bottom padding clearing pagination dots.
+                    Tablet & Desktop (md+): 2-column grid, dots absolute at bottom.
                   */}
-                  <div className="flex flex-col justify-start sm:justify-center lg:grid lg:grid-cols-2 lg:gap-12 lg:items-center h-full gap-2 sm:gap-3 pt-2 pb-4 sm:pt-6 sm:pb-10 md:py-8 lg:py-0 px-8 sm:px-10 md:px-12 lg:px-16">
+                  <div className="flex flex-col justify-center md:grid md:grid-cols-2 md:gap-8 lg:gap-12 md:items-center h-full gap-2 sm:gap-3 pt-2 pb-12 sm:pt-4 sm:pb-14 md:pt-4 md:pb-14 lg:pt-0 lg:pb-16 px-8 sm:px-12 md:px-14 lg:px-16">
 
-                    {/* Product Image — top on mobile, right on desktop */}
-                    <div className="flex items-center justify-center order-1 lg:order-2 lg:h-full py-2">
-                      <div className="relative w-full max-w-[140px] sm:max-w-xs md:max-w-md lg:max-w-lg mx-auto pt-1">
+                    {/* Product Image — top on mobile/sm, right on md+ */}
+                    <div className="flex items-center justify-center order-1 md:order-2 md:h-full py-1 md:py-2">
+                      <div className="relative w-full max-w-[140px] sm:max-w-[190px] md:max-w-sm lg:max-w-lg mx-auto">
                         <div className={`absolute inset-0 bg-gradient-to-r ${slide.accentColor} opacity-10 blur-3xl rounded-full`} />
                         <img
                           src={slideImage}
@@ -303,24 +195,24 @@ export function Hero() {
                               event.currentTarget.onerror = null;
                               event.currentTarget.src = fallbackHeroImage;
                             }}
-                          className="relative z-10 w-full h-auto object-contain drop-shadow-2xl max-h-[150px] sm:max-h-[220px] md:max-h-[340px] lg:max-h-[400px]"
+                          className="relative z-10 w-full h-auto object-contain drop-shadow-2xl max-h-[135px] sm:max-h-[175px] md:max-h-[300px] lg:max-h-[380px]"
                           loading={index === 0 ? 'eager' : 'lazy'}
                         />
                       </div>
                     </div>
 
-                    {/* Text + CTA — below image on mobile, left on desktop */}
+                    {/* Text + CTA — below image on mobile/sm, left on md+ */}
                     <motion.div
-                      key={textKey}
+                      key={isActiveSlide ? `${slide.id}-${textKey}` : slide.id}
                       variants={staggerContainer}
                       initial="hidden"
                       animate="visible"
-                      className="text-center lg:text-left order-2 lg:order-1 space-y-2 sm:space-y-3 md:space-y-4 lg:space-y-6"
+                      className="text-center md:text-left order-2 md:order-1 space-y-2 sm:space-y-2.5 md:space-y-3.5 lg:space-y-5"
                     >
                       {/* Badge */}
                       <motion.div
                         variants={fadeIn}
-                        className="inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm px-2 py-0.5 md:px-3 md:py-1.5 rounded-full shadow-md"
+                        className="inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm px-2.5 py-0.5 md:px-3 md:py-1.5 rounded-full shadow-md"
                       >
                         <Sparkles className="w-2.5 h-2.5 md:w-3.5 md:h-3.5 text-green-600 flex-shrink-0" />
                         <span className="text-xs font-bold bg-gradient-to-r from-green-700 to-emerald-600 bg-clip-text text-transparent">
@@ -329,49 +221,55 @@ export function Hero() {
                       </motion.div>
 
                       {/* Headline */}
-                      <motion.h1
+                      <SlideHeading
                         variants={slideUp}
-                        className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black leading-tight"
+                        className="text-2xl sm:text-3xl md:text-3xl lg:text-5xl font-black leading-tight text-[#243447] drop-shadow-sm"
                       >
-                        <span className="text-[#243447] drop-shadow-sm">
-                          {slide.headline.split(' ').map((word, i) => {
-                            const normalizedWord = word.toLowerCase().replace(/[^a-z]/g, '');
-                            const isHighlightedWord = highlightedHeadlineWords.has(normalizedWord);
-                            return (
-                              <span
-                                key={i}
-                                className={`inline-block mr-[0.25em] ${isHighlightedWord ? 'text-[#16A34A]' : ''}`}
-                              >
+                        {headlineWords.map((word, i) => {
+                          const normalizedWord = word.toLowerCase().replace(/[^a-z]/g, '');
+                          const isHighlightedWord = highlightedHeadlineWords.has(normalizedWord);
+                          return (
+                            <Fragment key={`${slide.id}-word-${i}`}>
+                              {i > 0 ? ' ' : ''}
+                              <span className={isHighlightedWord ? 'text-[#16A34A]' : 'text-current'}>
                                 {word}
                               </span>
-                            );
-                          })}
-                        </span>
-                      </motion.h1>
+                            </Fragment>
+                          );
+                        })}
+                      </SlideHeading>
 
                       {/* Description */}
                       <motion.p
                         variants={fadeIn}
-                        className="text-sm sm:text-base md:text-base lg:text-lg text-green-950/70 max-w-xl mx-auto lg:mx-0 leading-relaxed line-clamp-2 sm:line-clamp-none"
+                        className="text-sm sm:text-base md:text-sm lg:text-lg text-green-950/75 max-w-xl mx-auto md:mx-0 leading-relaxed line-clamp-2 sm:line-clamp-2 md:line-clamp-3"
                       >
                         {slide.description}
                       </motion.p>
 
                       {/* Chips */}
-                      {slideChips.length > 0 ? (
+                      {perSlideChips.length > 0 ? (
                         <motion.div
                           variants={fadeIn}
-                          className="flex flex-wrap items-center justify-center gap-2 lg:justify-start"
+                          className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 md:justify-start"
                         >
-                          {slideChips.map((chip) => {
-                            const ChipIcon = chip.Icon;
+                          {perSlideChips.map((chip) => {
+                            const ChipIcon = chip.iconName ? CHIP_ICONS[chip.iconName] : null;
                             return (
                               <span
                                 key={chip.key}
                                 className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold sm:text-xs ${chip.classes}`}
                               >
-                                {ChipIcon ? <ChipIcon className="h-3.5 w-3.5" /> : null}
-                                <span className="truncate">{chip.label}</span>
+                                {ChipIcon ? <ChipIcon className="h-3.5 w-3.5 flex-shrink-0" /> : null}
+                                <span className="truncate text-current">{chip.label}</span>
+                                {chip.originalLabel ? (
+                                  <>
+                                    {' '}
+                                    <span className="line-through text-slate-500 font-medium">
+                                      {chip.originalLabel}
+                                    </span>
+                                  </>
+                                ) : null}
                               </span>
                             );
                           })}
@@ -381,18 +279,20 @@ export function Hero() {
                       {/* CTA Buttons */}
                       <motion.div
                         variants={slideUp}
-                        className="flex flex-row items-center gap-2 md:gap-3 justify-center lg:justify-start"
+                        className="flex flex-row items-center gap-2 md:gap-3 justify-center md:justify-start"
                       >
                         <Link
                           to={slide.linkPrimary}
-                          className={`btn-3d inline-flex items-center justify-center gap-1.5 bg-gradient-to-r ${slide.accentColor} text-white px-3 py-2 sm:px-4 sm:py-2.5 md:px-6 md:py-3 rounded-lg md:rounded-xl font-semibold text-[13px] sm:text-base md:text-sm lg:text-base shadow-lg md:hover:shadow-3d-hover md:hover:-translate-y-0.5 active:scale-95 transition-all duration-300 group min-h-[40px] whitespace-nowrap`}
+                          tabIndex={isActiveSlide ? 0 : -1}
+                          className={`btn-3d inline-flex items-center justify-center gap-1.5 bg-gradient-to-r ${slide.accentColor} text-white px-3.5 py-2 sm:px-4 sm:py-2.5 md:px-5 md:py-2.5 lg:px-6 lg:py-3 rounded-lg md:rounded-xl font-semibold text-[13px] sm:text-sm md:text-sm lg:text-base shadow-lg md:hover:shadow-3d-hover md:hover:-translate-y-0.5 active:scale-95 transition-all duration-300 group min-h-[40px] whitespace-nowrap`}
                         >
-                          <ShoppingBag className="w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4 flex-shrink-0" />
-                          <span>{slide.ctaPrimary}</span>
+                          <ShoppingBag className="w-3.5 h-3.5 md:w-4 md:h-4 flex-shrink-0" />
+                          <span className="text-current">{slide.ctaPrimary}</span>
                         </Link>
                         <Link
                           to={slide.linkSecondary}
-                          className="inline-flex items-center justify-center gap-1.5 bg-white/90 backdrop-blur-sm text-gray-800 px-3 py-2 sm:px-4 sm:py-2.5 md:px-6 md:py-3 rounded-lg md:rounded-xl font-semibold text-[13px] sm:text-base md:text-sm lg:text-base border-2 border-gray-200 shadow-md md:hover:shadow-xl md:hover:border-gray-300 md:hover:-translate-y-0.5 active:scale-95 transition-all duration-300 min-h-[40px] whitespace-nowrap"
+                          tabIndex={isActiveSlide ? 0 : -1}
+                          className="inline-flex items-center justify-center gap-1.5 bg-white/90 backdrop-blur-sm text-gray-800 px-3.5 py-2 sm:px-4 sm:py-2.5 md:px-5 md:py-2.5 lg:px-6 lg:py-3 rounded-lg md:rounded-xl font-semibold text-[13px] sm:text-sm md:text-sm lg:text-base border-2 border-gray-200 shadow-md md:hover:shadow-xl md:hover:border-gray-300 md:hover:-translate-y-0.5 active:scale-95 transition-all duration-300 min-h-[40px] whitespace-nowrap"
                         >
                           {slide.ctaSecondary}
                         </Link>
@@ -443,12 +343,12 @@ export function Hero() {
                 onClick={() => goToSlide(index)}
                 disabled={isAnimating}
                 className={`transition-all duration-300 rounded-full disabled:cursor-not-allowed ${
-                  index === currentSlide
+                  index === activeSlideIndex
                     ? 'w-4 sm:w-6 lg:w-8 h-2 bg-green-500 shadow-sm'
                     : 'w-2 h-2 bg-gray-300/80 hover:bg-gray-400 active:scale-110'
                 }`}
                 aria-label={`Go to slide ${index + 1}`}
-                aria-current={index === currentSlide ? 'true' : 'false'}
+                aria-current={index === activeSlideIndex ? 'true' : 'false'}
               />
             ))}
           </div>

@@ -87,15 +87,18 @@ export function AdminShipping() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const eligibleShippingOrders = useMemo(() => {
+    return [...orders].filter((order) => {
+      const hasShipment = Boolean(order.shipment);
+      const shippingStatusOrder = ["processing", "shipped", "delivered"].includes(
+        String(order.status || "").toLowerCase(),
+      );
+      return hasShipment || shippingStatusOrder;
+    });
+  }, [orders]);
+
   const shippingRows = useMemo(() => {
-    return [...orders]
-      .filter((order) => {
-        const hasShipment = Boolean(order.shipment);
-        const shippingStatusOrder = ["processing", "shipped", "delivered"].includes(
-          String(order.status || "").toLowerCase(),
-        );
-        return hasShipment || shippingStatusOrder;
-      })
+    return eligibleShippingOrders
       .filter((order) => {
         const status = String(order.shipment?.shipment_status || "pending").toLowerCase();
         const query = searchQuery.trim().toLowerCase();
@@ -122,7 +125,7 @@ export function AdminShipping() {
           new Date(b.order_date || b.created_at) -
           new Date(a.order_date || a.created_at),
       );
-  }, [orders, searchQuery, statusFilter]);
+  }, [eligibleShippingOrders, searchQuery, statusFilter]);
 
   const metrics = useMemo(() => {
     const byStatus = {
@@ -133,7 +136,7 @@ export function AdminShipping() {
       returned: 0,
     };
 
-    shippingRows.forEach((order) => {
+    eligibleShippingOrders.forEach((order) => {
       const status = String(order.shipment?.shipment_status || "pending").toLowerCase();
       if (Object.prototype.hasOwnProperty.call(byStatus, status)) {
         byStatus[status] += 1;
@@ -141,12 +144,12 @@ export function AdminShipping() {
     });
 
     return {
-      total: shippingRows.length,
+      total: eligibleShippingOrders.length,
       inTransit: byStatus.shipped,
       delivered: byStatus.delivered,
       pending: byStatus.pending + byStatus.packed,
     };
-  }, [shippingRows]);
+  }, [eligibleShippingOrders]);
 
   const selectedOrder = shippingRows.find((item) => item.id === selectedOrderId) || null;
 
@@ -190,13 +193,8 @@ export function AdminShipping() {
       setSaving(true);
       setError("");
 
-      await orderAPI.updateShipment(selectedOrder.id, {
-        courier_name: formData.courier_name || null,
-        tracking_number: formData.tracking_number || null,
-        shipment_status: formData.shipment_status,
-        estimated_delivery: formData.estimated_delivery || null,
-      });
-
+      // Run order status transitions BEFORE mutating shipment fields so the
+      // backend payment-approval gate rejects unapproved orders cleanly.
       if (formData.shipment_status === "shipped" && selectedOrder.status !== "shipped") {
         await updateOrderStatus(selectedOrder.id, "shipped", undefined, {
           courier_name: formData.courier_name || undefined,
@@ -215,6 +213,13 @@ export function AdminShipping() {
           estimated_delivery: formData.estimated_delivery || undefined,
         });
       }
+
+      await orderAPI.updateShipment(selectedOrder.id, {
+        courier_name: formData.courier_name || null,
+        tracking_number: formData.tracking_number || null,
+        shipment_status: formData.shipment_status,
+        estimated_delivery: formData.estimated_delivery || null,
+      });
 
       await fetchOrders();
     } catch (requestError) {

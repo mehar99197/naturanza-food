@@ -993,6 +993,12 @@ export function AdminProducts() {
 
               <div className="scrollbar-hide flex-1 overflow-y-auto px-4 py-4 sm:max-h-[72vh] sm:px-8 sm:py-6">
                 <div className="space-y-5 sm:space-y-7">
+                  {error ? (
+                    <div className="flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                      <AlertCircle className="h-5 w-5 shrink-0" />
+                      <span>{error}</span>
+                    </div>
+                  ) : null}
                   <section className="space-y-3 sm:space-y-4">
                     <div className="flex items-center gap-2 text-emerald-700">
                       <Box className="h-4 w-4" />
@@ -1138,7 +1144,7 @@ export function AdminProducts() {
                         <input
                           type="number"
                           min="0"
-                          max="90"
+                          step="0.01"
                           value={formData.price}
                           onChange={(event) =>
                             setFormData((prev) => ({ ...prev, price: event.target.value }))
@@ -1154,6 +1160,8 @@ export function AdminProducts() {
                         </span>
                         <input
                           type="number"
+                          min="0"
+                          max="90"
                           value={formData.discount_percentage}
                           onChange={(event) =>
                             setFormData((prev) => ({ ...prev, discount_percentage: event.target.value }))
@@ -1169,6 +1177,7 @@ export function AdminProducts() {
                         </span>
                         <input
                           type="number"
+                          min="0"
                           value={formData.stock_quantity}
                           onChange={(event) =>
                             setFormData((prev) => ({ ...prev, stock_quantity: event.target.value }))

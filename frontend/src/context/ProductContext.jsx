@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useCallback, useContext, useState, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { productAPI } from "@/services/api";
 import { useAdminAuth } from "@/context/AdminAuthContext";
@@ -112,51 +112,53 @@ export const useProducts = () => {
 
 export const ProductProvider = ({ children }) => {
   const location = useLocation();
+  const isAdminPage = location.pathname.startsWith("/admin");
   const { isAdminAuthenticated, loading: adminLoading } = useAdminAuth();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const requestIdRef = useRef(0);
 
-  // Refetch when switching between public and admin catalog views so inactive
-  // products are not lost after navigating from the storefront.
+  const fetchProducts = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    try {
+      setLoading(true);
+      setError(null);
+
+      const data = await productAPI.getAll(isAdminPage);
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+      setProducts(Array.isArray(data) ? data : data.data || []);
+    } catch (err) {
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+      setError(err.message);
+      setProducts([]);
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [isAdminPage]);
+
+  // Refetch only when switching between public and admin catalog views (or when
+  // admin auth finishes hydrating) rather than on every route navigation.
   useEffect(() => {
-    const isAdminPage = location.pathname.startsWith("/admin");
-
-    // Wait for admin session restoration on hard reload. Public product
-    // responses intentionally omit stock_quantity, so using one here would
-    // make admin inventory appear as zero until the next navigation.
     if (isAdminPage && adminLoading) {
       return;
     }
 
     if (isAdminPage && !isAdminAuthenticated) {
+      requestIdRef.current += 1;
       setProducts([]);
       setLoading(false);
       return;
     }
 
     void fetchProducts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminLoading, isAdminAuthenticated, location.pathname]);
-
-  const fetchProducts = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Check if we're in admin panel - include inactive products for admin
-      const isAdminPage = typeof window !== 'undefined' && 
-        window.location.pathname.startsWith('/admin');
-      
-      const data = await productAPI.getAll(isAdminPage);
-      setProducts(Array.isArray(data) ? data : data.data || []);
-    } catch (err) {
-      setError(err.message);
-      setProducts([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [adminLoading, isAdminAuthenticated, isAdminPage, fetchProducts]);
 
   // Add new product via API
   const addProduct = async (productData) => {

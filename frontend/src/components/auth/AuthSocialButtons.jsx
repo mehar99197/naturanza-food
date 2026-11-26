@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { GoogleLogin } from '@react-oauth/google';
+import { useGoogleOAuth } from '@react-oauth/google';
 import { Loader2 } from 'lucide-react';
+import {
+  ensureGoogleIdentityInitialized,
+  registerGoogleIdentityHandlers,
+  unregisterGoogleIdentityHandlers,
+} from '@/lib/googleIdentity';
 
 const GoogleBrandIcon = ({ className = 'h-4 w-4' }) => (
   <svg viewBox="0 0 24 24" className={className} aria-hidden="true" focusable="false">
@@ -83,6 +88,100 @@ const useLayoutSize = (ref) => {
 // target stays roughly the size the user sees.
 const GSI_MIN_WIDTH = 200;
 const GSI_MAX_WIDTH = 400;
+const GSI_LARGE_BUTTON_HEIGHT = 40;
+
+const GoogleSignInOverlay = ({
+  onGoogleSuccess,
+  onGoogleError,
+  isIconVariant,
+  requestedWidth,
+  isWidthReady,
+  hostSize,
+}) => {
+  const { clientId, locale, scriptLoadedSuccessfully } = useGoogleOAuth();
+  const overlayRef = useRef(null);
+  const btnContainerRef = useRef(null);
+  const overlaySize = useLayoutSize(overlayRef);
+  const handlersRef = useRef({
+    onSuccess: onGoogleSuccess,
+    onError: onGoogleError,
+  });
+
+  const scaleX = hostSize.width && overlaySize.width ? hostSize.width / overlaySize.width : 1;
+  const scaleY = hostSize.height && overlaySize.height ? hostSize.height / overlaySize.height : 1;
+
+  useEffect(() => {
+    handlersRef.current = {
+      onSuccess: onGoogleSuccess,
+      onError: onGoogleError,
+    };
+  }, [onGoogleSuccess, onGoogleError]);
+
+  useEffect(() => {
+    const dispatchers = {
+      onSuccess: (response) => handlersRef.current.onSuccess?.(response),
+      onError: () => handlersRef.current.onError?.(),
+    };
+    registerGoogleIdentityHandlers(dispatchers);
+    return () => unregisterGoogleIdentityHandlers(dispatchers);
+  }, []);
+
+  useEffect(() => {
+    if (!scriptLoadedSuccessfully || !isWidthReady) {
+      return;
+    }
+
+    const gsiIdApi = window?.google?.accounts?.id;
+    const container = btnContainerRef.current;
+    if (!gsiIdApi || !container) {
+      return;
+    }
+
+    ensureGoogleIdentityInitialized(gsiIdApi, clientId);
+
+    container.innerHTML = '';
+    const renderConfig = {
+      type: isIconVariant ? 'icon' : 'standard',
+      theme: 'outline',
+      size: 'large',
+      text: 'continue_with',
+      shape: isIconVariant ? 'circle' : 'rectangular',
+      logo_alignment: 'left',
+    };
+    if (requestedWidth !== undefined) {
+      renderConfig.width = requestedWidth;
+    }
+    if (locale) {
+      renderConfig.locale = locale;
+    }
+    gsiIdApi.renderButton(container, renderConfig);
+  }, [
+    clientId,
+    locale,
+    scriptLoadedSuccessfully,
+    isWidthReady,
+    isIconVariant,
+    requestedWidth,
+  ]);
+
+  return (
+    <div className="absolute inset-0 z-10 overflow-hidden opacity-0">
+      <div
+        ref={overlayRef}
+        className="origin-top-left"
+        style={{
+          transform: `scale(${scaleX}, ${scaleY})`,
+          width: requestedWidth ? `${requestedWidth}px` : 'max-content',
+        }}
+      >
+        <div
+          ref={btnContainerRef}
+          style={{ height: GSI_LARGE_BUTTON_HEIGHT }}
+        />
+      </div>
+    </div>
+  );
+};
 
 const AuthSocialButtons = ({
   dividerLabel = 'Or continue with',
@@ -97,12 +196,11 @@ const AuthSocialButtons = ({
   buttonLabel = 'Sign in with Google',
 }) => {
   const hostRef = useRef(null);
-  const overlayRef = useRef(null);
   const hostSize = useLayoutSize(hostRef);
-  const overlaySize = useLayoutSize(overlayRef);
 
   const isIconVariant = variant === 'icon';
   const isInteractive = Boolean(isGoogleConfigured) && !googleLoading;
+  const isWidthReady = isIconVariant || hostSize.width > 0;
 
   const justifyClass =
     align === 'left' ? 'justify-start' : align === 'right' ? 'justify-end' : 'justify-center';
@@ -112,9 +210,6 @@ const AuthSocialButtons = ({
     : Math.round(
         Math.min(GSI_MAX_WIDTH, Math.max(GSI_MIN_WIDTH, hostSize.width || GSI_MAX_WIDTH)),
       );
-
-  const scaleX = hostSize.width && overlaySize.width ? hostSize.width / overlaySize.width : 1;
-  const scaleY = hostSize.height && overlaySize.height ? hostSize.height / overlaySize.height : 1;
 
   const visualContent = googleLoading ? (
     <Loader2 className="h-4 w-4 animate-spin" />
@@ -152,28 +247,14 @@ const AuthSocialButtons = ({
           </div>
 
           {isInteractive ? (
-            <div className="absolute inset-0 z-10 overflow-hidden opacity-0">
-              <div
-                ref={overlayRef}
-                className="origin-top-left"
-                style={{
-                  transform: `scale(${scaleX}, ${scaleY})`,
-                  width: requestedWidth ? `${requestedWidth}px` : 'max-content',
-                }}
-              >
-                <GoogleLogin
-                  onSuccess={onGoogleSuccess}
-                  onError={onGoogleError}
-                  theme="outline"
-                  type={isIconVariant ? 'icon' : 'standard'}
-                  size="large"
-                  shape={isIconVariant ? 'circle' : 'rectangular'}
-                  text="continue_with"
-                  logo_alignment="left"
-                  width={requestedWidth}
-                />
-              </div>
-            </div>
+            <GoogleSignInOverlay
+              onGoogleSuccess={onGoogleSuccess}
+              onGoogleError={onGoogleError}
+              isIconVariant={isIconVariant}
+              requestedWidth={requestedWidth}
+              isWidthReady={isWidthReady}
+              hostSize={hostSize}
+            />
           ) : null}
         </div>
       </div>

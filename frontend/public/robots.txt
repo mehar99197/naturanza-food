@@ -27,7 +27,11 @@ Allow: /api/categories
 Allow: /api/reviews/
 Allow: /api/settings
 Allow: /api/announcements/
+Allow: /api/blog
+Allow: /api/about
+Allow: /api/team
 Allow: /api/sitemap
+Allow: /api/merchant-feed.xml
 Disallow: /api/
 
 Disallow: /images/uploads/

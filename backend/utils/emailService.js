@@ -116,7 +116,7 @@ const sendEmail = async ({ to, subject, html, text, unsubscribeUrl }) => {
     to,
     subject,
     html,
-    text: text || html.replace(/<[^>]*>/g, ""), // Strip HTML for text version
+    text: text || String(html || "").replace(/<[^>]*>/g, ""), // Strip HTML for text version
     headers,
     messageId: `<${Date.now()}.${Math.random().toString(36).substring(2)}@${(process.env.PUBLIC_SITE_URL || "naturanzafood.com").replace(/^https?:\/\//, "").replace(/\/.*$/, "")}>`,
   };
@@ -539,7 +539,7 @@ const generatePaymentStatusEmail = ({
     : "linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)";
   const statusLabel = isApproved ? "Approved" : "Rejected";
   const heading = isApproved ? "Payment Approved" : "Payment Could Not Be Verified";
-  const formattedAmount = `${escapeHtml(currency || "Rs")} ${Number(amount || 0).toLocaleString("en-PK")}`;
+  const formattedAmount = `${currency || "Rs"} ${Number(amount || 0).toLocaleString("en-PK")}`;
   const safeCustomerName = escapeHtml(customerName || "Customer");
   const safeStoreName = escapeHtml(storeName || "Naturanza Food");
   const safeOrderId = String(orderId).replace(/[^0-9a-zA-Z_-]/g, "");
@@ -692,7 +692,8 @@ const sendPaymentStatusEmail = async ({
  * Send a 6-digit email verification code for new self-signup accounts.
  */
 const sendVerificationCodeEmail = async (email, userName, code, expiryMinutes = 15) => {
-  const greetingName = userName ? ` ${escapeHtml(userName)}` : "";
+  const safeGreetingName = userName ? ` ${escapeHtml(userName)}` : "";
+  const plainGreetingName = userName ? ` ${String(userName).trim()}` : "";
   const html = `
   <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f7f4;padding:32px 0;font-family:Arial,Helvetica,sans-serif;">
     <tr><td align="center">
@@ -701,7 +702,7 @@ const sendVerificationCodeEmail = async (email, userName, code, expiryMinutes = 
           <h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:700;">Naturanza Food</h1>
         </td></tr>
         <tr><td style="padding:28px;">
-          <p style="margin:0 0 12px;color:#1f2937;font-size:15px;">Hi${greetingName},</p>
+          <p style="margin:0 0 12px;color:#1f2937;font-size:15px;">Hi${safeGreetingName},</p>
           <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">
             Use the verification code below to confirm your email and activate your Naturanza Food account.
           </p>
@@ -724,7 +725,7 @@ const sendVerificationCodeEmail = async (email, userName, code, expiryMinutes = 
     </td></tr>
   </table>`;
 
-  const text = `Hi${greetingName},
+  const text = `Hi${plainGreetingName},
 
 Your Naturanza Food verification code is: ${code}
 
