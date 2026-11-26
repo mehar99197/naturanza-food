@@ -703,8 +703,13 @@ export function Checkout() {
       const statusCode = Number(error?.response?.status || 0);
       const errorMessage = String(error?.response?.data?.error || error?.message || "").toLowerCase();
 
-      if (statusCode === 401 || statusCode === 403 || errorMessage.includes("token") || errorMessage.includes("unauthorized") || errorMessage.includes("access token")) {
+      // Only our own API's 401 means the customer's login expired. Matching on
+      // words like "token" also caught payment-gateway errors and told the
+      // customer to log in again for a problem that was not theirs.
+      if (statusCode === 401) {
         setError("Your session has expired. Please login again to continue.");
+      } else if (statusCode === 403) {
+        setError(error?.response?.data?.error || "You do not have permission to complete this order.");
       } else if (statusCode === 400 && errorMessage.includes("cart is empty")) {
         setError("Your cart appears to be empty. Please add items before placing an order.");
       } else if (!error?.response) {

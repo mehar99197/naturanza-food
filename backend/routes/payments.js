@@ -522,9 +522,14 @@ router.post(
       if (error?.code === "SAFEPAY_TIMEOUT") {
         return res.status(504).json({ error: error.message });
       }
+      // The raw gateway message (e.g. SafePay's auth-strategy errors) is for
+      // the logs only: it means nothing to a customer and talks about "jwt
+      // tokens", which the storefront used to mistake for an expired login.
       console.error("[safepay] create-session failed:", error?.message || error);
       return res.status(502).json({
-        error: error?.message || "Failed to initialize SafePay checkout session",
+        code: "SAFEPAY_GATEWAY_ERROR",
+        error:
+          "Online payment is temporarily unavailable. Your order is saved — please try again in a few minutes or choose Cash on Delivery.",
       });
     }
   },
