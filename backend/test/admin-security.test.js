@@ -110,3 +110,152 @@ test('trusted client IP ignores spoofable X-Forwarded-For', () => {
 
   assert.equal(getTrustedClientIp(request), '198.51.100.7');
 });
+
+test('totp verification blocks immediate replay of the same code for a user', () => {
+  const { authenticator } = require('otplib');
+  const {
+    generateTwoFactorSetup,
+    verifyTwoFactorCode,
+    _clearTotpReplayCache,
+  } = require('../utils/totp');
+
+  _clearTotpReplayCache();
+  const setup = generateTwoFactorSetup({ email: 'replay@example.com' });
+  const code = authenticator.generate(setup.secret);
+
+  assert.equal(
+    verifyTwoFactorCode({ encryptedSecret: setup.encryptedSecret, code, userId: 42 }),
+    true,
+    'first verification of a valid TOTP code must succeed',
+  );
+  assert.equal(
+    verifyTwoFactorCode({ encryptedSecret: setup.encryptedSecret, code, userId: 42 }),
+    false,
+    'replaying the same TOTP code in the same time-step must be rejected',
+  );
+  // Different userId with same setup/code is tracked independently
+  assert.equal(
+    verifyTwoFactorCode({ encryptedSecret: setup.encryptedSecret, code, userId: 43 }),
+    true,
+  );
+});
+
+test('recovery codes use keyed HMAC-SHA256 while remaining backwards-compatible with legacy hashes', async () => {
+  const crypto = require('node:crypto');
+  const { generateRecoveryCodes, consumeRecoveryCode } = require('../utils/totp');
+
+  const { codes, hashes } = generateRecoveryCodes();
+  const plainSha256 = crypto
+    .createHash('sha256')
+    .update(codes[0].trim().toUpperCase())
+    .digest('hex');
+  assert.notEqual(
+    hashes[0],
+    plainSha256,
+    'new recovery code hashes must be keyed HMAC-SHA256, not plain unsalted SHA-256',
+  );
+
+  // Legacy plain SHA-256 hash stored before upgrade must still be consumable once
+  const legacyCode = 'ABCDE-12345';
+  const legacyHash = crypto.createHash('sha256').update(legacyCode).digest('hex');
+  const state = { stored: [legacyHash] };
+  const mockDb = {
+    async query(sql, params) {
+      if (sql.startsWith('SELECT')) {
+        return [[{ two_fa_recovery_codes: [...state.stored] }]];
+      }
+      if (sql.startsWith('UPDATE')) {
+        state.stored = JSON.parse(params[0]);
+        return [{}];
+      }
+      throw new Error('unexpected sql');
+    },
+  };
+
+  assert.equal(await consumeRecoveryCode({ db: mockDb, userId: 7, code: legacyCode }), true);
+  assert.equal(state.stored.length, 0);
+  assert.equal(await consumeRecoveryCode({ db: mockDb, userId: 7, code: legacyCode }), false);
+});
+
+test('csrfMiddleware ignores URL query-string _csrf tokens', () => {
+  const { csrfMiddleware, generateToken, createSignedToken, CSRF_COOKIE_NAME } = require('../middleware/csrf');
+  const middleware = csrfMiddleware({ cookieSecure: false, cookieSameSite: 'lax' });
+  const signed = createSignedToken(generateToken());
+
+  let statusCode = null;
+  let calledNext = false;
+  middleware(
+    {
+      method: 'POST',
+      path: '/api/admin/settings',
+      cookies: { [CSRF_COOKIE_NAME]: signed },
+      headers: {},
+      body: {},
+      query: { _csrf: signed },
+    },
+    {
+      status(code) {
+        statusCode = code;
+        return { json() {} };
+      },
+      cookie() {},
+      clearCookie() {},
+    },
+    () => {
+      calledNext = true;
+    },
+  );
+
+  assert.equal(calledNext, false);
+  assert.equal(statusCode, 403);
+});
+
+test('requireAdminRoutePermission fails closed on unmapped admin paths', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'routes', 'admin.js'), 'utf8');
+  const rules = source.slice(
+    source.indexOf('const ADMIN_PERMISSION_RULES'),
+    source.indexOf('router.use(requireAdminRoutePermission)'),
+  );
+  const requireAdminRoutePermission = new Function(
+    'requirePermission',
+    `${rules}; return requireAdminRoutePermission;`,
+  )(() => (req, res, next) => next());
+
+  const staff = { admin_role: 'staff_admin', admin_permissions: [] };
+  let status = null;
+  let nextCalled = false;
+  requireAdminRoutePermission(
+    { path: '/unmapped-future-endpoint', user: staff },
+    { status: (code) => ({ json: () => { status = code; } }) },
+    () => { nextCalled = true; },
+  );
+  assert.equal(nextCalled, false);
+  assert.equal(status, 403);
+});
+
+test('admin hardening invariants hold across routes and index.js', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const read = (...parts) => fs.readFileSync(path.join(__dirname, '..', ...parts), 'utf8');
+
+  const indexSrc = read('index.js');
+  assert.match(indexSrc, /\/api\/admin-management\/admins\/:id\/change-password",\s*authLimiter/);
+  assert.match(indexSrc, /X-Step-Up-Password/);
+  assert.match(indexSrc, /X-Step-Up-Otp/);
+
+  const adminSrc = read('routes', 'admin.js');
+  assert.match(adminSrc, /LOCATION_CACHE_MAX_ENTRIES/);
+  assert.doesNotMatch(adminSrc, /req\.headers\["x-city"\]/);
+  assert.doesNotMatch(adminSrc, /req\.headers\["cf-ipcity"\]/);
+
+  const mgmtSrc = read('routes', 'adminManagement.js');
+  assert.match(mgmtSrc, /ALLOWED_ADMIN_PERMISSIONS/);
+  assert.match(mgmtSrc, /requireStepUp\(\)/);
+  assert.match(mgmtSrc, /validateAndNormalizePermissions/);
+
+  const secSrc = read('routes', 'adminSecurity.js');
+  assert.match(secSrc, /requireStepUp\(\)/);
+  assert.match(secSrc, /recordFailedLoginAtomic/);
+});

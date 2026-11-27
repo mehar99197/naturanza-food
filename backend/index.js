@@ -414,6 +414,8 @@ const corsOptions = {
     "X-Skip-Auth-Refresh",
     "x-csrf-token",
     "X-CSRF-Token",
+    "X-Step-Up-Password",
+    "X-Step-Up-Otp",
   ],
   exposedHeaders: ["Content-Disposition", "Content-Type", "Content-Length"],
 };
@@ -744,6 +746,16 @@ if (ENABLE_RATE_LIMITS) {
   app.use("/api/admin/staff-login", authLimiter);
   // 2FA verify/enable/disable endpoints are credential-adjacent — same strict bucket.
   app.use("/api/admin/security/2fa", authLimiter);
+  // Step-up password / OTP verification on IP allowlist mutations & admin credential actions.
+  app.use("/api/admin/security/ip-allowlist", (req, res, next) =>
+    req.method === "GET" ? next() : authLimiter(req, res, next),
+  );
+  app.use("/api/admin-management/admins/:id/change-password", authLimiter);
+  app.use("/api/admin-management/admins/:id/reset-password", authLimiter);
+  app.use("/api/admin-management/admins/:id/role", authLimiter);
+  app.use("/api/admin-management/admins", (req, res, next) =>
+    req.method === "POST" ? authLimiter(req, res, next) : next(),
+  );
 
   app.use("/api/auth/forgot-password", passwordResetLimiter);
   app.use("/api/auth/reset-password", passwordResetLimiter);

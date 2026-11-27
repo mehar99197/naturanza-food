@@ -8,6 +8,7 @@ const { toNullableString } = require("../utils/helpers");
 const { getAdminSettings } = require("../utils/adminSettings");
 const { sendPaymentStatusEmail } = require("../utils/emailService");
 const { getPublicSafepayStatus } = require("../utils/safepay");
+const { logAdminAction, getClientIP } = require("../utils/adminHelpers");
 
 const ALLOWED_TX_STATUSES = new Set([
   "all",
@@ -348,6 +349,12 @@ router.post(
       };
 
       await conn.commit();
+
+      await logAdminAction(
+        req.user.id,
+        `Marked COD payment collected for order #${order.id} (PKR ${collectedAmount.toFixed(2)})`,
+        getClientIP(req),
+      );
 
       if (emailCtx.email) {
         setImmediate(async () => {

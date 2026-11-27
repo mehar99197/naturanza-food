@@ -50,7 +50,7 @@ const authenticateToken = async (req, res, next) => {
 
         const [userRows] = await db
             .promise()
-            .query("SELECT id, email, name, role, admin_role, admin_permissions, profile_image, is_active FROM users WHERE id = ? LIMIT 1", [userId]);
+            .query("SELECT id, email, name, role, admin_role, admin_permissions, profile_image, is_active, two_fa_enabled FROM users WHERE id = ? LIMIT 1", [userId]);
 
         if (!userRows.length) {
             return res.status(401).json({ error: "User account not found" });
@@ -78,6 +78,7 @@ const authenticateToken = async (req, res, next) => {
             admin_role: userRows[0].admin_role,
             admin_permissions: adminPermissions,
             profile_image: userRows[0].profile_image,
+            two_fa_enabled: userRows[0].two_fa_enabled === true || Number(userRows[0].two_fa_enabled) === 1,
             jti: payload.jti,
         };
         req.token = token;
@@ -135,7 +136,7 @@ const optionalAuthenticateToken = async (req, res, next) => {
         // evaluate against undefined instead of the account's real grants.
         const [userRows] = await db
             .promise()
-            .query("SELECT id, email, name, role, admin_role, admin_permissions, profile_image, is_active FROM users WHERE id = ? LIMIT 1", [userId]);
+            .query("SELECT id, email, name, role, admin_role, admin_permissions, profile_image, is_active, two_fa_enabled FROM users WHERE id = ? LIMIT 1", [userId]);
 
         if (!userRows.length) {
             req.authError = "User account not found";
@@ -164,6 +165,7 @@ const optionalAuthenticateToken = async (req, res, next) => {
             admin_role: userRows[0].admin_role,
             admin_permissions: adminPermissions,
             profile_image: userRows[0].profile_image,
+            two_fa_enabled: userRows[0].two_fa_enabled === true || Number(userRows[0].two_fa_enabled) === 1,
             jti: payload.jti,
         };
         req.token = token;

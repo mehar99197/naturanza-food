@@ -4,6 +4,14 @@ const { dbPool } = require("../config/db");
 const { authenticateToken, isAdmin } = require("../middleware/auth");
 const requirePermission = require("../middleware/requirePermission");
 const { restrictBody } = require("../middleware/security");
+const { logAdminAction, getClientIP } = require("../utils/adminHelpers");
+
+const parsePositiveInt = (raw) => {
+  const str = String(raw ?? "").trim();
+  if (!/^\d+$/.test(str)) return null;
+  const num = Number(str);
+  return Number.isSafeInteger(num) && num > 0 ? num : null;
+};
 
 // All routes require authentication and admin role
 router.use(authenticateToken);
@@ -57,6 +65,12 @@ router.post("/city-fees", restrictBody("city_name", "fee", "is_active"), async (
        [normalizedCityName, parsedFee, Boolean(is_active)],
     );
 
+    await logAdminAction(
+      req.user.id,
+      `Created shipping city ${normalizedCityName} (fee: ${parsedFee})`,
+      getClientIP(req),
+    );
+
     res.status(201).json({
       id: result.insertId,
        city_name: normalizedCityName,
@@ -71,7 +85,10 @@ router.post("/city-fees", restrictBody("city_name", "fee", "is_active"), async (
 // PUT /api/admin/shipping/city-fees/:id - update city
 router.put("/city-fees/:id", restrictBody("city_name", "fee", "is_active"), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveInt(req.params.id);
+    if (!id) {
+      return res.status(400).json({ error: "Invalid shipping city id" });
+    }
     const { city_name, fee, is_active } = req.body;
 
     const updates = [];
@@ -125,6 +142,13 @@ router.put("/city-fees/:id", restrictBody("city_name", "fee", "is_active"), asyn
     if (!cities.length) {
       return res.status(404).json({ error: "Shipping city not found" });
     }
+
+    await logAdminAction(
+      req.user.id,
+      `Updated shipping city #${id} (${cities[0].city_name}, fee: ${cities[0].fee})`,
+      getClientIP(req),
+    );
+
     res.json(cities[0]);
   } catch (error) {
     res.status(500).json({ error: "Could not update shipping city" });
@@ -134,11 +158,21 @@ router.put("/city-fees/:id", restrictBody("city_name", "fee", "is_active"), asyn
 // DELETE /api/admin/shipping/city-fees/:id - delete city
 router.delete("/city-fees/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveInt(req.params.id);
+    if (!id) {
+      return res.status(400).json({ error: "Invalid shipping city id" });
+    }
     const [result] = await dbPool.query("DELETE FROM city_delivery_fees WHERE id = ?", [id]);
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "Shipping city not found" });
     }
+
+    await logAdminAction(
+      req.user.id,
+      `Deleted shipping city #${id}`,
+      getClientIP(req),
+    );
+
     res.json({ message: "City deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: "Could not delete shipping city" });

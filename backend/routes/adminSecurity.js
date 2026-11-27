@@ -7,8 +7,9 @@ const requireSuperAdmin = require("../middleware/requireSuperAdmin");
 const { restrictBody } = require("../middleware/security");
 const asyncHandler = require("../middleware/asyncHandler");
 const { enforceSuperAdminIpAllowlist } = require("../middleware/adminIpAllowlist");
-const { getClientIp } = require("../utils/clientIp");
+const { requireStepUp } = require("../middleware/requireStepUp");
 const { getTrustedClientIp } = require("../utils/rateLimitKey");
+const { checkAccountLockout, recordFailedLoginAtomic } = require("../utils/loginSecurity");
 const { hashToken } = require("../utils/sessionManager");
 const { revokeRefreshTokensBySessionId } = require("../utils/tokenStore");
 const {
@@ -32,7 +33,7 @@ const audit = (req, action, category, metadata = null) =>
     action,
     category,
     actorEmail: req.user.email,
-    ipAddress: getClientIp(req),
+    ipAddress: getTrustedClientIp(req) || null,
     userAgent: req.headers["user-agent"] || null,
     metadata,
   });
@@ -83,7 +84,7 @@ router.get(
     res.json({
       ...overview,
       sessions: overview.sessions.map((row) => mapSessionRow(row, currentSessionId)),
-      currentIp: getTrustedClientIp(req) || getClientIp(req) || null,
+      currentIp: getTrustedClientIp(req) || null,
     });
   }),
 );
@@ -262,6 +263,7 @@ router.post(
     const valid = verifyTwoFactorCode({
       encryptedSecret: record.two_fa_secret_encrypted,
       code,
+      userId: req.user.id,
     });
     if (!valid) {
       return res.status(400).json({ error: "Invalid code. Check your authenticator app and try again." });
@@ -299,10 +301,17 @@ router.post(
       return res.status(400).json({ error: "Password and authentication code are required." });
     }
 
+    const lockout = await checkAccountLockout(db.promise(), req.user.id);
+    if (lockout?.locked) {
+      return res.status(429).json({
+        error: "Too many failed verification attempts. Please try again later.",
+      });
+    }
+
     const [rows] = await db
       .promise()
       .query(
-        "SELECT password, two_fa_enabled, two_fa_secret_encrypted FROM users WHERE id = ? LIMIT 1",
+        "SELECT email, password, two_fa_enabled, two_fa_secret_encrypted FROM users WHERE id = ? LIMIT 1",
         [req.user.id],
       );
 
@@ -316,17 +325,20 @@ router.post(
 
     const passwordOk = await bcrypt.compare(password, record.password || "");
     if (!passwordOk) {
+      await recordFailedLoginAtomic(db.promise(), req.user.id, record.email, true);
       return res.status(401).json({ error: "Password is incorrect." });
     }
 
     let codeOk = verifyTwoFactorCode({
       encryptedSecret: record.two_fa_secret_encrypted,
       code,
+      userId: req.user.id,
     });
     if (!codeOk) {
       codeOk = await consumeRecoveryCode({ db: db.promise(), userId: req.user.id, code });
     }
     if (!codeOk) {
+      await recordFailedLoginAtomic(db.promise(), req.user.id, record.email, true);
       return res.status(401).json({ error: "Invalid authentication or recovery code." });
     }
 
@@ -379,10 +391,17 @@ router.post(
       return res.status(400).json({ error: "Enter the 6-digit code from your authenticator app." });
     }
 
+    const lockout = await checkAccountLockout(db.promise(), req.user.id);
+    if (lockout?.locked) {
+      return res.status(429).json({
+        error: "Too many failed verification attempts. Please try again later.",
+      });
+    }
+
     const [rows] = await db
       .promise()
       .query(
-        "SELECT two_fa_enabled, two_fa_secret_encrypted FROM users WHERE id = ? LIMIT 1",
+        "SELECT email, two_fa_enabled, two_fa_secret_encrypted FROM users WHERE id = ? LIMIT 1",
         [req.user.id],
       );
 
@@ -394,8 +413,10 @@ router.post(
     const valid = verifyTwoFactorCode({
       encryptedSecret: record.two_fa_secret_encrypted,
       code,
+      userId: req.user.id,
     });
     if (!valid) {
+      await recordFailedLoginAtomic(db.promise(), req.user.id, record.email, true);
       return res.status(401).json({ error: "Invalid authentication code." });
     }
 
@@ -430,7 +451,7 @@ router.get(
     const entries = await listAllowlistEntries();
     res.json({
       items: entries,
-      currentIp: getTrustedClientIp(req) || getClientIp(req) || null,
+      currentIp: getTrustedClientIp(req) || null,
       enforced: entries.length > 0,
     });
   }),
@@ -445,6 +466,7 @@ router.post(
   authenticateToken,
   isAdmin,
   requireSuperAdmin,
+  requireStepUp(),
   restrictBody("label", "cidr"),
   asyncHandler(async (req, res) => {
     const label = String(req.body?.label || "").trim().slice(0, 120);
@@ -460,7 +482,7 @@ router.post(
     }
 
     const existing = await listAllowlistEntries();
-    const currentIp = getTrustedClientIp(req) || getClientIp(req);
+    const currentIp = getTrustedClientIp(req);
     if (existing.length === 0 && !ipMatchesCidr(currentIp, parsed.cidr)) {
       return res.status(400).json({
         error: `The first allowlist entry must include your current IP (${currentIp || "unknown"}). This prevents accidental lockout.`,
@@ -498,6 +520,7 @@ router.delete(
   authenticateToken,
   isAdmin,
   requireSuperAdmin,
+  requireStepUp(),
   restrictBody(),
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
@@ -513,7 +536,7 @@ router.delete(
     }
 
     const remaining = entries.filter((entry) => Number(entry.id) !== id);
-    const currentIp = getTrustedClientIp(req) || getClientIp(req);
+    const currentIp = getTrustedClientIp(req);
     if (
       remaining.length > 0 &&
       !remaining.some((entry) => ipMatchesCidr(currentIp, entry.cidr))

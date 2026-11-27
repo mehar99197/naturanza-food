@@ -1,11 +1,15 @@
 import { useState } from "react";
 import { UserPlus } from "lucide-react";
 import { adminAPI } from "@/services/api";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 import { toast } from "sonner";
 import { PERMISSION_LIST, PERMISSION_GROUPS } from "@/config/adminPermissions";
 
 export function AddAdminForm({ onSuccess }) {
+  const { admin: currentAdmin } = useAdminAuth();
   const [loading, setLoading] = useState(false);
+  const [stepUp, setStepUp] = useState({ currentPassword: "", otpCode: "" });
+  const [needsOtp, setNeedsOtp] = useState(Boolean(currentAdmin?.two_fa_enabled));
   const [formData, setFormData] = useState({
     full_name: "",
     email: "",
@@ -35,7 +39,10 @@ export function AddAdminForm({ onSuccess }) {
       data.append("role", formData.role);
       data.append("permissions", JSON.stringify(formData.permissions));
 
-      const response = await adminAPI.createAdmin(data);
+      const response = await adminAPI.createAdmin(data, {
+        currentPassword: stepUp.currentPassword,
+        otpCode: stepUp.otpCode.trim(),
+      });
 
       if (response?.emailStatus === "failed") {
         toast.error(response?.message || "Admin created, but reset email failed to send.");
@@ -50,9 +57,13 @@ export function AddAdminForm({ onSuccess }) {
         role: "staff_admin",
         permissions: [],
       });
+      setStepUp({ currentPassword: "", otpCode: "" });
 
       if (onSuccess) onSuccess();
     } catch (error) {
+      if (error?.response?.data?.requiresTwoFactor) {
+        setNeedsOtp(true);
+      }
       toast.error(error?.response?.data?.error || "Failed to create admin");
     } finally {
       setLoading(false);
@@ -158,6 +169,32 @@ export function AddAdminForm({ onSuccess }) {
             </div>
           </div>
         )}
+
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs font-semibold text-slate-700">Security Confirmation</p>
+          <input
+            type="password"
+            required
+            autoComplete="current-password"
+            value={stepUp.currentPassword}
+            onChange={(e) => setStepUp((prev) => ({ ...prev, currentPassword: e.target.value }))}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+            placeholder="Your current password *"
+          />
+          {(needsOtp || currentAdmin?.two_fa_enabled) ? (
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              required
+              value={stepUp.otpCode}
+              onChange={(e) => setStepUp((prev) => ({ ...prev, otpCode: e.target.value.replace(/\D/g, "") }))}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+              placeholder="6-digit authenticator code *"
+            />
+          ) : null}
+        </div>
 
         <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
           <p className="text-xs text-blue-800">

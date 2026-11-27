@@ -18,7 +18,6 @@ const {
 const { blacklistAccessToken, revokeRefreshTokensByUserId } = require("../utils/tokenStore");
 const { getAdminSettings, updateAdminSettings } = require("../utils/adminSettings");
 const { getAboutContent, updateAboutContent } = require("../utils/aboutContent");
-const { getClientIp } = require("../utils/clientIp");
 const { getTrustedClientIp } = require("../utils/rateLimitKey");
 const { logAdminAction, generateSecurePassword } = require("../utils/adminHelpers");
 const { escapeHtml } = require("../utils/htmlEscape");
@@ -37,7 +36,7 @@ const {
   revokeSessionByToken,
   revokeSessionsByUserId,
 } = require("../utils/sessionManager");
-const { adminResetPasswordSchema } = require("../validation/authSchemas");
+const { adminResetPasswordSchema, strongPassword } = require("../validation/authSchemas");
 const {
   ensurePasswordHistoryTable,
   addPasswordToHistory,
@@ -63,6 +62,7 @@ const IP_LOOKUP_TIMEOUT_MS = Number.parseInt(
   10,
 );
 const LOCATION_CACHE_TTL_MS = 1000 * 60 * 60 * 6;
+const LOCATION_CACHE_MAX_ENTRIES = 500;
 const adminLoginLocationCache = new Map();
 // Real client IP for admin login-history/session display — resolved from the
 // forwarded headers (Express's req.ip is a Hostinger internal hop). See
@@ -158,6 +158,12 @@ const getCachedLocationForIp = (ipAddress) => {
 };
 
 const setCachedLocationForIp = (ipAddress, location) => {
+  if (adminLoginLocationCache.size >= LOCATION_CACHE_MAX_ENTRIES) {
+    const oldestKey = adminLoginLocationCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      adminLoginLocationCache.delete(oldestKey);
+    }
+  }
   adminLoginLocationCache.set(ipAddress, {
     location,
     timestamp: Date.now(),
@@ -243,32 +249,9 @@ const lookupLocationByIp = async (ipAddress) => {
   return "Unknown";
 };
 
+// Resolve location strictly from the trusted client IP — never from
+// client-spoofable headers like x-city / x-country / cf-ipcity.
 const resolveRequestLocation = async (req, ipAddress = null) => {
-  const city = String(
-    req.headers["x-city"] ||
-      req.headers["cf-ipcity"] ||
-      req.headers["x-vercel-ip-city"] ||
-      "",
-  ).trim();
-  const region = String(
-    req.headers["x-region"] ||
-      req.headers["cf-region"] ||
-      req.headers["x-vercel-ip-country-region"] ||
-      "",
-  ).trim();
-  const country = String(
-    req.headers["x-country"] ||
-      req.headers["x-country-code"] ||
-      req.headers["cf-ipcountry"] ||
-      req.headers["x-vercel-ip-country"] ||
-      "",
-  ).trim();
-
-  const parts = [city, region, country].filter(Boolean);
-  if (parts.length) {
-    return parts.join(", ");
-  }
-
   return lookupLocationByIp(ipAddress || getRequestIp(req));
 };
 
@@ -537,6 +520,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       let twoFactorOk = verifyTwoFactorCode({
         encryptedSecret: user.two_fa_secret_encrypted,
         code: otpCode,
+        userId: user.id,
       });
       if (!twoFactorOk) {
         twoFactorOk = await consumeRecoveryCode({
@@ -627,10 +611,11 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
       }
     }
 
+    // Admin JWT is delivered exclusively via the HttpOnly, Secure, SameSite=strict
+    // `adminAccessToken` cookie above — never exposed to JS in the JSON body.
     return res.json({
       success: true,
       message: gateLabel === "super_admin" ? "Admin login successful" : "Staff login successful",
-      token,
       accessTokenExpiresIn: accessToken.expiresInSeconds,
       admin: {
         id: user.id,
@@ -640,6 +625,7 @@ async function processAdminLogin(req, res, { allowedAdminRoles, gateLabel }) {
         admin_role: user.admin_role, // no fallback — authoritative value from DB
         admin_permissions: adminPermissions,
         profile_image: user.profile_image || null,
+        two_fa_enabled: user.two_fa_enabled === true || Number(user.two_fa_enabled) === 1,
       },
     });
   } catch (error) {
@@ -682,9 +668,10 @@ router.get("/verify", authenticateToken, isAdmin, (req, res) => {
       name: req.user.name,
       email: req.user.email,
       role: req.user.role,
-       admin_role: req.user.admin_role,
+      admin_role: req.user.admin_role,
       admin_permissions: req.user.admin_permissions,
       profile_image: req.user.profile_image || null,
+      two_fa_enabled: Boolean(req.user.two_fa_enabled),
     },
   });
 });
@@ -744,7 +731,7 @@ const {
 // Who/where an admin account email was triggered from (display only — the
 // forwarded-for IP is the real client here; see utils/clientIp.js).
 const buildAdminEmailRequestContext = async (req) => {
-  const ip = getClientIp(req);
+  const ip = getRequestIp(req);
   const location = await resolveRequestLocation(req, ip).catch(() => null);
   return {
     ip,
@@ -1042,6 +1029,8 @@ const ADMIN_PERMISSION_RULES = [
   { prefix: "/newsletter", permission: "manage_subscribers" },
 ];
 
+const ADMIN_SHARED_ROUTE_PREFIXES = ["/dashboard"];
+
 const requireAdminRoutePermission = (req, res, next) => {
   // Lower-cased because Express matches routes case-INSENSITIVELY: a request to
   // "/api/admin/Users" reaches the "/users" handler while req.path stays
@@ -1066,12 +1055,22 @@ const requireAdminRoutePermission = (req, res, next) => {
     return res.status(403).json({ error: "Super admin access required" });
   }
 
+  if (
+    ADMIN_SHARED_ROUTE_PREFIXES.some(
+      (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+    )
+  ) {
+    return next();
+  }
+
   const rule = ADMIN_PERMISSION_RULES.find(({ prefix }) =>
     path === prefix || path.startsWith(`${prefix}/`),
   );
 
+  // Fail closed: any route not explicitly listed above or in ADMIN_PERMISSION_RULES
+  // is super-admin-only by default so future endpoints can never silently leak to staff.
   if (!rule) {
-    return next();
+    return res.status(403).json({ error: "Insufficient admin permissions" });
   }
 
   if (Array.isArray(rule.altPermissions) && Array.isArray(req.user?.admin_permissions)) {
@@ -1253,6 +1252,7 @@ router.get("/settings", async (req, res) => {
 router.put("/settings", restrictBody('storeName', 'storeEmail', 'storePhone', 'currency', 'taxRate', 'shippingFlat', 'shippingFree', 'emailNotifications', 'orderNotifications', 'lowStockAlerts', 'lowStockThreshold', 'address', 'supportHours', 'facebookUrl', 'instagramUrl', 'tiktokUrl', 'twitterUrl', 'youtubeUrl', 'whatsappNumber', 'whatsappEnabled', 'mapLatitude', 'mapLongitude', 'mapLocationLabel', 'newsletterWelcomePromoCode', 'storeDiscountActive', 'storeDiscountPercentage', 'storeDiscountLabel'), async (req, res) => {
   try {
     const settings = await updateAdminSettings(db.promise(), req.body || {});
+    await logAdminAction(req.user.id, "Updated store settings", getRequestIp(req));
     res.json(settings);
   } catch (error) {
     res.status(500).json({ error: "Could not update settings" });
@@ -1272,6 +1272,7 @@ router.get("/about", async (req, res) => {
 router.put("/about", restrictBody('hero', 'story', 'stats', 'values', 'team', 'certifications', 'sections'), async (req, res) => {
   try {
     const content = await updateAboutContent(db.promise(), req.body || {});
+    await logAdminAction(req.user.id, "Updated About page content", getRequestIp(req));
     res.json(content);
   } catch (error) {
     res.status(500).json({ error: "Could not update About content" });
@@ -1558,7 +1559,21 @@ router.post("/users", requireSuperAdmin, restrictBody('name', 'email', 'password
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
-    const passwordToHash = toNullableString(password) || generateSecurePassword();
+    if (normalizedEmail.length > 254 || !SIMPLE_EMAIL_REGEX.test(normalizedEmail)) {
+      return res.status(400).json({ error: "Please provide a valid email address" });
+    }
+
+    const providedPassword = toNullableString(password);
+    if (providedPassword) {
+      const passwordCheck = strongPassword.safeParse(providedPassword);
+      if (!passwordCheck.success) {
+        return res.status(400).json({
+          error: passwordCheck.error?.issues?.[0]?.message || "Password does not meet strength requirements",
+        });
+      }
+    }
+
+    const passwordToHash = providedPassword || generateSecurePassword();
     const hashedPassword = await bcrypt.hash(passwordToHash, 12);
     const nextAdminRole = normalizedRole === "admin" ? "staff_admin" : null;
 
@@ -1575,6 +1590,12 @@ router.post("/users", requireSuperAdmin, restrictBody('name', 'email', 'password
         nextAdminRole,
         toBoolean(is_active, true),
       ],
+    );
+
+    await logAdminAction(
+      req.user.id,
+      `Created user #${result.insertId} (${normalizedEmail}, role: ${normalizedRole})`,
+      getRequestIp(req),
     );
 
     const [rows] = await db.promise().query(
@@ -1656,7 +1677,7 @@ router.put("/users/:id", restrictBody('name', 'email', 'phone', 'address'), asyn
       await logAdminAction(
         req.user.id,
         `Changed email for customer ${userId}: ${target.email} -> ${nextEmail}`,
-        getClientIp(req),
+        getRequestIp(req),
       );
     }
 
@@ -1724,6 +1745,20 @@ router.patch("/users/:id/status", restrictBody('is_active'), async (req, res) =>
       return res.status(404).json({ error: "User not found" });
     }
 
+    if (!nextActive) {
+      await Promise.allSettled([
+        revokeSessionsByUserId(db.promise(), userId),
+        revokeRefreshTokensByUserId(db.promise(), userId, "account_deactivated"),
+        invalidateAllUserTokens(db.promise(), userId),
+      ]);
+    }
+
+    await logAdminAction(
+      req.user.id,
+      `${nextActive ? "Activated" : "Deactivated"} customer #${userId}`,
+      getRequestIp(req),
+    );
+
     res.json({
       message: `User ${nextActive ? "activated" : "deactivated"} successfully`,
     });
@@ -1775,6 +1810,12 @@ router.put("/users/:id/role", requireSuperAdmin, restrictBody('role'), async (re
       ]);
     }
 
+    await logAdminAction(
+      req.user.id,
+      `Changed user #${targetUserId} role to ${normalizedRole}`,
+      getRequestIp(req),
+    );
+
     res.json({ message: "User role updated successfully" });
   } catch (error) {
     res.status(500).json({ error: "Error updating user role" });
@@ -1784,16 +1825,52 @@ router.put("/users/:id/role", requireSuperAdmin, restrictBody('role'), async (re
 // Delete user
 router.delete("/users/:id", requireSuperAdmin, async (req, res) => {
   try {
+    const rawId = String(req.params.id || "").trim();
+    const targetUserId = /^\d+$/.test(rawId) ? Number(rawId) : NaN;
+    if (!Number.isSafeInteger(targetUserId) || targetUserId <= 0) {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+
     // Prevent self-deletion
-    if (parseInt(req.params.id) === req.user.id) {
+    if (targetUserId === req.user.id) {
       return res.status(400).json({ error: "Cannot delete your own account" });
     }
 
-    const [result] = await db.promise().query("DELETE FROM users WHERE id = ?", [req.params.id]);
+    const [[targetUser]] = await db.promise().query(
+      "SELECT id, email, role, admin_role FROM users WHERE id = ? LIMIT 1",
+      [targetUserId],
+    );
+    if (!targetUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (String(targetUser.admin_role || "").toLowerCase() === "super_admin") {
+      const [[{ activeSupers }]] = await db.promise().query(
+        "SELECT COUNT(*) AS activeSupers FROM users WHERE role = 'admin' AND admin_role = 'super_admin' AND is_active = TRUE AND id <> ?",
+        [targetUserId],
+      );
+      if (Number(activeSupers) < 1) {
+        return res.status(400).json({ error: "Cannot delete the last active super admin" });
+      }
+    }
+
+    await Promise.allSettled([
+      revokeSessionsByUserId(db.promise(), targetUserId),
+      revokeRefreshTokensByUserId(db.promise(), targetUserId, "account_deleted"),
+      invalidateAllUserTokens(db.promise(), targetUserId),
+    ]);
+
+    const [result] = await db.promise().query("DELETE FROM users WHERE id = ?", [targetUserId]);
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "User not found" });
     }
+
+    await logAdminAction(
+      req.user.id,
+      `Deleted user #${targetUserId} (${targetUser.email})`,
+      getRequestIp(req),
+    );
 
     res.json({ message: "User deleted successfully" });
   } catch (error) {
@@ -1804,7 +1881,10 @@ router.delete("/users/:id", requireSuperAdmin, async (req, res) => {
 // Low stock alert
 router.get("/inventory/low-stock", async (req, res) => {
   try {
-    const threshold = req.query.threshold || 10;
+    const parsedThreshold = Number.parseInt(String(req.query.threshold ?? "10"), 10);
+    const threshold = Number.isInteger(parsedThreshold)
+      ? Math.min(Math.max(parsedThreshold, 0), 10000)
+      : 10;
     const [results] = await db.promise().query(`
       SELECT p.*, c.name as category_name
       FROM products p
@@ -1932,6 +2012,12 @@ router.post("/tax-rates", restrictBody('name', 'rate_percent', 'country', 'state
       return rows[0];
     });
 
+    await logAdminAction(
+      req.user.id,
+      `Created tax rate "${normalizedName}" (${parsedRate}%, ${normalizedCountry})`,
+      getRequestIp(req),
+    );
+
     res.status(201).json({
       message: "Tax rate created successfully",
       taxRate,
@@ -2016,6 +2102,12 @@ router.put("/tax-rates/:id", restrictBody('name', 'rate_percent', 'country', 'st
       return res.status(404).json({ error: "Tax rate not found" });
     }
 
+    await logAdminAction(
+      req.user.id,
+      `Updated tax rate #${taxRateId} ("${normalizedName}", ${parsedRate}%)`,
+      getRequestIp(req),
+    );
+
     res.json({
       message: "Tax rate updated successfully",
       taxRate,
@@ -2049,6 +2141,7 @@ router.delete("/tax-rates/:id", async (req, res) => {
     }
 
     await db.promise().query("DELETE FROM tax_rates WHERE id = ?", [taxRateId]);
+    await logAdminAction(req.user.id, `Deleted tax rate #${taxRateId}`, getRequestIp(req));
     res.json({ message: "Tax rate deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: "Error deleting tax rate" });
@@ -2123,6 +2216,12 @@ router.post("/payment-methods", restrictBody('code', 'label', 'description', 'so
       .query("SELECT * FROM payment_methods WHERE id = ? LIMIT 1", [
         result.insertId,
       ]);
+
+    await logAdminAction(
+      req.user.id,
+      `Created payment method "${normalizedCode}" (${normalizedLabel})`,
+      getRequestIp(req),
+    );
 
     res.status(201).json({
       message: "Payment method created successfully",
@@ -2225,6 +2324,12 @@ router.put("/payment-methods/:id", restrictBody('code', 'label', 'description', 
         paymentMethodId,
       ]);
 
+    await logAdminAction(
+      req.user.id,
+      `Updated payment method #${paymentMethodId} (${normalizedCode}, active=${toBoolean(is_active, true)})`,
+      getRequestIp(req),
+    );
+
     res.json({
       message: "Payment method updated successfully",
       paymentMethod: rows[0],
@@ -2267,6 +2372,12 @@ router.delete("/payment-methods/:id", async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "Payment method not found" });
     }
+
+    await logAdminAction(
+      req.user.id,
+      `Deleted payment method #${paymentMethodId} (${paymentMethod.code})`,
+      getRequestIp(req),
+    );
 
     res.json({ message: "Payment method deleted successfully" });
   } catch (error) {
@@ -2447,6 +2558,11 @@ router.put("/returns/:id/status", restrictBody('status', 'note', 'refund_amount'
     );
 
     await connection.commit();
+    await logAdminAction(
+      req.user.id,
+      `Updated return request #${request.id} status to ${status}`,
+      getRequestIp(req),
+    );
     res.json({ message: "Return request updated successfully" });
   } catch (error) {
     await connection.rollback();

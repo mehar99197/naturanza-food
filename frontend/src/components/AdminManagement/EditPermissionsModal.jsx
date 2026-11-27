@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X, Shield, ShieldCheck, Save } from "lucide-react";
 import { adminAPI } from "@/services/api";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 import { toast } from "sonner";
 import { PERMISSION_LIST, PERMISSION_GROUPS } from "@/config/adminPermissions";
 
@@ -18,12 +19,15 @@ const normalizePermissions = (value) => {
 };
 
 export function EditPermissionsModal({ admin, onClose, onSuccess }) {
+  const { admin: currentAdmin } = useAdminAuth();
   const [role, setRole] = useState(
     admin.admin_role === "super_admin" ? "super_admin" : "staff_admin",
   );
   const [permissions, setPermissions] = useState(() =>
     normalizePermissions(admin.admin_permissions),
   );
+  const [stepUp, setStepUp] = useState({ currentPassword: "", otpCode: "" });
+  const [needsOtp, setNeedsOtp] = useState(Boolean(currentAdmin?.two_fa_enabled));
   const [saving, setSaving] = useState(false);
 
   const togglePermission = (id) => {
@@ -36,11 +40,17 @@ export function EditPermissionsModal({ admin, onClose, onSuccess }) {
     setSaving(true);
     try {
       const payloadPermissions = role === "super_admin" ? null : permissions;
-      await adminAPI.updateAdminRole(admin.id, role, payloadPermissions);
+      await adminAPI.updateAdminRole(admin.id, role, payloadPermissions, {
+        currentPassword: stepUp.currentPassword,
+        otpCode: stepUp.otpCode.trim(),
+      });
       toast.success("Permissions updated successfully");
       if (onSuccess) onSuccess();
       onClose();
     } catch (error) {
+      if (error?.response?.data?.requiresTwoFactor) {
+        setNeedsOtp(true);
+      }
       toast.error(error?.response?.data?.error || "Failed to update permissions");
     } finally {
       setSaving(false);
@@ -146,6 +156,30 @@ export function EditPermissionsModal({ admin, onClose, onSuccess }) {
               </p>
             </div>
           )}
+
+          <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-semibold text-slate-700">Security Confirmation</p>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={stepUp.currentPassword}
+              onChange={(e) => setStepUp((prev) => ({ ...prev, currentPassword: e.target.value }))}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+              placeholder="Your current password"
+            />
+            {(needsOtp || currentAdmin?.two_fa_enabled) ? (
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={stepUp.otpCode}
+                onChange={(e) => setStepUp((prev) => ({ ...prev, otpCode: e.target.value.replace(/\D/g, "") }))}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                placeholder="6-digit authenticator code"
+              />
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">
@@ -160,7 +194,11 @@ export function EditPermissionsModal({ admin, onClose, onSuccess }) {
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving}
+            disabled={
+              saving ||
+              !stepUp.currentPassword ||
+              ((needsOtp || currentAdmin?.two_fa_enabled) && stepUp.otpCode.length !== 6)
+            }
             className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {saving ? (

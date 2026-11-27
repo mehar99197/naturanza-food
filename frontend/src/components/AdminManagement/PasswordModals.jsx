@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X, Key, Eye, EyeOff, AlertTriangle } from "lucide-react";
 import { adminAPI } from "@/services/api";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 import { toast } from "sonner";
 
 // Password strength calculator
@@ -204,12 +205,21 @@ export function ChangePasswordModal({ admin, onClose, onSuccess }) {
 }
 
 export function ResetPasswordModal({ admin, onConfirm, onClose }) {
+  const { admin: currentAdmin } = useAdminAuth();
   const [loading, setLoading] = useState(false);
+  const [stepUp, setStepUp] = useState({ currentPassword: "", otpCode: "" });
+  const [needsOtp, setNeedsOtp] = useState(Boolean(currentAdmin?.two_fa_enabled));
 
   const handleConfirm = async () => {
     setLoading(true);
     try {
-      await onConfirm();
+      const result = await onConfirm({
+        currentPassword: stepUp.currentPassword,
+        otpCode: stepUp.otpCode.trim(),
+      });
+      if (result?.requiresTwoFactor) {
+        setNeedsOtp(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -227,7 +237,7 @@ export function ResetPasswordModal({ admin, onConfirm, onClose }) {
         <h3 className="mb-2 text-center text-lg font-bold text-slate-900">
           Reset Password for {admin?.name}?
         </h3>
-        <p className="mb-6 text-center text-sm text-slate-600">
+        <p className="mb-4 text-center text-sm text-slate-600">
            A secure password reset link will be sent to{" "}
           <strong className="text-slate-900">{admin?.email}</strong>
           <br />
@@ -235,6 +245,29 @@ export function ResetPasswordModal({ admin, onConfirm, onClose }) {
              The admin must use the link to choose a new password.
           </span>
         </p>
+
+        <div className="mb-5 space-y-2">
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={stepUp.currentPassword}
+            onChange={(e) => setStepUp((prev) => ({ ...prev, currentPassword: e.target.value }))}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
+            placeholder="Confirm your current password"
+          />
+          {(needsOtp || currentAdmin?.two_fa_enabled) ? (
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={stepUp.otpCode}
+              onChange={(e) => setStepUp((prev) => ({ ...prev, otpCode: e.target.value.replace(/\D/g, "") }))}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
+              placeholder="6-digit authenticator code"
+            />
+          ) : null}
+        </div>
 
         <div className="flex gap-2">
           <button
@@ -246,7 +279,11 @@ export function ResetPasswordModal({ admin, onConfirm, onClose }) {
           </button>
           <button
             onClick={handleConfirm}
-            disabled={loading}
+            disabled={
+              loading ||
+              !stepUp.currentPassword ||
+              ((needsOtp || currentAdmin?.two_fa_enabled) && stepUp.otpCode.length !== 6)
+            }
             className="flex-1 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
           >
             {loading ? "Resetting..." : "Reset Password"}

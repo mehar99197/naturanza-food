@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { db } = require('../config/db');
+const { getTrustedClientIp } = require('./rateLimitKey');
 
 // Generate a cryptographically strong password that satisfies all 4 character
 // classes (uppercase, lowercase, digit, special) and the >=12 char policy.
@@ -38,9 +39,9 @@ async function logAdminAction(adminId, action, ipAddress = null) {
   }
 }
 
-// Get client IP address — trusts Express req.ip (set by trust proxy)
+// Get client IP address from the proxy-trusted source (never raw X-Forwarded-For).
 function getClientIP(req) {
-  return req.ip || req.connection?.remoteAddress || null;
+  return getTrustedClientIp(req) || null;
 }
 
 module.exports = {

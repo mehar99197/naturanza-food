@@ -76,29 +76,33 @@ export function AdminAdmins() {
   const showDirectory = mobileSection === "directory";
   const showCreate = mobileSection === "create";
 
-  const handleRemoveAdmin = async () => {
-    if (!showRemoveModal) return;
+  const handleRemoveAdmin = async (stepUp) => {
+    if (!showRemoveModal) return null;
     
     try {
-      await adminAPI.removeAdminRole(showRemoveModal.id);
+      await adminAPI.removeAdminRole(showRemoveModal.id, stepUp);
       toast.success("Admin role removed successfully");
       setShowRemoveModal(null);
       loadAdmins();
+      return { success: true };
     } catch (error) {
       toast.error(error?.response?.data?.error || "Failed to remove admin role");
+      return { requiresTwoFactor: error?.response?.data?.requiresTwoFactor === true };
     }
   };
 
-  const handleResetPassword = async () => {
-    if (!showResetPasswordModal) return;
+  const handleResetPassword = async (stepUp) => {
+    if (!showResetPasswordModal) return null;
     
     try {
-      await adminAPI.resetPassword(showResetPasswordModal.id);
+      await adminAPI.resetPassword(showResetPasswordModal.id, stepUp);
       toast.success(`Password reset email sent to ${showResetPasswordModal.email}`);
       setShowResetPasswordModal(null);
       loadAdmins();
+      return { success: true };
     } catch (error) {
       toast.error(error?.response?.data?.error || "Failed to reset password");
+      return { requiresTwoFactor: error?.response?.data?.requiresTwoFactor === true };
     }
   };
 

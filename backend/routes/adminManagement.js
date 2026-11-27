@@ -5,23 +5,101 @@ const { db } = require('../config/db');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 const { restrictBody } = require('../middleware/security');
 const requireSuperAdmin = require('../middleware/requireSuperAdmin');
+const { requireStepUp } = require('../middleware/requireStepUp');
 const { uploadProfileImage } = require('../middleware/upload');
 const { generateSecurePassword, logAdminAction, getClientIP } = require('../utils/adminHelpers');
 const { createPasswordResetToken } = require('../utils/passwordResetTokens');
 const { sendPasswordResetEmail, sendPasswordChangedEmail } = require('../utils/emailService');
-const { getClientIp } = require('../utils/clientIp');
+const { getTrustedClientIp } = require('../utils/rateLimitKey');
 const { resolveDeviceName } = require('../utils/adminSecurity');
 const { revokeSessionsByUserId, touchSessionByToken } = require('../utils/sessionManager');
 const { revokeRefreshTokensByUserId } = require('../utils/tokenStore');
 const { syncDefaultAdminPassword } = require('../utils/envSync');
 const { hasReusedPassword, addPasswordToHistory } = require('../utils/passwordHistory');
+const { checkAccountLockout, recordFailedLoginAtomic } = require('../utils/loginSecurity');
 
 const isValidAdminStatus = (status) => ['active', 'inactive'].includes(status);
 const SIMPLE_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Canonical staff-admin permission allowlist (mirrors frontend/src/config/adminPermissions.js).
+const ALLOWED_ADMIN_PERMISSIONS = new Set([
+  'manage_products',
+  'manage_categories',
+  'manage_coupons',
+  'manage_reviews',
+  'manage_orders',
+  'manage_returns',
+  'manage_customers',
+  'manage_messages',
+  'manage_subscribers',
+  'view_reports',
+  'view_analytics',
+  'manage_shipping',
+  'manage_shipping_cities',
+  'manage_payments',
+  'manage_announcements',
+  'manage_blog',
+  'manage_team',
+]);
+
+const parsePositiveInt = (raw) => {
+  const str = String(raw ?? '').trim();
+  if (!/^\d+$/.test(str)) return null;
+  const num = Number(str);
+  return Number.isSafeInteger(num) && num > 0 ? num : null;
+};
+
+const validateAndNormalizePermissions = (raw) => {
+  if (raw === undefined || raw === null || raw === '') {
+    return { valid: true, value: null };
+  }
+
+  let parsed = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { valid: false, error: 'Permissions must be a valid JSON array of permission keys' };
+    }
+  }
+
+  if (parsed === null) {
+    return { valid: true, value: null };
+  }
+
+  if (!Array.isArray(parsed)) {
+    return { valid: false, error: 'Permissions must be an array of permission keys' };
+  }
+
+  if (parsed.length > ALLOWED_ADMIN_PERMISSIONS.size) {
+    return { valid: false, error: 'Too many permission entries' };
+  }
+
+  const normalized = [];
+  const seen = new Set();
+  for (const item of parsed) {
+    if (typeof item !== 'string') {
+      return { valid: false, error: 'Every permission key must be a string' };
+    }
+    const key = item.trim();
+    if (!ALLOWED_ADMIN_PERMISSIONS.has(key)) {
+      return { valid: false, error: `Unknown permission key: ${key}` };
+    }
+    if (!seen.has(key)) {
+      seen.add(key);
+      normalized.push(key);
+    }
+  }
+
+  return { valid: true, value: normalized };
+};
+
 const requireSelfOrSuperAdmin = (req, res, next) => {
-  const targetId = Number(req.params.id);
-  const isSelf = Number.isInteger(targetId) && targetId === req.user.id;
+  const targetId = parsePositiveInt(req.params.id);
+  if (!targetId) {
+    return res.status(400).json({ error: 'Invalid admin id' });
+  }
+  const isSelf = targetId === req.user.id;
   const isSuperAdmin = String(req.user?.admin_role || '').toLowerCase() === 'super_admin';
   if (!isSelf && !isSuperAdmin) {
     return res.status(403).json({ error: 'You can only update your own profile image' });
@@ -127,7 +205,7 @@ router.get('/admins', authenticateToken, isAdmin, requireSuperAdmin, async (req,
 });
 
 // POST /api/admin-management/admins - Create new admin
-router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, uploadProfileImage, restrictBody('full_name', 'email', 'phone', 'role', 'permissions'), async (req, res) => {
+router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, requireStepUp(), uploadProfileImage, restrictBody('full_name', 'email', 'phone', 'role', 'permissions'), async (req, res) => {
   try {
 
     const { full_name, email, phone, role, permissions } = req.body;
@@ -171,14 +249,11 @@ router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, uploadProf
       profilePicture = req.file.url;
     }
 
-    let adminPermissions = null;
-    if (permissions) {
-      try {
-        adminPermissions = typeof permissions === 'string' ? JSON.parse(permissions) : permissions;
-      } catch (e) {
-        adminPermissions = permissions;
-      }
+    const permissionsResult = validateAndNormalizePermissions(permissions);
+    if (!permissionsResult.valid) {
+      return res.status(400).json({ error: permissionsResult.error });
     }
+    const adminPermissions = permissionsResult.value;
 
     const requestedRole = String(role || 'staff_admin').trim().toLowerCase();
     const resolvedRole = await resolveAdminRole(db.promise(), requestedRole);
@@ -277,11 +352,14 @@ router.post('/admins', authenticateToken, isAdmin, requireSuperAdmin, uploadProf
 // PATCH /api/admin-management/admins/:id/status - Update admin status
 router.patch('/admins/:id/status', authenticateToken, isAdmin, requireSuperAdmin, restrictBody('status'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const targetId = parsePositiveInt(req.params.id);
+    if (!targetId) {
+      return res.status(400).json({ error: 'Invalid admin id' });
+    }
     const { status } = req.body;
 
     // Prevent self-deactivation
-    if (parseInt(id) === req.user.id) {
+    if (targetId === req.user.id) {
       return res.status(400).json({ error: 'Cannot change your own status' });
     }
 
@@ -290,7 +368,7 @@ router.patch('/admins/:id/status', authenticateToken, isAdmin, requireSuperAdmin
     }
 
     const isActive = status === 'active';
-    const [result] = await db.promise().query('UPDATE users SET is_active = ? WHERE id = ? AND role = "admin"', [isActive, id]);
+    const [result] = await db.promise().query('UPDATE users SET is_active = ? WHERE id = ? AND role = "admin"', [isActive, targetId]);
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Admin not found' });
@@ -298,12 +376,12 @@ router.patch('/admins/:id/status', authenticateToken, isAdmin, requireSuperAdmin
 
     if (!isActive) {
       await Promise.allSettled([
-        revokeSessionsByUserId(db.promise(), Number(id)),
-        revokeRefreshTokensByUserId(db.promise(), Number(id), 'admin_deactivated'),
+        revokeSessionsByUserId(db.promise(), targetId),
+        revokeRefreshTokensByUserId(db.promise(), targetId, 'admin_deactivated'),
       ]);
     }
 
-    await logAdminAction(req.user.id, `Changed admin ${id} status to ${status}`, getClientIP(req));
+    await logAdminAction(req.user.id, `Changed admin ${targetId} status to ${status}`, getClientIP(req));
 
     res.json({ message: 'Admin status updated successfully' });
   } catch (error) {
@@ -316,7 +394,10 @@ router.isValidAdminStatus = isValidAdminStatus;
 // POST /api/admin-management/admins/:id/profile-image - Upload/update admin profile image
 router.post('/admins/:id/profile-image', authenticateToken, isAdmin, requireSelfOrSuperAdmin, uploadProfileImage, async (req, res) => {
   try {
-    const targetId = Number(req.params.id);
+    const targetId = parsePositiveInt(req.params.id);
+    if (!targetId) {
+      return res.status(400).json({ error: 'Invalid admin id' });
+    }
 
     if (!req.file || !req.file.url) {
       return res.status(400).json({ error: 'No image file uploaded' });
@@ -343,7 +424,10 @@ router.post('/admins/:id/profile-image', authenticateToken, isAdmin, requireSelf
 // DELETE /api/admin-management/admins/:id/profile-image - Remove admin profile image
 router.delete('/admins/:id/profile-image', authenticateToken, isAdmin, async (req, res) => {
   try {
-    const targetId = Number(req.params.id);
+    const targetId = parsePositiveInt(req.params.id);
+    if (!targetId) {
+      return res.status(400).json({ error: 'Invalid admin id' });
+    }
     const isSelf = targetId === req.user.id;
     const isSuperAdmin = String(req.user.admin_role || '').toLowerCase() === 'super_admin';
 
@@ -369,10 +453,10 @@ router.delete('/admins/:id/profile-image', authenticateToken, isAdmin, async (re
 });
 
 // PATCH /api/admin-management/admins/:id/role - Update admin role and permissions
-router.patch('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin, restrictBody('role', 'permissions'), async (req, res) => {
+router.patch('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin, requireStepUp(), restrictBody('role', 'permissions'), async (req, res) => {
   try {
-    const targetId = Number(req.params.id);
-    if (!Number.isInteger(targetId) || targetId <= 0) {
+    const targetId = parsePositiveInt(req.params.id);
+    if (!targetId) {
       return res.status(400).json({ error: 'Invalid admin id' });
     }
 
@@ -390,7 +474,14 @@ router.patch('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin, 
     }
 
     const permissionsProvided = Object.prototype.hasOwnProperty.call(req.body, 'permissions');
-    const serializedPermissions = permissionsProvided ? JSON.stringify(permissions ?? null) : null;
+    let serializedPermissions = null;
+    if (permissionsProvided) {
+      const permissionsResult = validateAndNormalizePermissions(permissions);
+      if (!permissionsResult.valid) {
+        return res.status(400).json({ error: permissionsResult.error });
+      }
+      serializedPermissions = JSON.stringify(permissionsResult.value);
+    }
 
     const [result] = await db.promise().query(
       `UPDATE users
@@ -420,10 +511,10 @@ router.patch('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin, 
 });
 
 // DELETE /api/admin-management/admins/:id/role - Remove admin role
-router.delete('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin, async (req, res) => {
+router.delete('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin, requireStepUp(), async (req, res) => {
   try {
-    const targetId = Number(req.params.id);
-    if (!Number.isInteger(targetId) || targetId <= 0) {
+    const targetId = parsePositiveInt(req.params.id);
+    if (!targetId) {
       return res.status(400).json({ error: 'Invalid admin id' });
     }
 
@@ -464,12 +555,15 @@ router.delete('/admins/:id/role', authenticateToken, isAdmin, requireSuperAdmin,
 // GET /api/admin-management/admins/:id/logs - Get admin activity logs
 router.get('/admins/:id/logs', authenticateToken, isAdmin, requireSuperAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const targetId = parsePositiveInt(req.params.id);
+    if (!targetId) {
+      return res.status(400).json({ error: 'Invalid admin id' });
+    }
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
 
     const [logs] = await db.promise().query(
       'SELECT action, ip_address, created_at FROM admin_audit_logs WHERE admin_id = ? ORDER BY created_at DESC LIMIT ?',
-      [id, limit]
+      [targetId, limit]
     );
 
     res.json(logs);
@@ -481,12 +575,22 @@ router.get('/admins/:id/logs', authenticateToken, isAdmin, requireSuperAdmin, as
 // PATCH /api/admin-management/admins/:id/change-password - Change own password
 router.patch('/admins/:id/change-password', authenticateToken, isAdmin, restrictBody('current_password', 'new_password', 'confirm_password'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const targetId = parsePositiveInt(req.params.id);
+    if (!targetId) {
+      return res.status(400).json({ error: 'Invalid admin id' });
+    }
     const { current_password, new_password, confirm_password } = req.body;
 
     // Only allow changing own password
-    if (parseInt(id) !== req.user.id) {
+    if (targetId !== req.user.id) {
       return res.status(403).json({ error: 'You can only change your own password' });
+    }
+
+    const lockout = await checkAccountLockout(db.promise(), req.user.id);
+    if (lockout?.locked) {
+      return res.status(429).json({
+        error: 'Too many failed password verification attempts. Please try again later.',
+      });
     }
 
     if (!current_password || !new_password || !confirm_password) {
@@ -516,7 +620,7 @@ router.patch('/admins/:id/change-password', authenticateToken, isAdmin, restrict
     // Get current password hash
     const [user] = await db.promise().query(
       'SELECT password, email FROM users WHERE id = ?',
-      [id]
+      [targetId]
     );
 
     if (user.length === 0) {
@@ -526,6 +630,7 @@ router.patch('/admins/:id/change-password', authenticateToken, isAdmin, restrict
     // Verify current password
     const passwordMatch = await bcrypt.compare(current_password, user[0].password);
     if (!passwordMatch) {
+      await recordFailedLoginAtomic(db.promise(), targetId, user[0].email, true);
       return res.status(400).json({ error: 'Current password is incorrect' });
     }
 
@@ -536,7 +641,7 @@ router.patch('/admins/:id/change-password', authenticateToken, isAdmin, restrict
         .json({ error: 'New password must be different from your current password' });
     }
 
-    const reusedPassword = await hasReusedPassword(db.promise(), id, new_password);
+    const reusedPassword = await hasReusedPassword(db.promise(), targetId, new_password);
     if (reusedPassword) {
       return res.status(400).json({
         error: 'Password was recently used. Please choose a different password.',
@@ -547,10 +652,10 @@ router.patch('/admins/:id/change-password', authenticateToken, isAdmin, restrict
     const hashedPassword = await bcrypt.hash(new_password, 12);
     await db.promise().query(
       'UPDATE users SET password = ? WHERE id = ?',
-      [hashedPassword, id]
+      [hashedPassword, targetId]
     );
 
-    await addPasswordToHistory(db.promise(), id, new_password);
+    await addPasswordToHistory(db.promise(), targetId, new_password);
 
     try {
       await syncDefaultAdminPassword(user[0]?.email, new_password);
@@ -562,8 +667,8 @@ router.patch('/admins/:id/change-password', authenticateToken, isAdmin, restrict
       : null;
     const exceptSessionId = currentSession?.id || null;
 
-    await revokeSessionsByUserId(db.promise(), id, exceptSessionId);
-    await revokeRefreshTokensByUserId(db.promise(), id, 'password_change');
+    await revokeSessionsByUserId(db.promise(), targetId, exceptSessionId);
+    await revokeRefreshTokensByUserId(db.promise(), targetId, 'password_change');
 
     await logAdminAction(req.user.id, `Changed own password`, getClientIP(req));
 
@@ -572,7 +677,7 @@ router.patch('/admins/:id/change-password', authenticateToken, isAdmin, restrict
       userName: req.user.name,
       isAdmin: true,
       requestContext: {
-        ip: getClientIp(req),
+        ip: getTrustedClientIp(req),
         device: resolveDeviceName(req.headers['user-agent'] || ''),
       },
     }).catch((notifyError) => {
@@ -586,19 +691,22 @@ router.patch('/admins/:id/change-password', authenticateToken, isAdmin, restrict
 });
 
 // POST /api/admin-management/admins/:id/reset-password - Reset admin password (Super Admin only)
-router.post('/admins/:id/reset-password', authenticateToken, isAdmin, requireSuperAdmin, restrictBody(), async (req, res) => {
+router.post('/admins/:id/reset-password', authenticateToken, isAdmin, requireSuperAdmin, requireStepUp(), restrictBody(), async (req, res) => {
   try {
-    const { id } = req.params;
+    const targetId = parsePositiveInt(req.params.id);
+    if (!targetId) {
+      return res.status(400).json({ error: 'Invalid admin id' });
+    }
 
     // Cannot reset own password this way
-    if (parseInt(id) === req.user.id) {
+    if (targetId === req.user.id) {
       return res.status(400).json({ error: 'Cannot reset your own password. Use change password instead.' });
     }
 
     // Get admin details
     const [admin] = await db.promise().query(
       'SELECT name, email FROM users WHERE id = ? AND role = "admin"',
-      [id]
+      [targetId]
     );
 
     if (admin.length === 0) {
@@ -606,7 +714,7 @@ router.post('/admins/:id/reset-password', authenticateToken, isAdmin, requireSup
     }
 
     // Create a password reset token and send a reset link (no plaintext password)
-    const tokenData = await createPasswordResetToken(db.promise(), id, admin[0].email);
+    const tokenData = await createPasswordResetToken(db.promise(), targetId, admin[0].email);
 
     const emailResult = await sendPasswordResetEmail(admin[0].email, admin[0].name, tokenData.token, true);
 
@@ -614,8 +722,8 @@ router.post('/admins/:id/reset-password', authenticateToken, isAdmin, requireSup
       return res.status(500).json({ error: "Failed to send password reset email" });
     }
 
-    await revokeSessionsByUserId(db.promise(), id);
-    await revokeRefreshTokensByUserId(db.promise(), id, 'password_reset');
+    await revokeSessionsByUserId(db.promise(), targetId);
+    await revokeRefreshTokensByUserId(db.promise(), targetId, 'password_reset');
 
     await logAdminAction(req.user.id, `Sent password reset link to admin ${admin[0].name} (${admin[0].email})`, getClientIP(req));
 

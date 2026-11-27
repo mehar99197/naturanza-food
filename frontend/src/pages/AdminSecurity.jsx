@@ -76,7 +76,14 @@ export function AdminSecurity() {
   const [sessionFeedback, setSessionFeedback] = useState({ type: "", message: "" });
 
   const [allowlist, setAllowlist] = useState(null);
-  const [allowlistForm, setAllowlistForm] = useState({ label: "", cidr: "" });
+  const [allowlistForm, setAllowlistForm] = useState({
+    label: "",
+    cidr: "",
+    currentPassword: "",
+    otpCode: "",
+  });
+  const [pendingDeleteEntry, setPendingDeleteEntry] = useState(null);
+  const [deleteStepUp, setDeleteStepUp] = useState({ currentPassword: "", otpCode: "" });
   const [allowlistLoading, setAllowlistLoading] = useState("");
   const [allowlistFeedback, setAllowlistFeedback] = useState({ type: "", message: "" });
 
@@ -246,8 +253,10 @@ export function AdminSecurity() {
       await adminSecurityAPI.addIpAllowlistEntry({
         label: allowlistForm.label.trim(),
         cidr: allowlistForm.cidr.trim(),
+        currentPassword: allowlistForm.currentPassword,
+        otpCode: allowlistForm.otpCode.trim(),
       });
-      setAllowlistForm({ label: "", cidr: "" });
+      setAllowlistForm({ label: "", cidr: "", currentPassword: "", otpCode: "" });
       setAllowlistFeedback({ type: "success", message: "Allowlist entry added. It is enforced immediately." });
       await loadAllowlist();
     } catch (err) {
@@ -260,15 +269,18 @@ export function AdminSecurity() {
     }
   };
 
-  const handleDeleteAllowlistEntry = async (entry) => {
-    const confirmed = window.confirm(
-      `Remove ${entry.cidr} (${entry.label}) from the allowlist? If it is the last entry, the restriction turns off.`,
-    );
-    if (!confirmed) return;
+  const handleDeleteAllowlistEntry = async (event) => {
+    event.preventDefault();
+    if (!pendingDeleteEntry) return;
     try {
-      setAllowlistLoading(`delete-${entry.id}`);
+      setAllowlistLoading(`delete-${pendingDeleteEntry.id}`);
       setAllowlistFeedback({ type: "", message: "" });
-      await adminSecurityAPI.deleteIpAllowlistEntry(entry.id);
+      await adminSecurityAPI.deleteIpAllowlistEntry(pendingDeleteEntry.id, {
+        currentPassword: deleteStepUp.currentPassword,
+        otpCode: deleteStepUp.otpCode.trim(),
+      });
+      setPendingDeleteEntry(null);
+      setDeleteStepUp({ currentPassword: "", otpCode: "" });
       setAllowlistFeedback({ type: "success", message: "Allowlist entry removed." });
       await loadAllowlist();
     } catch (err) {
@@ -712,42 +724,135 @@ export function AdminSecurity() {
 
             <Feedback feedback={allowlistFeedback} />
 
-            <form onSubmit={handleAddAllowlistEntry} className="mt-4 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-              <input
-                type="text"
-                value={allowlistForm.label}
-                onChange={(event) => setAllowlistForm((prev) => ({ ...prev, label: event.target.value }))}
-                className={inputClasses}
-                placeholder="Label (e.g. Office)"
-                maxLength={120}
-              />
-              <div className="flex gap-2">
+            <form onSubmit={handleAddAllowlistEntry} className="mt-4 space-y-2.5">
+              <div className="grid gap-2 sm:grid-cols-2">
                 <input
                   type="text"
-                  value={allowlistForm.cidr}
-                  onChange={(event) => setAllowlistForm((prev) => ({ ...prev, cidr: event.target.value }))}
+                  value={allowlistForm.label}
+                  onChange={(event) => setAllowlistForm((prev) => ({ ...prev, label: event.target.value }))}
                   className={inputClasses}
-                  placeholder="203.0.113.10 or 203.0.113.0/24"
+                  placeholder="Label (e.g. Office)"
+                  maxLength={120}
                 />
-                {allowlist?.currentIp ? (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={allowlistForm.cidr}
+                    onChange={(event) => setAllowlistForm((prev) => ({ ...prev, cidr: event.target.value }))}
+                    className={inputClasses}
+                    placeholder="203.0.113.10 or 203.0.113.0/24"
+                  />
+                  {allowlist?.currentIp ? (
+                    <button
+                      type="button"
+                      onClick={() => setAllowlistForm((prev) => ({ ...prev, cidr: allowlist.currentIp }))}
+                      className="whitespace-nowrap rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+                    >
+                      Use my IP
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={allowlistForm.currentPassword}
+                  onChange={(event) => setAllowlistForm((prev) => ({ ...prev, currentPassword: event.target.value }))}
+                  className={inputClasses}
+                  placeholder="Confirm current password"
+                />
+                {account.twoFactorEnabled ? (
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={allowlistForm.otpCode}
+                    onChange={(event) => setAllowlistForm((prev) => ({ ...prev, otpCode: event.target.value.replace(/\D/g, "") }))}
+                    className={inputClasses}
+                    placeholder="6-digit authenticator code"
+                  />
+                ) : (
+                  <div className="hidden sm:block" />
+                )}
+                <button
+                  type="submit"
+                  disabled={
+                    allowlistLoading === "add" ||
+                    !allowlistForm.label.trim() ||
+                    !allowlistForm.cidr.trim() ||
+                    !allowlistForm.currentPassword ||
+                    (account.twoFactorEnabled && allowlistForm.otpCode.length !== 6)
+                  }
+                  className={primaryButtonClasses}
+                >
+                  {allowlistLoading === "add" ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
+                  Add
+                </button>
+              </div>
+            </form>
+
+            {pendingDeleteEntry ? (
+              <form
+                onSubmit={handleDeleteAllowlistEntry}
+                className="mt-4 space-y-2.5 rounded-xl border border-red-200 bg-red-50/70 p-4"
+              >
+                <p className="text-xs font-semibold text-red-800 sm:text-sm">
+                  Confirm removal of <code className="font-mono">{pendingDeleteEntry.cidr}</code> ({pendingDeleteEntry.label}). If this is the last entry, IP restriction turns off.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={deleteStepUp.currentPassword}
+                    onChange={(event) => setDeleteStepUp((prev) => ({ ...prev, currentPassword: event.target.value }))}
+                    className={inputClasses}
+                    placeholder="Current password"
+                  />
+                  {account.twoFactorEnabled ? (
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={deleteStepUp.otpCode}
+                      onChange={(event) => setDeleteStepUp((prev) => ({ ...prev, otpCode: event.target.value.replace(/\D/g, "") }))}
+                      className={inputClasses}
+                      placeholder="6-digit authenticator code"
+                    />
+                  ) : (
+                    <div className="hidden sm:block" />
+                  )}
                   <button
                     type="button"
-                    onClick={() => setAllowlistForm((prev) => ({ ...prev, cidr: allowlist.currentIp }))}
-                    className="whitespace-nowrap rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+                    onClick={() => {
+                      setPendingDeleteEntry(null);
+                      setDeleteStepUp({ currentPassword: "", otpCode: "" });
+                    }}
+                    className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 sm:text-sm"
                   >
-                    Use my IP
+                    Cancel
                   </button>
-                ) : null}
-              </div>
-              <button
-                type="submit"
-                disabled={allowlistLoading === "add" || !allowlistForm.label.trim() || !allowlistForm.cidr.trim()}
-                className={primaryButtonClasses}
-              >
-                {allowlistLoading === "add" ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
-                Add
-              </button>
-            </form>
+                  <button
+                    type="submit"
+                    disabled={
+                      allowlistLoading === `delete-${pendingDeleteEntry.id}` ||
+                      !deleteStepUp.currentPassword ||
+                      (account.twoFactorEnabled && deleteStepUp.otpCode.length !== 6)
+                    }
+                    className={dangerButtonClasses}
+                  >
+                    {allowlistLoading === `delete-${pendingDeleteEntry.id}` ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                    Confirm remove
+                  </button>
+                </div>
+              </form>
+            ) : null}
 
             <div className="mt-4 space-y-2">
               {(allowlist?.items || []).length === 0 ? (
@@ -768,7 +873,11 @@ export function AdminSecurity() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => handleDeleteAllowlistEntry(entry)}
+                      onClick={() => {
+                        setPendingDeleteEntry(entry);
+                        setDeleteStepUp({ currentPassword: "", otpCode: "" });
+                        setAllowlistFeedback({ type: "", message: "" });
+                      }}
                       disabled={allowlistLoading === `delete-${entry.id}`}
                       className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
                     >

@@ -67,7 +67,9 @@ export const AdminAuthProvider = ({ children }) => {
     }
   };
 
-  // Check for existing admin token on mount
+  // Check for existing admin session on mount — fail closed until the server
+  // verifies the HttpOnly cookie / session so stale localStorage can never
+  // hydrate an unverified admin UI.
   useEffect(() => {
     const adminData = safeLocalStorage.getItem("adminData");
 
@@ -76,15 +78,12 @@ export const AdminAuthProvider = ({ children }) => {
       return;
     }
 
-    if (adminData) {
-      try {
-        const parsedAdmin = JSON.parse(adminData);
-        setAdmin(parsedAdmin);
-      } catch {
-        safeLocalStorage.removeItem("adminData");
-        setLoading(false);
-        return;
-      }
+    try {
+      JSON.parse(adminData);
+    } catch {
+      safeLocalStorage.removeItem("adminData");
+      setLoading(false);
+      return;
     }
 
     const verificationGeneration = authGenerationRef.current;
@@ -95,7 +94,7 @@ export const AdminAuthProvider = ({ children }) => {
 
       if (verificationResult.state === "valid") {
         applyAdminState(verificationResult.admin);
-      } else if (verificationResult.state === "invalid") {
+      } else {
         clearAdminAuthState();
       }
       setLoading(false);
@@ -108,15 +107,6 @@ export const AdminAuthProvider = ({ children }) => {
     } else {
       const syncAdminSessionState = async () => {
         const verificationGeneration = authGenerationRef.current;
-        const adminData = safeLocalStorage.getItem("adminData");
-        if (adminData) {
-          try {
-            setAdmin(JSON.parse(adminData));
-          } catch {
-            safeLocalStorage.removeItem("adminData");
-          }
-        }
-
         const verificationResult = await verifyAdminToken();
         if (authGenerationRef.current !== verificationGeneration) {
           return;
@@ -181,7 +171,7 @@ export const AdminAuthProvider = ({ children }) => {
     try {
       const response = await adminAPI.login({ email, password, ...(otpCode ? { otpCode } : {}) });
 
-      if (response?.success && response?.token && response?.admin) {
+      if (response?.success && response?.admin) {
         applyAdminState(response.admin);
         return { success: true };
       }
@@ -213,7 +203,7 @@ export const AdminAuthProvider = ({ children }) => {
     try {
       const response = await adminAPI.staffLogin({ email, password, ...(otpCode ? { otpCode } : {}) });
 
-      if (response?.success && response?.token && response?.admin) {
+      if (response?.success && response?.admin) {
         applyAdminState(response.admin);
         return { success: true };
       }

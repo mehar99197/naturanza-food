@@ -126,11 +126,12 @@ const csrfMiddleware = (options = {}) => {
       existingToken = signedToken;
     }
 
-    const tokenFromBody = req.body?._csrf || req.body?.csrfToken;
     const tokenFromHeader = req.headers[CSRF_HEADER_NAME];
-    const tokenFromQuery = req.query?._csrf;
+    const tokenFromBody = req.body?._csrf || req.body?.csrfToken;
 
-    const clientToken = tokenFromBody || tokenFromHeader || tokenFromQuery;
+    // Never accept CSRF tokens from URL query strings — query parameters leak
+    // into server access logs, browser history, and Referer headers.
+    const clientToken = tokenFromHeader || tokenFromBody;
 
     if (!clientToken) {
       return res.status(403).json({

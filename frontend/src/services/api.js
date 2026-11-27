@@ -833,6 +833,17 @@ export const profileSecurityAPI = {
   },
 };
 
+const buildStepUpHeaders = (stepUp = {}) => {
+  const headers = {};
+  if (stepUp?.currentPassword) {
+    headers["X-Step-Up-Password"] = String(stepUp.currentPassword);
+  }
+  if (stepUp?.otpCode) {
+    headers["X-Step-Up-Otp"] = String(stepUp.otpCode).trim();
+  }
+  return headers;
+};
+
 // Admin Security Center APIs (2FA, sessions, login alerts feed, IP allowlist)
 export const adminSecurityAPI = {
   getOverview: async () => {
@@ -892,17 +903,22 @@ export const adminSecurityAPI = {
     return response.data;
   },
 
-  addIpAllowlistEntry: async ({ label, cidr }) => {
-    const response = await axiosInstance.post("/admin/security/ip-allowlist", {
-      label,
-      cidr,
-    });
+  addIpAllowlistEntry: async ({ label, cidr, currentPassword, otpCode }) => {
+    const response = await axiosInstance.post(
+      "/admin/security/ip-allowlist",
+      {
+        label,
+        cidr,
+      },
+      { headers: buildStepUpHeaders({ currentPassword, otpCode }) },
+    );
     return response.data;
   },
 
-  deleteIpAllowlistEntry: async (id) => {
+  deleteIpAllowlistEntry: async (id, stepUp = {}) => {
     const response = await axiosInstance.delete(
       `/admin/security/ip-allowlist/${id}`,
+      { headers: buildStepUpHeaders(stepUp) },
     );
     return response.data;
   },
@@ -1335,8 +1351,12 @@ export const adminAPI = {
     return response.data;
   },
 
-  createAdmin: async (formData) => {
-    const response = await axiosInstance.post("/admin-management/admins", formData);
+  createAdmin: async (formData, stepUp = {}) => {
+    const response = await axiosInstance.post(
+      "/admin-management/admins",
+      formData,
+      { headers: buildStepUpHeaders(stepUp) },
+    );
     return response.data;
   },
 
@@ -1348,17 +1368,19 @@ export const adminAPI = {
     return response.data;
   },
 
-  updateAdminRole: async (adminId, role, permissions) => {
+  updateAdminRole: async (adminId, role, permissions, stepUp = {}) => {
     const response = await axiosInstance.patch(
       `/admin-management/admins/${adminId}/role`,
-      { role, permissions }
+      { role, permissions },
+      { headers: buildStepUpHeaders(stepUp) },
     );
     return response.data;
   },
 
-  removeAdminRole: async (adminId) => {
+  removeAdminRole: async (adminId, stepUp = {}) => {
     const response = await axiosInstance.delete(
-      `/admin-management/admins/${adminId}/role`
+      `/admin-management/admins/${adminId}/role`,
+      { headers: buildStepUpHeaders(stepUp) },
     );
     return response.data;
   },
@@ -1396,9 +1418,11 @@ export const adminAPI = {
     return response.data;
   },
 
-  resetPassword: async (adminId) => {
+  resetPassword: async (adminId, stepUp = {}) => {
     const response = await axiosInstance.post(
-      `/admin-management/admins/${adminId}/reset-password`
+      `/admin-management/admins/${adminId}/reset-password`,
+      {},
+      { headers: buildStepUpHeaders(stepUp) },
     );
     return response.data;
   },
