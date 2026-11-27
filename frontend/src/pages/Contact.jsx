@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Mail,
   Phone,
@@ -7,12 +7,13 @@ import {
   Send,
   Check,
   ExternalLink,
+  Navigation,
   Facebook,
   Instagram,
-  Music2,
   Twitter,
   Youtube,
 } from "lucide-react";
+import { TikTokIcon } from "@/components/icons/TikTokIcon";
 import { useScrollReveal } from "@/hooks/useScrollReveal";
 import { contactAPI } from "@/services/api";
 import { ContactSEO } from "@/components/SEO";
@@ -52,21 +53,25 @@ export function Contact() {
   const lng = Number(settings.mapLongitude);
   const safeLat = Number.isFinite(lat) ? lat : 30.9716931;
   const safeLng = Number.isFinite(lng) ? lng : 73.8896874;
-  const bboxLeft = (safeLng - 0.055).toFixed(4);
-  const bboxRight = (safeLng + 0.055).toFixed(4);
-  const bboxBottom = (safeLat - 0.06).toFixed(4);
-  const bboxTop = (safeLat + 0.06).toFixed(4);
-  const mapEmbedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(
-    `${bboxLeft},${bboxBottom},${bboxRight},${bboxTop}`,
-  )}&layer=mapnik&marker=${encodeURIComponent(`${safeLat.toFixed(4)},${safeLng.toFixed(4)}`)}`;
-  const directionsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-    mapLocationLabel,
+  const mapCoords = `${safeLat.toFixed(6)},${safeLng.toFixed(6)}`;
+  const mapEmbedUrl = `https://www.google.com/maps?q=${encodeURIComponent(
+    mapCoords,
+  )}&hl=en&z=15&output=embed`;
+  const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    mapCoords,
   )}`;
+  const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+    mapCoords,
+  )}`;
+
+  useEffect(() => {
+    setMapLoaded(false);
+  }, [mapEmbedUrl]);
 
   const socialLinks = [
     { label: "Facebook", url: settings.facebookUrl, Icon: Facebook },
     { label: "Instagram", url: settings.instagramUrl, Icon: Instagram },
-    { label: "TikTok", url: settings.tiktokUrl, Icon: Music2 },
+    { label: "TikTok", url: settings.tiktokUrl, Icon: TikTokIcon },
     { label: "Twitter", url: settings.twitterUrl, Icon: Twitter },
     { label: "YouTube", url: settings.youtubeUrl, Icon: Youtube },
   ].filter((item) => item.url);
@@ -369,24 +374,36 @@ export function Contact() {
                 </h3>
                 <p className="text-sm text-[#6b7a6b]">{mapLocationLabel}</p>
               </div>
-              <a
-                href={directionsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#3d7a3d] hover:text-[#2f642f]"
-              >
-                Open in Google Maps
-                <ExternalLink className="w-4 h-4" />
-              </a>
+              <div className="flex flex-wrap items-center gap-3">
+                <a
+                  href={directionsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#3d7a3d] px-3 py-1.5 text-xs sm:text-sm font-semibold text-white hover:bg-[#2f642f] transition-colors"
+                >
+                  <Navigation className="w-3.5 h-3.5" />
+                  Get Directions
+                </a>
+                <a
+                  href={googleMapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-[#3d7a3d] hover:text-[#2f642f]"
+                >
+                  Open in Google Maps
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              </div>
             </div>
-            <div className="relative h-[260px] sm:h-[320px] md:h-[360px]">
+            <div className="relative h-[280px] sm:h-[340px] md:h-[400px]">
               {!mapLoaded && (
                 <div
-                  className="absolute inset-0 bg-[#f3f4f2]"
+                  className="absolute inset-0 bg-[#f3f4f2] animate-pulse"
                   aria-hidden="true"
                 />
               )}
               <iframe
+                key={mapEmbedUrl}
                 src={mapEmbedUrl}
                 width="100%"
                 height="100%"
@@ -395,7 +412,7 @@ export function Contact() {
                 allowFullScreen
                 loading="eager"
                 referrerPolicy="no-referrer-when-downgrade"
-                title="Naturanza Location"
+                title={`Naturanza Location — ${mapLocationLabel}`}
               />
             </div>
           </div>

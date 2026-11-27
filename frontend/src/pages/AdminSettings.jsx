@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { AdminLayout } from '@/components/AdminLayout';
 import { useSettings } from '@/context/SettingsContext';
 import { adminAPI } from '@/services/api';
+import { TikTokIcon } from '@/components/icons/TikTokIcon';
 import {
  Store,
  Bell,
@@ -14,7 +15,6 @@ import {
  MapPin,
  Facebook,
  Instagram,
- Music2,
  Twitter,
  Youtube,
  MessageCircle,
@@ -580,7 +580,7 @@ export function AdminSettings() {
  {[
  { key: 'facebookUrl', label: 'Facebook URL', Icon: Facebook, placeholder: 'https://www.facebook.com/naturanzafood' },
  { key: 'instagramUrl', label: 'Instagram URL', Icon: Instagram, placeholder: 'https://www.instagram.com/naturanzafood' },
- { key: 'tiktokUrl', label: 'TikTok URL', Icon: Music2, placeholder: 'https://www.tiktok.com/@naturanzafood' },
+ { key: 'tiktokUrl', label: 'TikTok URL', Icon: TikTokIcon, placeholder: 'https://www.tiktok.com/@naturanzafood' },
  { key: 'twitterUrl', label: 'Twitter URL', Icon: Twitter, placeholder: 'https://twitter.com/naturanzafood' },
  { key: 'youtubeUrl', label: 'YouTube URL', Icon: Youtube, placeholder: 'https://www.youtube.com/@naturanzafood' }
  ].map(({ key, label, Icon, placeholder }) => (
