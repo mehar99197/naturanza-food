@@ -97,8 +97,12 @@ const toStatusKey = (status) => {
 };
 
 const formatTrend = (value) => {
-  const prefix = value > 0 ? "+" : "";
-  return `${prefix}${value.toFixed(1)}%`;
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "New";
+  }
+  const numeric = Number(value);
+  const prefix = numeric > 0 ? "+" : "";
+  return `${prefix}${numeric.toFixed(1)}%`;
 };
 
 const compactNumber = (value) => {
@@ -112,27 +116,32 @@ const compactNumber = (value) => {
   return `${Math.round(amount)}`;
 };
 
-const DashboardStatCard = ({ title, value, subtitle, icon: Icon, tone, trendValue }) => (
-  <article className="group rounded-2xl border border-[#dbe4de] bg-white p-3.5 shadow-[0_14px_30px_rgba(15,23,42,0.06)] transition-all duration-300 sm:rounded-3xl sm:p-5 sm:hover:-translate-y-1 sm:hover:shadow-[0_18px_36px_rgba(15,23,42,0.09)]">
-    <div className="mb-3 flex items-center justify-between sm:mb-4">
-      <span className={`inline-flex h-9 w-9 items-center justify-center rounded-xl sm:h-11 sm:w-11 sm:rounded-2xl ${tone}`}>
-        <Icon className="h-5 w-5" />
-      </span>
-      <span
-        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold sm:px-2.5 sm:py-1 sm:text-[11px] ${
-          trendValue >= 0 ? "bg-[#ecfdf5] text-[#16a34a]" : "bg-red-50 text-[#ef4444]"
-        }`}
-      >
-        <ArrowUpRight className={`h-3 w-3 sm:h-3.5 sm:w-3.5 ${trendValue < 0 ? "rotate-90" : ""}`} />
-        {formatTrend(trendValue)}
-      </span>
-    </div>
+const DashboardStatCard = ({ title, value, subtitle, icon: Icon, tone, trendValue }) => {
+  const isNegative =
+    typeof trendValue === "number" && Number.isFinite(trendValue) && trendValue < 0;
 
-    <p className="text-[1.7rem] font-extrabold tracking-tight text-[#1f2937] sm:text-[1.9rem]">{value}</p>
-    <p className="mt-1 text-[13px] font-semibold text-[#1f2937] sm:text-sm">{title}</p>
-    <p className="mt-1 text-[11px] font-medium text-[#6b7280] sm:mt-2 sm:text-xs">{subtitle}</p>
-  </article>
-);
+  return (
+    <article className="group rounded-2xl border border-[#dbe4de] bg-white p-3.5 shadow-[0_14px_30px_rgba(15,23,42,0.06)] transition-all duration-300 sm:rounded-3xl sm:p-5 sm:hover:-translate-y-1 sm:hover:shadow-[0_18px_36px_rgba(15,23,42,0.09)]">
+      <div className="mb-3 flex items-center justify-between sm:mb-4">
+        <span className={`inline-flex h-9 w-9 items-center justify-center rounded-xl sm:h-11 sm:w-11 sm:rounded-2xl ${tone}`}>
+          <Icon className="h-5 w-5" />
+        </span>
+        <span
+          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold sm:px-2.5 sm:py-1 sm:text-[11px] ${
+            !isNegative ? "bg-[#ecfdf5] text-[#16a34a]" : "bg-red-50 text-[#ef4444]"
+          }`}
+        >
+          <ArrowUpRight className={`h-3 w-3 sm:h-3.5 sm:w-3.5 ${isNegative ? "rotate-90" : ""}`} />
+          {formatTrend(trendValue)}
+        </span>
+      </div>
+
+      <p className="text-[1.7rem] font-extrabold tracking-tight text-[#1f2937] sm:text-[1.9rem]">{value}</p>
+      <p className="mt-1 text-[13px] font-semibold text-[#1f2937] sm:text-sm">{title}</p>
+      <p className="mt-1 text-[11px] font-medium text-[#6b7280] sm:mt-2 sm:text-xs">{subtitle}</p>
+    </article>
+  );
+};
 
 const OrderStatusBadge = ({ status }) => {
   const key = toStatusKey(status);
@@ -267,7 +276,7 @@ export function AdminDashboard() {
 
   const revenueTrendPct = useMemo(() => {
     if (previousWeekRevenue <= 0) {
-      return sevenDayRevenue > 0 ? 12.4 : 0;
+      return sevenDayRevenue > 0 ? null : 0;
     }
 
     return ((sevenDayRevenue - previousWeekRevenue) / previousWeekRevenue) * 100;
@@ -275,7 +284,7 @@ export function AdminDashboard() {
 
   const orderTrendPct = useMemo(() => {
     if (previousWeekOrders <= 0) {
-      return sevenDayOrders > 0 ? 8.7 : 0;
+      return sevenDayOrders > 0 ? null : 0;
     }
 
     return ((sevenDayOrders - previousWeekOrders) / previousWeekOrders) * 100;

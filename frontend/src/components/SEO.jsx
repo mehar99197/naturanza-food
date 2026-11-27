@@ -1,15 +1,23 @@
 import { useEffect } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { SITE_URL, SITE_DOMAIN } from '@/config/site';
+import { BUSINESS_INFO } from '@/config/legal';
 import { useOptionalSettings } from '@/context/SettingsContext';
 import { CATEGORY_DESCRIPTION_DEFAULTS } from '@/lib/categoryDefaults';
 import { getProductContentDefaults } from '@/lib/productContentDefaults';
 import { extractTwitterHandle, getConfiguredSocialUrls } from '@/lib/socialLinks';
-import { getProductPricing } from '@/lib/utils';
+import { formatPrice, getProductPricing } from '@/lib/utils';
 
-const SITE_NAME = 'Naturanza Food';
+const SITE_NAME = BUSINESS_INFO.brandName;
 const DEFAULT_DESCRIPTION = 'Discover pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural, sustainably sourced, and delivered fresh to your door across Pakistan.';
 const DEFAULT_KEYWORDS = 'organic food Pakistan, natural products, organic honey, ispaghol husk, organic spices, pure haldi, red chili powder, wellness, buy organic online Pakistan';
+
+const resolveFreeShippingThreshold = (shippingFree) => {
+  const parsed = Number(shippingFree);
+  return shippingFree !== '' && shippingFree != null && Number.isFinite(parsed) && parsed >= 0
+    ? parsed
+    : 5000;
+};
 
 export function SEO({
   title,
@@ -18,17 +26,21 @@ export function SEO({
   image = '/images/logo.png',
   type = 'website',
   url,
-  author = 'Naturanza Food',
+  author,
   price,
-  currency = 'PKR',
+  currency,
   availability = 'in stock',
   noIndex = false,
   canonicalUrl,
 }) {
   const { settings } = useOptionalSettings();
+  const siteName = settings?.storeName || SITE_NAME;
+  const resolvedAuthor = author || siteName;
+  const resolvedCurrency = currency || settings?.currency || 'PKR';
+  const geoPlaceName = settings?.address || BUSINESS_INFO.officeAddress;
   const socialUrls = getConfiguredSocialUrls(settings);
   const twitterHandle = extractTwitterHandle(settings?.twitterUrl);
-  const fullTitle = title ? `${title} | ${SITE_NAME}` : `${SITE_NAME} - Premium Organic & Natural Products in Pakistan`;
+  const fullTitle = title ? `${title} | ${siteName}` : `${siteName} - Premium Organic & Natural Products in Pakistan`;
   const finalDescription = description || DEFAULT_DESCRIPTION;
   const currentUrl = url || (typeof window !== 'undefined' ? window.location.href : '');
   const canonical = canonicalUrl || currentUrl;
@@ -54,7 +66,7 @@ export function SEO({
       <title>{fullTitle}</title>
       <meta name="description" content={finalDescription} />
       {finalKeywords && <meta name="keywords" content={finalKeywords} />}
-      <meta name="author" content={author} />
+      <meta name="author" content={resolvedAuthor} />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <meta name="theme-color" content="#22c55e" />
       <meta name="robots" content={robotsContent} />
@@ -62,7 +74,7 @@ export function SEO({
       <meta name="language" content="English" />
       <meta name="revisit-after" content="7 days" />
       <meta name="geo.region" content="PK-PB" />
-      <meta name="geo.placename" content="Nizam Pura, Chunian, District Kasur, Punjab, Pakistan" />
+      <meta name="geo.placename" content={geoPlaceName} />
 
       <link rel="canonical" href={canonical} />
       <link rel="alternate" hrefLang="en-pk" href={canonical} />
@@ -75,7 +87,7 @@ export function SEO({
           product page. Omitted so scrapers measure the real file instead. */}
       <meta property="og:image" content={imageUrl} />
       <meta property="og:image:alt" content={fullTitle} />
-      <meta property="og:site_name" content={SITE_NAME} />
+      <meta property="og:site_name" content={siteName} />
       <meta property="og:locale" content="en_PK" />
       <meta property="og:locale:alternate" content="ur_PK" />
       {canonical && <meta property="og:url" content={canonical} />}
@@ -94,7 +106,7 @@ export function SEO({
       {price && (
         <>
           <meta property="product:price:amount" content={price} />
-          <meta property="product:price:currency" content={currency} />
+          <meta property="product:price:currency" content={resolvedCurrency} />
           <meta property="product:availability" content={availability} />
         </>
       )}
@@ -103,12 +115,22 @@ export function SEO({
 }
 
 export function HomeSEO() {
+  const { settings } = useOptionalSettings();
+  const freeThreshold = resolveFreeShippingThreshold(settings?.shippingFree);
+  const currency = settings?.currency || 'PKR';
+  const isDefaultFreeThreshold = freeThreshold === 5000 && currency === 'PKR';
+  const description = isDefaultFreeThreshold
+    ? 'Shop pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural, sustainably sourced. Free shipping on prepaid online orders over Rs. 5,000 across Pakistan.'
+    : freeThreshold === 0
+      ? 'Shop pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural, sustainably sourced. Free shipping on prepaid online orders across Pakistan.'
+      : `Shop pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural, sustainably sourced. Free shipping on prepaid online orders over ${formatPrice(freeThreshold, currency)} across Pakistan.`;
+
   // No `title` prop on the home page → the SEO component uses the branded fallback
   // ("Naturanza Food - Premium Organic & Natural Products in Pakistan") instead of
   // appending a generic "Home", which Google was showing as "Naturanza Food: Home".
   return (
     <SEO
-      description="Shop pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural, sustainably sourced. Free shipping on prepaid online orders over Rs. 5,000 across Pakistan."
+      description={description}
       keywords="organic food Pakistan, natural products, buy organic honey, ispaghol husk online Pakistan, organic spices, pure turmeric haldi, red chili powder, organic store Karachi Lahore Islamabad"
       type="website"
       url={`${SITE_URL}/`}
@@ -117,6 +139,8 @@ export function HomeSEO() {
 }
 
 export function ShopSEO({ category, categoryName }) {
+  const { settings } = useOptionalSettings();
+  const storeName = settings?.storeName || SITE_NAME;
   const categoryConfig = {
     honey: { title: 'Organic Honey', desc: CATEGORY_DESCRIPTION_DEFAULTS.honey, kw: 'organic honey Pakistan, raw honey online, pure honey buy, natural honey Pakistan' },
     ispaghol: { title: 'Ispaghol Husk', desc: CATEGORY_DESCRIPTION_DEFAULTS.ispaghol, kw: 'ispaghol husk Pakistan, psyllium husk online, natural fiber digestion Pakistan' },
@@ -137,7 +161,7 @@ export function ShopSEO({ category, categoryName }) {
   const config = normalizedSlug
     ? categoryConfig[normalizedSlug] || {
         title: formattedFallbackTitle,
-        desc: `Browse our ${formattedFallbackTitle.toLowerCase()} collection at Naturanza Food. Premium quality, sustainably sourced across Pakistan.`,
+        desc: `Browse our ${formattedFallbackTitle.toLowerCase()} collection at ${storeName}. Premium quality, sustainably sourced across Pakistan.`,
         kw: `${formattedFallbackTitle.toLowerCase()} Pakistan, organic ${formattedFallbackTitle.toLowerCase()} online`,
       }
     : {
@@ -158,88 +182,116 @@ export function ShopSEO({ category, categoryName }) {
 }
 
 export function AboutSEO() {
+  const { settings } = useOptionalSettings();
+  const storeName = settings?.storeName || SITE_NAME;
   return (
     <SEO
       title="About Us"
-      description="Discover Naturanza Food's story — Pakistan's trusted source for pure organic honey, ispaghol husk, organic spices, and natural wellness products. Learn about our quality standards, sourcing practices, and commitment to purity."
-      keywords="about Naturanza Food, organic food brand Pakistan, natural products company, wellness brand Pakistan, organic store history"
+      description={`Discover ${storeName}'s story — Pakistan's trusted source for pure organic honey, ispaghol husk, organic spices, and natural wellness products. Learn about our quality standards, sourcing practices, and commitment to purity.`}
+      keywords={`about ${storeName}, organic food brand Pakistan, natural products company, wellness brand Pakistan, organic store history`}
       url={`${SITE_URL}/about`}
     />
   );
 }
 
 export function ContactSEO() {
+  const { settings } = useOptionalSettings();
+  const storeName = settings?.storeName || BUSINESS_INFO.brandName;
+  const officeAddress = settings?.address || BUSINESS_INFO.officeAddress;
+  const supportEmail = settings?.storeEmail || BUSINESS_INFO.contacts.supportEmail;
+  const supportPhone = settings?.storePhone || BUSINESS_INFO.contacts.phone;
+  const supportHours = settings?.supportHours || BUSINESS_INFO.supportHours;
   return (
     <SEO
       title="Contact Us"
-      description="Contact Naturanza Food (Naturanza Foods) at Nizam Pura, Chunian, District Kasur, Punjab, Pakistan. Email: support@naturanzafood.com | Phone: +92340 9502646. Available 24/7 across Pakistan."
-      keywords="contact Naturanza Food, organic food support Pakistan, natural products inquiry, bulk orders organic Pakistan, customer support"
+      description={`Contact ${storeName} (${BUSINESS_INFO.legalName}) at ${officeAddress}. Email: ${supportEmail} | Phone: ${supportPhone}. ${supportHours} across Pakistan.`}
+      keywords={`contact ${storeName}, organic food support Pakistan, natural products inquiry, bulk orders organic Pakistan, customer support`}
       url={`${SITE_URL}/contact`}
     />
   );
 }
 
 export function FAQSEO() {
+  const { settings } = useOptionalSettings();
+  const storeName = settings?.storeName || SITE_NAME;
   return (
     <SEO
       title="Frequently Asked Questions"
-      description="Find answers to common questions about Naturanza Food orders, delivery, returns, product sourcing, and certifications. Organic products support in Pakistan."
-      keywords="Naturanza FAQ, organic products questions Pakistan, natural food FAQ, organic store help, honey delivery Pakistan"
+      description={`Find answers to common questions about ${storeName} orders, delivery, returns, product sourcing, and certifications. Organic products support in Pakistan.`}
+      keywords={`${storeName} FAQ, organic products questions Pakistan, natural food FAQ, organic store help, honey delivery Pakistan`}
       url={`${SITE_URL}/faq`}
     />
   );
 }
 
 export function ShippingSEO() {
+  const { settings } = useOptionalSettings();
+  const storeName = settings?.storeName || SITE_NAME;
+  const freeThreshold = resolveFreeShippingThreshold(settings?.shippingFree);
+  const currency = settings?.currency || 'PKR';
+  const isDefaultFreeThreshold = freeThreshold === 5000 && currency === 'PKR';
+  const description = isDefaultFreeThreshold
+    ? `${storeName} shipping policy. Orders processed within 24 hours with 3–5 working days delivery across Pakistan and free shipping on prepaid online orders over Rs. 5,000.`
+    : freeThreshold === 0
+      ? `${storeName} shipping policy. Orders processed within 24 hours with 3–5 working days delivery across Pakistan and free shipping on prepaid online orders.`
+      : `${storeName} shipping policy. Orders processed within 24 hours with 3–5 working days delivery across Pakistan and free shipping on prepaid online orders over ${formatPrice(freeThreshold, currency)}.`;
   return (
     <SEO
       title="Shipping and Delivery"
-      description="Naturanza Food shipping policy. Orders processed within 24 hours with 3–5 working days delivery across Pakistan and free shipping on prepaid online orders over Rs. 5,000."
-      keywords="Naturanza shipping, organic delivery Pakistan, natural products shipping, COD delivery Pakistan, order tracking"
+      description={description}
+      keywords={`${storeName} shipping, organic delivery Pakistan, natural products shipping, COD delivery Pakistan, order tracking`}
       url={`${SITE_URL}/shipping`}
     />
   );
 }
 
 export function ReturnsSEO() {
+  const { settings } = useOptionalSettings();
+  const storeName = settings?.storeName || SITE_NAME;
   return (
     <SEO
       title="Returns and Refunds Policy"
-      description="Naturanza Food returns and refund policy. Request a return within 7 days of delivery for damaged, defective, or incorrect items. Approved refunds processed within 5–7 business days."
-      keywords="Naturanza returns, organic products refund Pakistan, natural food returns, satisfaction guarantee Pakistan"
+      description={`${storeName} returns and refund policy. Request a return within 7 days of delivery for damaged, defective, or incorrect items. Approved refunds processed within 5–7 business days.`}
+      keywords={`${storeName} returns, organic products refund Pakistan, natural food returns, satisfaction guarantee Pakistan`}
       url={`${SITE_URL}/returns`}
     />
   );
 }
 
 export function TermsSEO() {
+  const { settings } = useOptionalSettings();
+  const storeName = settings?.storeName || SITE_NAME;
   return (
     <SEO
       title="Terms of Service"
-      description="Read Naturanza Food's Terms of Service. These terms govern your use of our website when purchasing organic and natural products in Pakistan."
-      keywords="Naturanza terms of service, organic store terms Pakistan"
+      description={`Read ${storeName}'s Terms of Service. These terms govern your use of our website when purchasing organic and natural products in Pakistan.`}
+      keywords={`${storeName} terms of service, organic store terms Pakistan`}
       url={`${SITE_URL}/terms`}
     />
   );
 }
 
 export function PrivacySEO() {
+  const { settings } = useOptionalSettings();
+  const storeName = settings?.storeName || SITE_NAME;
   return (
     <SEO
       title="Privacy Policy"
-      description="Naturanza Food Privacy Policy. Learn how we collect, use, and protect your personal information when you shop organic products online in Pakistan."
-      keywords="Naturanza privacy policy, organic store data protection Pakistan"
+      description={`${storeName} Privacy Policy. Learn how we collect, use, and protect your personal information when you shop organic products online in Pakistan.`}
+      keywords={`${storeName} privacy policy, organic store data protection Pakistan`}
       url={`${SITE_URL}/privacy`}
     />
   );
 }
 
 export function CookiesSEO() {
+  const { settings } = useOptionalSettings();
+  const storeName = settings?.storeName || SITE_NAME;
   return (
     <SEO
       title="Cookie Policy"
-      description="Naturanza Food Cookie Policy. Learn how we use cookies and similar technologies to improve your shopping experience for organic and natural products."
-      keywords="Naturanza cookie policy, organic website cookies Pakistan"
+      description={`${storeName} Cookie Policy. Learn how we use cookies and similar technologies to improve your shopping experience for organic and natural products.`}
+      keywords={`${storeName} cookie policy, organic website cookies Pakistan`}
       url={`${SITE_URL}/cookies`}
     />
   );
@@ -256,17 +308,20 @@ export function NoIndexSEO({ title }) {
 }
 
 export function ProductSEO({ product, category, settings }) {
+  const { settings: contextSettings } = useOptionalSettings();
   if (!product) return <SEO title="Product" />;
+  const activeSettings = settings || contextSettings;
+  const storeName = activeSettings?.storeName || SITE_NAME;
   const fullTitle = product.name;
   const fallbackDescription = getProductContentDefaults(product)?.description;
   const description =
     product.description ||
     fallbackDescription ||
-    `${product.name} - Premium organic product from Naturanza Food. Order online with SafePay or Cash on Delivery across Pakistan.`;
+    `${product.name} - Premium organic product from ${storeName}. Order online with SafePay or Cash on Delivery across Pakistan.`;
   const productUrl = `${SITE_URL}/product/${product.id}`;
   const image = product.image_url || product.image || '/images/logo.png';
   const imageUrl = image.startsWith('http') ? image : `${SITE_URL}${image}`;
-  const pricing = getProductPricing(product, settings);
+  const pricing = getProductPricing(product, activeSettings);
   const effectivePrice = Number.isFinite(pricing.salePrice) && pricing.salePrice > 0
     ? pricing.salePrice.toFixed(2)
     : product.price;
@@ -280,6 +335,7 @@ export function ProductSEO({ product, category, settings }) {
       type="product"
       url={productUrl}
       price={effectivePrice}
+      currency="PKR"
       availability={
         (typeof product.is_in_stock === 'boolean'
           ? product.is_in_stock
@@ -315,6 +371,8 @@ export function PaginationSEO({ currentPage, totalPages, baseUrl }) {
 }
 
 export function BlogPostSEO({ title, description, url, date, author, image }) {
+  const { settings } = useOptionalSettings();
+  const storeName = settings?.storeName || SITE_NAME;
   const imageUrl = image ? (image.startsWith('http') ? image : `${SITE_URL}${image}`) : `${SITE_URL}/images/logo.png`;
 
   return (
@@ -322,11 +380,11 @@ export function BlogPostSEO({ title, description, url, date, author, image }) {
       <SEO
         title={title}
         description={description}
-        author={author || 'Naturanza Food'}
+        author={author || storeName}
         type="article"
         url={url}
         image={imageUrl}
-        keywords={`${title}, naturanza food blog, organic food Pakistan, health tips`}
+        keywords={`${title}, ${storeName.toLowerCase()} blog, organic food Pakistan, health tips`}
       />
       {date && (
         <Helmet>

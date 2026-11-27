@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import JsBarcode from "jsbarcode";
 import { QRCodeSVG } from "qrcode.react";
 import { Download, ExternalLink, Printer, Search, ShoppingBag } from "lucide-react";
+import { useOptionalSettings } from "@/context/SettingsContext";
+import { SITE_DOMAIN } from "@/config/site";
 
 // On-screen preview sizing. Print sizing is defined separately in millimetres
 // below, because a scanner only reads reliably at (or near) nominal scale.
@@ -118,7 +120,7 @@ const downloadSvgAsPng = async (svgElement, filename) => {
   }, "image/png");
 };
 
-const printProductLabel = (productName, barcode, format, qrSvgOuterHTML) => {
+const printProductLabel = (productName, barcode, format, qrSvgOuterHTML, storeName) => {
   const printWindow = window.open("", "_blank");
   if (!printWindow) return;
 
@@ -153,6 +155,9 @@ const printProductLabel = (productName, barcode, format, qrSvgOuterHTML) => {
       </div>`
     : "";
 
+  const safeBrandName = escapeHtml(
+    String(storeName || "Naturanza Food").trim().toUpperCase() || "NATURANZA FOOD",
+  );
   const safeProductName = escapeHtml(productName);
   const label = `<!DOCTYPE html>
 <html>
@@ -233,7 +238,7 @@ const printProductLabel = (productName, barcode, format, qrSvgOuterHTML) => {
 </head>
 <body>
   <div class="label">
-    <div class="brand">NATURANZA FOOD</div>
+    <div class="brand">${safeBrandName}</div>
     <div class="product-name">${safeProductName}</div>
     <div class="codes">${barcodeBlock}${qrBlock}</div>
   </div>
@@ -248,18 +253,23 @@ const printProductLabel = (productName, barcode, format, qrSvgOuterHTML) => {
 // Deep links into Google's own search UI — never scrapes or predicts results,
 // just pre-fills a query that should surface this product once Google has
 // indexed its canonical page (see backend/utils/seoRenderer.js).
-const buildGoogleSiteSearchUrl = (url) =>
-  `https://www.google.com/search?q=${encodeURIComponent(`site:naturanzafood.com "${url}"`)}`;
+const buildGoogleSiteSearchUrl = (url, domain) => {
+  const targetDomain =
+    domain || SITE_DOMAIN || (typeof window !== "undefined" ? window.location.host : "naturanzafood.com");
+  return `https://www.google.com/search?q=${encodeURIComponent(`site:${targetDomain} "${url}"`)}`;
+};
 
 const buildGoogleShoppingUrl = (code) =>
   `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(code)}`;
 
 export function ProductBarcode({ productName, barcode, productUrl }) {
+  const { settings } = useOptionalSettings();
   const svgRef = useRef(null);
   const qrWrapperRef = useRef(null);
   const [renderError, setRenderError] = useState(null);
   const format = resolveFormat(barcode);
-  const baseFileName = `naturanza-${toKebabCase(productName)}`;
+  const storeName = String(settings?.storeName || "").trim() || "Naturanza Food";
+  const baseFileName = `${toKebabCase(storeName)}-${toKebabCase(productName)}`;
 
   useEffect(() => {
     if (!svgRef.current) {
@@ -303,8 +313,8 @@ export function ProductBarcode({ productName, barcode, productUrl }) {
     if (!format && !qrOuter) {
       return;
     }
-    printProductLabel(productName, barcode, format, qrOuter);
-  }, [barcode, format, productName]);
+    printProductLabel(productName, barcode, format, qrOuter, storeName);
+  }, [barcode, format, productName, storeName]);
 
   const hasQr = Boolean(productUrl);
 
@@ -411,7 +421,7 @@ export function ProductBarcode({ productName, barcode, productUrl }) {
               Open Product
             </a>
             <a
-              href={buildGoogleSiteSearchUrl(productUrl)}
+              href={buildGoogleSiteSearchUrl(productUrl, SITE_DOMAIN)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex min-h-[40px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:bg-slate-50"

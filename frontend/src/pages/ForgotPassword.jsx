@@ -3,15 +3,9 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, CheckCircle2, Mail } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
 import LeftPanel from "@/components/auth/LeftPanel";
 import { NoIndexSEO } from "@/components/SEO";
-
-const leftPoints = [
-  "Secure password recovery",
-  "Reset link expires in 1 hour",
-  "24/7 Support available",
-  "Protected account access",
-];
 
 const labelClassName = "mb-2 block text-sm font-semibold text-slate-700";
 const inputClassName =
@@ -19,6 +13,14 @@ const inputClassName =
 
 const ForgotPassword = () => {
   const { forgotPassword } = useAuth();
+  const { settings } = useSettings();
+
+  const leftPoints = [
+    "Secure password recovery",
+    "Reset link expires in 1 hour",
+    settings.supportHours ? `Support: ${settings.supportHours}` : "24/7 Support available",
+    "Protected account access",
+  ];
 
   const [generalError, setGeneralError] = useState("");
   const [submittedEmail, setSubmittedEmail] = useState("");

@@ -3,17 +3,12 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
+import { formatPrice } from "@/lib/utils";
 import { sanitizeEmail } from "@/lib/sanitize";
 import LeftPanel from "@/components/auth/LeftPanel";
 import AuthSocialButtons from "@/components/auth/AuthSocialButtons";
 import { NoIndexSEO } from "@/components/SEO";
-
-const leftPoints = [
-  "100% Certified Organic Products",
-  "Free Delivery on Prepaid Online Orders Over Rs. 5,000",
-  "7-Day Returns for Damaged or Incorrect Items",
-  "24/7 Customer Support",
-];
 
 const getOAuthErrorMessage = (errorCode, providerLabel) => {
   if (errorCode === "oauth_not_configured") {
@@ -43,6 +38,31 @@ const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { login, loginWithGoogle } = useAuth();
+  const { settings } = useSettings();
+
+  const storeName = settings.storeName || "Naturanza Food";
+  const parsedFreeShipping = Number(settings.shippingFree);
+  const freeShippingThreshold =
+    settings.shippingFree !== "" &&
+    settings.shippingFree != null &&
+    Number.isFinite(parsedFreeShipping) &&
+    parsedFreeShipping >= 0
+      ? parsedFreeShipping
+      : 5000;
+  const isDefaultFreeShipping =
+    freeShippingThreshold === 5000 && (settings.currency || "PKR") === "PKR";
+  const freeDeliveryPoint =
+    freeShippingThreshold === 0
+      ? "Free Delivery on Prepaid Online Orders"
+      : isDefaultFreeShipping
+        ? "Free Delivery on Prepaid Online Orders Over Rs. 5,000"
+        : `Free Delivery on Prepaid Online Orders Over ${formatPrice(freeShippingThreshold, settings.currency)}`;
+  const leftPoints = [
+    "100% Certified Organic Products",
+    freeDeliveryPoint,
+    "7-Day Returns for Damaged or Incorrect Items",
+    settings.supportHours ? `Customer Support (${settings.supportHours})` : "24/7 Customer Support",
+  ];
 
   const {
     register,
@@ -182,7 +202,7 @@ const Login = () => {
                 Welcome back
               </h1>
               <p className="mt-2 text-sm text-slate-600">
-                Sign in to continue your Naturanza wellness experience.
+                Sign in to continue your {storeName} wellness experience.
               </p>
             </div>
 

@@ -25,9 +25,48 @@ const ACCENTS = {
   red: { solid: "#dc2626", gradientEnd: "#b91c1c" },
 };
 
+const normalizeWhatsappDigits = (value, fallback) => {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits || fallback;
+};
+
+const resolveBrand = (brandOverride = null) => {
+  if (!brandOverride || typeof brandOverride !== "object") {
+    return BRAND;
+  }
+
+  const name =
+    String(brandOverride.storeName ?? brandOverride.name ?? "").trim() || BRAND.name;
+  const supportEmail =
+    String(brandOverride.supportEmail ?? brandOverride.storeEmail ?? "").trim() ||
+    BRAND.supportEmail;
+  const address =
+    String(brandOverride.address ?? "").trim() || BRAND.address;
+  const whatsappRaw =
+    String(brandOverride.whatsappNumber ?? "").trim() ||
+    String(brandOverride.storePhone ?? "").trim();
+  const whatsappNumber = normalizeWhatsappDigits(whatsappRaw, BRAND.whatsappNumber);
+  const siteUrl =
+    String(brandOverride.siteUrl ?? "").trim().replace(/\/+$/, "") || BRAND.siteUrl;
+  const logoUrl = String(brandOverride.logoUrl ?? "").trim() || BRAND.logoUrl;
+  const tagline = String(brandOverride.tagline ?? "").trim() || BRAND.tagline;
+
+  return {
+    ...BRAND,
+    name,
+    tagline,
+    siteUrl,
+    logoUrl,
+    supportEmail,
+    whatsappNumber,
+    address,
+  };
+};
+
 const formatWhatsappDisplay = (digits) => {
-  const match = String(digits).match(/^92(\d{3})(\d{7})$/);
-  return match ? `+92 ${match[1]} ${match[2]}` : `+${digits}`;
+  const clean = String(digits || "").replace(/\D/g, "");
+  const match = clean.match(/^92(\d{3})(\d{7})$/);
+  return match ? `+92 ${match[1]} ${match[2]}` : `+${clean}`;
 };
 
 /**
@@ -126,24 +165,25 @@ const requestDetailsToText = (context) =>
     .map(([label, value]) => `${label}: ${value}`)
     .join("\n");
 
-const renderFooter = ({ footerNote }) => {
+const renderFooter = ({ footerNote, brand = null }) => {
+  const resolvedBrand = resolveBrand(brand);
   const year = new Date().getFullYear();
-  const whatsappDisplay = formatWhatsappDisplay(BRAND.whatsappNumber);
+  const whatsappDisplay = formatWhatsappDisplay(resolvedBrand.whatsappNumber);
   const link = "color: #16a34a; text-decoration: none;";
   return `
           <tr>
             <td bgcolor="#f8fafc" style="background-color: #f8fafc; padding: 24px 40px; border-top: 1px solid #e2e8f0; text-align: center;">
               ${footerNote ? `<p style="margin: 0 0 12px; color: #64748b; font-size: 12px; line-height: 1.6;">${footerNote}</p>` : ""}
               <p style="margin: 0 0 8px; color: #475569; font-size: 13px; line-height: 1.6;">
-                Need help? <a href="mailto:${escapeHtml(BRAND.supportEmail)}" style="${link}">${escapeHtml(BRAND.supportEmail)}</a>
-                &nbsp;·&nbsp; WhatsApp <a href="https://wa.me/${escapeHtml(BRAND.whatsappNumber)}" style="${link}">${escapeHtml(whatsappDisplay)}</a>
+                Need help? <a href="mailto:${escapeHtml(resolvedBrand.supportEmail)}" style="${link}">${escapeHtml(resolvedBrand.supportEmail)}</a>
+                &nbsp;·&nbsp; WhatsApp <a href="https://wa.me/${escapeHtml(resolvedBrand.whatsappNumber)}" style="${link}">${escapeHtml(whatsappDisplay)}</a>
               </p>
               <p style="margin: 0 0 8px; color: #94a3b8; font-size: 12px; line-height: 1.6;">
-                <a href="${escapeHtml(BRAND.siteUrl)}" style="color: #94a3b8; text-decoration: underline;">${escapeHtml(BRAND.siteUrl.replace(/^https?:\/\//, ""))}</a>
-                &nbsp;·&nbsp; ${escapeHtml(BRAND.address)}
+                <a href="${escapeHtml(resolvedBrand.siteUrl)}" style="color: #94a3b8; text-decoration: underline;">${escapeHtml(resolvedBrand.siteUrl.replace(/^https?:\/\//, ""))}</a>
+                &nbsp;·&nbsp; ${escapeHtml(resolvedBrand.address)}
               </p>
               <p style="margin: 0; color: #94a3b8; font-size: 12px;">
-                © ${year} ${BRAND.name}. All rights reserved.
+                © ${year} ${escapeHtml(resolvedBrand.name)}. All rights reserved.
               </p>
             </td>
           </tr>`;
@@ -160,16 +200,21 @@ const renderFooter = ({ footerNote }) => {
  * @param {"green"|"red"} [options.accent]
  * @param {string} options.contentHtml  Pre-escaped body HTML
  * @param {string} [options.footerNote] Pre-escaped extra footer line (e.g. unsubscribe)
+ * @param {object} [options.brand]      Optional brand overrides ({ storeName, supportEmail, address, whatsappNumber })
  */
 const renderEmailLayout = ({
   title,
   preheader,
   heading,
-  subheading = BRAND.tagline,
+  subheading,
   accent = "green",
   contentHtml,
   footerNote = "",
+  brand = null,
 }) => {
+  const resolvedBrand = resolveBrand(brand);
+  const resolvedSubheading =
+    subheading === undefined ? resolvedBrand.tagline : subheading;
   const { solid, gradientEnd } = ACCENTS[accent] || ACCENTS.green;
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -203,12 +248,12 @@ const renderEmailLayout = ({
               <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin: 0 auto;">
                 <tr>
                   <td bgcolor="#ffffff" style="background-color: #ffffff; border-radius: 12px; padding: 12px 20px;">
-                    <a href="${escapeHtml(BRAND.siteUrl)}" target="_blank" style="color: #15803d; text-decoration: none; font-size: 20px; font-weight: 700;"><img src="${escapeHtml(BRAND.logoUrl)}" width="180" alt="${BRAND.name}" style="display: block; width: 180px; max-width: 180px; height: auto; border: 0; color: #15803d; font-size: 20px; font-weight: 700;" /></a>
+                    <a href="${escapeHtml(resolvedBrand.siteUrl)}" target="_blank" style="color: #15803d; text-decoration: none; font-size: 20px; font-weight: 700;"><img src="${escapeHtml(resolvedBrand.logoUrl)}" width="180" alt="${escapeHtml(resolvedBrand.name)}" style="display: block; width: 180px; max-width: 180px; height: auto; border: 0; color: #15803d; font-size: 20px; font-weight: 700;" /></a>
                   </td>
                 </tr>
               </table>
               ${heading ? `<h1 style="margin: 20px 0 0; color: #ffffff; font-size: 24px; font-weight: 700; line-height: 1.3;">${escapeHtml(heading)}</h1>` : ""}
-              ${subheading ? `<p style="margin: ${heading ? "8px" : "12px"} 0 0; color: #ecfdf5; font-size: 14px;">${escapeHtml(subheading)}</p>` : ""}
+              ${resolvedSubheading ? `<p style="margin: ${heading ? "8px" : "12px"} 0 0; color: #ecfdf5; font-size: 14px;">${escapeHtml(resolvedSubheading)}</p>` : ""}
             </td>
           </tr>
           <tr>
@@ -216,7 +261,7 @@ const renderEmailLayout = ({
 ${contentHtml}
             </td>
           </tr>
-${renderFooter({ footerNote })}
+${renderFooter({ footerNote, brand: resolvedBrand })}
         </table>
       </td>
     </tr>
@@ -227,6 +272,7 @@ ${renderFooter({ footerNote })}
 
 module.exports = {
   BRAND,
+  resolveBrand,
   renderEmailLayout,
   renderButton,
   renderLinkFallback,

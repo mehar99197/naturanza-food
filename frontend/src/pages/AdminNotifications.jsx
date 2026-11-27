@@ -39,6 +39,7 @@ const TYPE_FILTERS = [
   { key: "all", label: "All" },
   { key: "unread", label: "Unread" },
   { key: "order", label: "Orders" },
+  { key: "payment", label: "Payments" },
   { key: "stock", label: "Stock" },
   { key: "message", label: "Messages" },
 ];
@@ -157,6 +158,7 @@ export function AdminNotifications() {
       all: notifications.length,
       unread: unreadCount,
       order: notifications.filter((n) => categoryOf(n.type) === "order").length,
+      payment: notifications.filter((n) => categoryOf(n.type) === "payment").length,
       stock: notifications.filter((n) => categoryOf(n.type) === "stock").length,
       message: notifications.filter((n) => categoryOf(n.type) === "message").length,
     }),

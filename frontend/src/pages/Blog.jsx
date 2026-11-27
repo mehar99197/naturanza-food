@@ -4,6 +4,7 @@ import { Newspaper, Clock3, CalendarDays } from 'lucide-react';
 import { Loader } from '@/components/Loader';
 import { SEO } from '@/components/SEO';
 import { BlogStructuredData } from '@/components/StructuredData';
+import { useSettings } from '@/context/SettingsContext';
 import { blogAPI } from '@/services/api';
 import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 import { SITE_URL } from '@/config/site';
@@ -46,6 +47,8 @@ const MetaRow = ({ post, className = '' }) => (
 );
 
 export function Blog() {
+  const { settings } = useSettings();
+  const storeName = settings.storeName || 'Naturanza Food';
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -86,7 +89,7 @@ export function Blog() {
     <>
       <SEO
         title="Blog"
-        description="Expert articles on pure honey, ispaghol husk, digestive health, and natural living from Naturanza Food — Pakistan's trusted organic store."
+        description={`Expert articles on pure honey, ispaghol husk, digestive health, and natural living from ${storeName} — Pakistan's trusted organic store.`}
         keywords="organic food blog Pakistan, honey benefits, ispaghol husk, digestive health, natural products"
         url={`${SITE_URL}/blog`}
       />
@@ -102,14 +105,14 @@ export function Blog() {
             <div className="pointer-events-none absolute inset-0 opacity-10" style={{backgroundImage:'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize:'28px 28px'}} />
             <div className="relative">
               <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur-sm">
-                <Newspaper className="h-3.5 w-3.5" /> Naturanza Journal
+                <Newspaper className="h-3.5 w-3.5" /> {storeName} Journal
               </span>
               {posts.length > 0 && (
                 <span className="ml-2 inline-flex items-center rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-semibold text-emerald-100">
                   {posts.length} {posts.length === 1 ? 'Article' : 'Articles'}
                 </span>
               )}
-              <h1 className="mt-4 font-display text-3xl md:text-5xl font-bold leading-tight">Naturanza Food Blog</h1>
+              <h1 className="mt-4 font-display text-3xl md:text-5xl font-bold leading-tight">{storeName} Blog</h1>
               <p className="mt-3 max-w-2xl text-base sm:text-lg text-green-50/90">
                 Insights on pure honey, ispaghol husk, and natural living — tips you can actually use.
               </p>

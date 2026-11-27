@@ -12,6 +12,7 @@ const dotenv = require("dotenv");
 const { escapeHtml } = require("./htmlEscape");
 const {
   BRAND,
+  resolveBrand,
   renderEmailLayout,
   renderButton,
   renderLinkFallback,
@@ -101,14 +102,16 @@ const verifyEmailConfig = async () => {
  * "high priority" flags are a spam signal, and List-Unsubscribe belongs only on
  * subscription mail (pass `unsubscribeUrl` for those).
  */
-const sendEmail = async ({ to, subject, html, text, unsubscribeUrl }) => {
+const sendEmail = async ({ to, subject, html, text, unsubscribeUrl, storeName }) => {
   const transport = getTransporter();
 
   if (!transport) {
     return { success: false, error: "Email service not configured" };
   }
 
-  const headers = { "X-Mailer": "Naturanza Food Mailer" };
+  const resolvedSenderName =
+    String(storeName || EMAIL_CONFIG.fromName || BRAND.name).trim() || BRAND.name;
+  const headers = { "X-Mailer": `${resolvedSenderName} Mailer` };
 
   if (unsubscribeUrl) {
     headers["List-Unsubscribe"] = `<${unsubscribeUrl}>, <mailto:${EMAIL_CONFIG.fromEmail}?subject=unsubscribe>`;
@@ -117,7 +120,7 @@ const sendEmail = async ({ to, subject, html, text, unsubscribeUrl }) => {
 
   const mailOptions = {
     from: {
-      name: EMAIL_CONFIG.fromName,
+      name: resolvedSenderName,
       address: EMAIL_CONFIG.fromEmail,
     },
     to,
@@ -148,15 +151,61 @@ const greetingHtml = (userName) =>
 
 const greetingText = (userName) => `Hi${userName ? ` ${String(userName).trim()}` : ""},`;
 
-const contactLineText = () =>
-  `Need help? ${BRAND.supportEmail} · WhatsApp +${BRAND.whatsappNumber}`;
+const resolveEmailBrand = async (overrides = {}) => {
+  let dbSettings = null;
+  const needsDbLookup = !overrides.storeName || !overrides.brand;
+  if (needsDbLookup) {
+    try {
+      const { getAdminSettings } = require("./adminSettings");
+      dbSettings = await getAdminSettings();
+    } catch {
+      dbSettings = null;
+    }
+  }
+
+  const brand = resolveBrand({
+    ...(overrides.brand && typeof overrides.brand === "object" ? overrides.brand : {}),
+    storeName: overrides.storeName || dbSettings?.storeName || BRAND.name,
+    supportEmail: overrides.supportEmail || dbSettings?.storeEmail || BRAND.supportEmail,
+    address: overrides.address || dbSettings?.address || BRAND.address,
+    whatsappNumber:
+      overrides.whatsappNumber ||
+      dbSettings?.whatsappNumber ||
+      dbSettings?.storePhone ||
+      BRAND.whatsappNumber,
+  });
+
+  const currency =
+    String(overrides.currency || dbSettings?.currency || "PKR").trim() || "PKR";
+
+  return {
+    storeName: brand.name,
+    currency,
+    brand,
+  };
+};
+
+const contactLineText = (brand = BRAND) => {
+  const b = resolveBrand(brand);
+  return `Need help? ${b.supportEmail} · WhatsApp +${b.whatsappNumber}`;
+};
 
 /**
  * Generate password reset email HTML
  * @param {object|null} requestContext - { device, ip, location } of the request, shown so the
  *   recipient can spot a reset they did not ask for. Omit for admin-initiated resets.
  */
-const generatePasswordResetEmail = ({ userName, resetLink, expiryMinutes, accountLabel, requestContext }) => {
+const generatePasswordResetEmail = ({
+  userName,
+  resetLink,
+  expiryMinutes,
+  accountLabel,
+  requestContext,
+  storeName,
+  brand,
+}) => {
+  const resolvedStoreName =
+    String(storeName || brand?.name || BRAND.name).trim() || BRAND.name;
   const contentHtml = `
               <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">Reset your password</h2>
               ${greetingHtml(userName)}
@@ -178,10 +227,11 @@ ${renderRequestDetails(requestContext)}` : ""}
 ${renderLinkFallback(resetLink)}`;
 
   return renderEmailLayout({
-    title: "Reset your password - Naturanza Food",
+    title: `Reset your password - ${resolvedStoreName}`,
     preheader: `Your password reset link expires in ${expiryMinutes} minutes.`,
     contentHtml,
     footerNote: "You received this because a password reset was requested for this email address.",
+    brand,
   });
 };
 
@@ -194,11 +244,12 @@ ${renderLinkFallback(resetLink)}`;
  * @param {object|null} requestContext - { device, ip, location } of the request that asked for it
  */
 const sendPasswordResetEmail = async (email, userName, resetToken, isAdmin = false, requestContext = null) => {
+  const { storeName, brand } = await resolveEmailBrand();
   const resetPath = isAdmin ? "/admin/reset-password" : "/reset-password";
   // Token goes in the fragment: browsers never send it to the server, so it stays
   // out of access logs and Referer headers (see frontend/src/lib/resetToken.js).
   const resetLink = `${FRONTEND_URL}${resetPath}#token=${encodeURIComponent(resetToken)}`;
-  const accountLabel = isAdmin ? "Naturanza Food admin" : "Naturanza Food";
+  const accountLabel = isAdmin ? `${storeName} admin` : storeName;
 
   const html = generatePasswordResetEmail({
     userName,
@@ -206,6 +257,8 @@ const sendPasswordResetEmail = async (email, userName, resetToken, isAdmin = fal
     expiryMinutes: PASSWORD_RESET_MINUTES,
     accountLabel,
     requestContext,
+    storeName,
+    brand,
   });
   const text = `${greetingText(userName)}
 
@@ -218,15 +271,16 @@ This link expires in ${PASSWORD_RESET_MINUTES} minutes and can only be used once
 ${requestContext ? `\nRequest details:\n${requestDetailsToText(requestContext)}\n` : ""}
 Didn't request this? Ignore this email - your password will not change.
 
-${contactLineText()}
-- Naturanza Food Team
+${contactLineText(brand)}
+- ${storeName} Team
 `;
 
   return sendEmail({
     to: email,
-    subject: isAdmin ? "Reset your admin password - Naturanza Food" : "Reset your password - Naturanza Food",
+    subject: isAdmin ? `Reset your admin password - ${storeName}` : `Reset your password - ${storeName}`,
     html,
     text,
+    storeName,
   });
 };
 
@@ -234,11 +288,18 @@ ${contactLineText()}
  * Security notice sent after any successful password change or reset, so the
  * owner learns about a change they did not make.
  */
-const sendPasswordChangedEmail = async ({ email, userName, isAdmin = false, requestContext = null }) => {
+const sendPasswordChangedEmail = async ({
+  email,
+  userName,
+  isAdmin = false,
+  requestContext = null,
+  storeName: passedStoreName,
+}) => {
   if (!email) return { success: false, error: "No recipient email" };
 
+  const { storeName, brand } = await resolveEmailBrand({ storeName: passedStoreName });
   const recoverLink = `${FRONTEND_URL}${isAdmin ? "/admin/forgot-password" : "/forgot-password"}`;
-  const accountLabel = isAdmin ? "Naturanza Food admin" : "Naturanza Food";
+  const accountLabel = isAdmin ? `${storeName} admin` : storeName;
 
   const contentHtml = `
               <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">Your password was changed</h2>
@@ -258,10 +319,11 @@ ${renderNotice({
 ${renderButton({ href: recoverLink, label: "Secure My Account", accent: "red" })}`;
 
   const html = renderEmailLayout({
-    title: "Your password was changed - Naturanza Food",
-    preheader: "Your Naturanza Food password was just changed. Not you? Secure your account now.",
+    title: `Your password was changed - ${storeName}`,
+    preheader: `Your ${storeName} password was just changed. Not you? Secure your account now.`,
     contentHtml,
     footerNote: "This is a security notification and is sent for every password change.",
+    brand,
   });
 
   const text = `${greetingText(userName)}
@@ -275,15 +337,16 @@ If this was you, there's nothing else to do.
 Didn't change your password? Someone else may have access to your account.
 Reset it right away: ${recoverLink}
 
-${contactLineText()}
-- Naturanza Food Team
+${contactLineText(brand)}
+- ${storeName} Team
 `;
 
   return sendEmail({
     to: email,
-    subject: "Your password was changed - Naturanza Food",
+    subject: `Your password was changed - ${storeName}`,
     html,
     text,
+    storeName,
   });
 };
 
@@ -291,9 +354,16 @@ ${contactLineText()}
  * Security notice sent when a customer signs in from a device we have not seen
  * on their account before.
  */
-const sendNewDeviceLoginEmail = async ({ email, userName, provider = "password", requestContext = null }) => {
+const sendNewDeviceLoginEmail = async ({
+  email,
+  userName,
+  provider = "password",
+  requestContext = null,
+  storeName: passedStoreName,
+}) => {
   if (!email) return { success: false, error: "No recipient email" };
 
+  const { storeName, brand } = await resolveEmailBrand({ storeName: passedStoreName });
   const methodLabel = provider === "google" ? "Google sign-in" : "email and password";
   const recoverLink = `${FRONTEND_URL}/forgot-password`;
   const sessionsLink = `${FRONTEND_URL}/profile`;
@@ -302,7 +372,7 @@ const sendNewDeviceLoginEmail = async ({ email, userName, provider = "password",
               <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">New sign-in to your account</h2>
               ${greetingHtml(userName)}
               <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
-                Your Naturanza Food account was just signed in to from a device we haven't seen before, using ${escapeHtml(methodLabel)}.
+                Your ${escapeHtml(storeName)} account was just signed in to from a device we haven't seen before, using ${escapeHtml(methodLabel)}.
               </p>
 ${renderRequestDetails(requestContext || {})}
               <p style="margin: 0 0 24px; color: #475569; font-size: 15px; line-height: 1.6;">
@@ -319,15 +389,16 @@ ${renderButton({ href: recoverLink, label: "Secure My Account", accent: "red" })
               </p>`;
 
   const html = renderEmailLayout({
-    title: "New sign-in to your account - Naturanza Food",
+    title: `New sign-in to your account - ${storeName}`,
     preheader: "We noticed a sign-in from a new device. Not you? Secure your account.",
     contentHtml,
     footerNote: "This is a security notification sent when your account is used on a new device.",
+    brand,
   });
 
   const text = `${greetingText(userName)}
 
-Your Naturanza Food account was just signed in to from a new device, using ${methodLabel}.
+Your ${storeName} account was just signed in to from a new device, using ${methodLabel}.
 
 ${requestDetailsToText(requestContext || {})}
 
@@ -335,26 +406,29 @@ If this was you, you can ignore this email.
 
 Don't recognise this sign-in? Change your password now: ${recoverLink}
 
-${contactLineText()}
-- Naturanza Food Team
+${contactLineText(brand)}
+- ${storeName} Team
 `;
 
   return sendEmail({
     to: email,
-    subject: "New sign-in to your Naturanza Food account",
+    subject: `New sign-in to your ${storeName} account`,
     html,
     text,
+    storeName,
   });
 };
 
 /**
  * Build the newsletter welcome email
  */
-const formatPromoDiscount = (coupon) => {
+const formatPromoDiscount = (coupon, currency = "PKR") => {
   if (!coupon) return "a special discount";
   const value = Number(coupon.discount_value);
   if (!Number.isFinite(value) || value <= 0) return "a special discount";
-  if (coupon.discount_type === "fixed") return `Rs ${value.toLocaleString("en-PK")} off`;
+  if (coupon.discount_type === "fixed") {
+    return `${currency || "PKR"} ${value.toLocaleString("en-PK")} off`;
+  }
   return `${value % 1 === 0 ? value.toFixed(0) : value}% off`;
 };
 
@@ -367,9 +441,13 @@ const generateNewsletterWelcomeEmail = ({
   promoCoupon,
   unsubscribeUrl,
   siteUrl,
+  currency,
+  brand,
 }) => {
-  const discountLabel = formatPromoDiscount(promoCoupon);
-  const safeStoreName = escapeHtml(storeName || "Naturanza Food");
+  const resolvedStoreName =
+    String(storeName || brand?.name || BRAND.name).trim() || BRAND.name;
+  const discountLabel = formatPromoDiscount(promoCoupon, currency || "PKR");
+  const safeStoreName = escapeHtml(resolvedStoreName);
   const safePromoCode = promoCode ? escapeHtml(promoCode) : "";
   const promoBlock = safePromoCode
     ? `
@@ -409,69 +487,82 @@ ${promoBlock}
 ${renderButton({ href: `${siteUrl}/shop`, label: "Start Shopping" })}`;
 
   return renderEmailLayout({
-    title: `Welcome to ${storeName || "Naturanza Food"}`,
+    title: `Welcome to ${resolvedStoreName}`,
     preheader: promoCode
       ? `Thanks for subscribing! Here's ${discountLabel} on your first order.`
       : "Thanks for subscribing! Offers, recipes and wellness tips are on the way.",
     contentHtml,
-    footerNote: unsubscribeFooterNote(unsubscribeUrl, `You're receiving this because you subscribed to ${storeName || "Naturanza Food"}.`),
+    footerNote: unsubscribeFooterNote(unsubscribeUrl, `You're receiving this because you subscribed to ${resolvedStoreName}.`),
+    brand,
   });
 };
 
 const sendNewsletterWelcomeEmail = async ({
   email,
-  storeName,
+  storeName: passedStoreName,
   promoCode,
   promoCoupon,
   unsubscribeUrl,
+  currency: passedCurrency,
 }) => {
+  const { storeName, currency, brand } = await resolveEmailBrand({
+    storeName: passedStoreName,
+    currency: passedCurrency,
+  });
   const html = generateNewsletterWelcomeEmail({
-    storeName: storeName || "Naturanza Food",
+    storeName,
     promoCode: promoCode || "",
     promoCoupon: promoCoupon || null,
     unsubscribeUrl,
     siteUrl: FRONTEND_URL,
+    currency,
+    brand,
   });
 
-  const discountLabel = formatPromoDiscount(promoCoupon);
+  const discountLabel = formatPromoDiscount(promoCoupon, currency);
   const promoLine = promoCode
     ? `\nWelcome gift: use code ${promoCode} at checkout for ${discountLabel} on your first order.\n`
     : "";
 
   const text = `
-Welcome to ${storeName || "Naturanza Food"}!
+Welcome to ${storeName}!
 
 Thank you for subscribing. You'll get exclusive offers, wellness tips,
 and updates on new products.
 ${promoLine}
 Start shopping: ${FRONTEND_URL}/shop
 
-${contactLineText()}
+${contactLineText(brand)}
 Didn't subscribe? Unsubscribe: ${unsubscribeUrl}
 `;
 
   return sendEmail({
     to: email,
-    subject: `Welcome to ${storeName || "Naturanza Food"}!`,
+    subject: `Welcome to ${storeName}!`,
     html,
     text,
     unsubscribeUrl,
+    storeName,
   });
 };
 
 /**
  * Build a generic broadcast email (admin update / promo / announcement)
  */
-const generateNewsletterBroadcastEmail = ({ storeName, subject, preheader, bodyHtml, unsubscribeUrl }) =>
-  renderEmailLayout({
+const generateNewsletterBroadcastEmail = ({ storeName, subject, preheader, bodyHtml, unsubscribeUrl, brand }) => {
+  const resolvedStoreName =
+    String(storeName || brand?.name || BRAND.name).trim() || BRAND.name;
+  return renderEmailLayout({
     title: subject,
     preheader,
     contentHtml: `
               <div style="color: #1f2937; font-size: 16px; line-height: 1.7;">
                 ${bodyHtml}
               </div>`,
-    footerNote: unsubscribeFooterNote(unsubscribeUrl, `You're receiving this because you subscribed to ${storeName} updates.`),
+    footerNote: unsubscribeFooterNote(unsubscribeUrl, `You're receiving this because you subscribed to ${resolvedStoreName} updates.`),
+    brand,
   });
+};
 
 const messageBodyToHtml = (message) =>
   escapeHtml(message)
@@ -481,21 +572,24 @@ const messageBodyToHtml = (message) =>
 
 const sendNewsletterBroadcastEmail = async ({
   email,
-  storeName,
+  storeName: passedStoreName,
   subject,
   message,
   unsubscribeUrl,
 }) => {
-  const resolvedStoreName = storeName || "Naturanza Food";
+  const { storeName: resolvedStoreName, brand } = await resolveEmailBrand({
+    storeName: passedStoreName,
+  });
   const html = generateNewsletterBroadcastEmail({
     storeName: resolvedStoreName,
     subject,
     preheader: String(message || "").replace(/\s+/g, " ").trim().slice(0, 120),
     bodyHtml: messageBodyToHtml(message),
     unsubscribeUrl,
+    brand,
   });
 
-  const text = `${message}\n\n— ${resolvedStoreName}\n${contactLineText()}\nUnsubscribe: ${unsubscribeUrl}`;
+  const text = `${message}\n\n— ${resolvedStoreName}\n${contactLineText(brand)}\nUnsubscribe: ${unsubscribeUrl}`;
 
   return sendEmail({
     to: email,
@@ -503,6 +597,7 @@ const sendNewsletterBroadcastEmail = async ({
     html,
     text,
     unsubscribeUrl,
+    storeName: resolvedStoreName,
   });
 };
 
@@ -518,11 +613,13 @@ const generatePaymentStatusEmail = ({
   isApproved,
   rejectionReason,
   siteUrl,
+  brand,
 }) => {
   const accentColor = isApproved ? "#16a34a" : "#dc2626";
   const statusLabel = isApproved ? "Approved" : "Rejected";
   const heading = isApproved ? "Payment Approved" : "Payment Could Not Be Verified";
-  const formattedAmount = `${currency || "Rs"} ${Number(amount || 0).toLocaleString("en-PK")}`;
+  const resolvedCurrency = String(currency || "PKR").trim() || "PKR";
+  const formattedAmount = `${resolvedCurrency} ${Number(amount || 0).toLocaleString("en-PK")}`;
   const safeCustomerName = escapeHtml(customerName || "Customer");
   const safeOrderId = String(orderId).replace(/[^0-9a-zA-Z_-]/g, "");
   const safeStageLabel = escapeHtml(stageLabel || "Payment");
@@ -570,30 +667,38 @@ ${renderButton({
     subheading: `Order #${safeOrderId} · ${statusLabel}`,
     accent: isApproved ? "green" : "red",
     contentHtml,
+    brand,
   });
 };
 
 const sendPaymentStatusEmail = async ({
   email,
+  storeName: passedStoreName,
   customerName,
   orderId,
   amount,
-  currency,
+  currency: passedCurrency,
   stageLabel,
   isApproved,
   rejectionReason,
 }) => {
   if (!email) return { success: false, error: "No customer email" };
 
+  const { storeName, currency, brand } = await resolveEmailBrand({
+    storeName: passedStoreName,
+    currency: passedCurrency,
+  });
+
   const html = generatePaymentStatusEmail({
     customerName,
     orderId,
     amount,
-    currency: currency || "Rs",
+    currency,
     stageLabel: stageLabel || "Payment",
     isApproved: Boolean(isApproved),
     rejectionReason: rejectionReason || "",
     siteUrl: FRONTEND_URL,
+    brand,
   });
 
   const statusLabel = isApproved ? "Approved" : "Rejected";
@@ -602,24 +707,26 @@ const sendPaymentStatusEmail = async ({
     : `Payment Could Not Be Verified — Order #${orderId}`;
 
   const text = isApproved
-    ? `Your ${stageLabel} payment of ${currency || "Rs"} ${amount} for Order #${orderId} has been ${statusLabel}.\n\nTrack your order: ${FRONTEND_URL}/orders\n\n${contactLineText()}`
-    : `Your ${stageLabel} payment of ${currency || "Rs"} ${amount} for Order #${orderId} could not be verified.${
+    ? `Your ${stageLabel} payment of ${currency} ${amount} for Order #${orderId} has been ${statusLabel}.\n\nTrack your order: ${FRONTEND_URL}/orders\n\n${contactLineText(brand)}`
+    : `Your ${stageLabel} payment of ${currency} ${amount} for Order #${orderId} could not be verified.${
         rejectionReason ? `\n\nReason: ${rejectionReason}` : ""
-      }\n\nView order: ${FRONTEND_URL}/orders\n\n${contactLineText()}`;
+      }\n\nView order: ${FRONTEND_URL}/orders\n\n${contactLineText(brand)}`;
 
-  return sendEmail({ to: email, subject, html, text });
+  return sendEmail({ to: email, subject, html, text, storeName });
 };
 
 /**
  * Send a 6-digit email verification code for new self-signup accounts.
  */
 const sendVerificationCodeEmail = async (email, userName, code, expiryMinutes = 15) => {
+  const { storeName, brand } = await resolveEmailBrand();
+  const safeStoreName = escapeHtml(storeName);
   const safeCode = escapeHtml(code);
   const contentHtml = `
               <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">Verify your email</h2>
               ${greetingHtml(userName)}
               <p style="margin: 0 0 20px; color: #475569; font-size: 15px; line-height: 1.6;">
-                Use the verification code below to confirm your email and activate your Naturanza Food account.
+                Use the verification code below to confirm your email and activate your ${safeStoreName} account.
               </p>
               <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin: 8px auto 16px;">
                 <tr>
@@ -632,31 +739,33 @@ const sendVerificationCodeEmail = async (email, userName, code, expiryMinutes = 
                 This code expires in ${expiryMinutes} minutes. Never share it with anyone &mdash; our team will never ask for it.
               </p>
               <p style="margin: 0; color: #94a3b8; font-size: 13px; line-height: 1.6;">
-                If you didn't try to create a Naturanza Food account, you can safely ignore this email.
+                If you didn't try to create a ${safeStoreName} account, you can safely ignore this email.
               </p>`;
 
   const html = renderEmailLayout({
-    title: "Verify your email - Naturanza Food",
+    title: `Verify your email - ${storeName}`,
     preheader: `Your verification code is ${code}. It expires in ${expiryMinutes} minutes.`,
     contentHtml,
+    brand,
   });
 
   const text = `${greetingText(userName)}
 
-Your Naturanza Food verification code is: ${code}
+Your ${storeName} verification code is: ${code}
 
 This code expires in ${expiryMinutes} minutes. Never share it with anyone.
 
 If you didn't try to create an account, you can ignore this email.
 
-${contactLineText()}
-- Naturanza Food Team`;
+${contactLineText(brand)}
+- ${storeName} Team`;
 
   return sendEmail({
     to: email,
-    subject: `${code} is your Naturanza Food verification code`,
+    subject: `${code} is your ${storeName} verification code`,
     html,
     text,
+    storeName,
   });
 };
 
@@ -665,11 +774,14 @@ const generateNewsletterVerificationEmail = ({
   storeName,
   verificationUrl,
   unsubscribeUrl,
+  brand,
 }) => {
+  const resolvedStoreName =
+    String(storeName || brand?.name || BRAND.name).trim() || BRAND.name;
   const contentHtml = `
               <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">Confirm your subscription</h2>
               <p style="margin: 0 0 24px; color: #1e293b; font-size: 16px; line-height: 1.6;">
-                Thanks for subscribing to <strong>${escapeHtml(storeName)}</strong>. Please confirm your email address to join our newsletter.
+                Thanks for subscribing to <strong>${escapeHtml(resolvedStoreName)}</strong>. Please confirm your email address to join our newsletter.
               </p>
 ${renderButton({ href: verificationUrl, label: "Confirm Subscription" })}
               <p style="margin: 0 0 24px; color: #64748b; font-size: 14px; line-height: 1.6;">
@@ -678,42 +790,47 @@ ${renderButton({ href: verificationUrl, label: "Confirm Subscription" })}
 ${renderLinkFallback(verificationUrl)}`;
 
   return renderEmailLayout({
-    title: "Confirm your subscription - Naturanza Food",
-    preheader: "One click to confirm your Naturanza Food newsletter subscription.",
+    title: `Confirm your subscription - ${resolvedStoreName}`,
+    preheader: `One click to confirm your ${resolvedStoreName} newsletter subscription.`,
     contentHtml,
     footerNote: unsubscribeFooterNote(unsubscribeUrl, "You received this because this address was entered on our newsletter form."),
+    brand,
   });
 };
 
 const sendNewsletterVerificationEmail = async ({
   email,
-  storeName,
+  storeName: passedStoreName,
   verificationUrl,
   unsubscribeUrl,
 }) => {
+  const { storeName, brand } = await resolveEmailBrand({ storeName: passedStoreName });
   const html = generateNewsletterVerificationEmail({
-    storeName: storeName || "Naturanza Food",
+    storeName,
     verificationUrl,
     unsubscribeUrl,
+    brand,
   });
 
   const text = `
-Confirm your subscription to ${storeName || "Naturanza Food"}!
+Confirm your subscription to ${storeName}!
 
 Please click the link below to complete your newsletter signup:
 ${verificationUrl}
 
 This link expires in 24 hours.
 
+${contactLineText(brand)}
 Didn't subscribe? Unsubscribe: ${unsubscribeUrl}
 `;
 
   return sendEmail({
     to: email,
-    subject: "Confirm your Naturanza Food subscription",
+    subject: `Confirm your ${storeName} subscription`,
     html,
     text,
     unsubscribeUrl,
+    storeName,
   });
 };
 

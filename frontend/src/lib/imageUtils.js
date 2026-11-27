@@ -90,5 +90,5 @@ export const getProductPlaceholder = () => {
  * Get a placeholder image URL for categories
  */
 export const getCategoryPlaceholder = () => {
-  return "/images/categories/honey.webp";
+  return "/images/products/honey.webp";
 };

@@ -79,7 +79,7 @@ export function AdminOperations() {
       ...prev,
       code,
       label: matched?.label || prev.label,
-      supports_online: !["cod", "bank"].includes(code),
+      supports_online: code !== "cod",
     }));
   };
 

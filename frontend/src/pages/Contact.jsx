@@ -41,6 +41,7 @@ export function Contact() {
   const { ref: formRef, isVisible: formVisible } = useScrollReveal({ threshold: 0.15 });
   const { ref: mapRef, isVisible: mapVisible } = useScrollReveal({ threshold: 0.15 });
 
+  const storeName = settings.storeName || BUSINESS_INFO.brandName;
   const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
   const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
   const phoneLink = normalizePhoneLink(supportPhone);
@@ -173,7 +174,7 @@ export function Contact() {
                 Contact Information
               </h2>
               <p className="text-xs text-[#6b7a6b] mb-5">
-                {BUSINESS_INFO.brandName} (Legal Name: {BUSINESS_INFO.legalName})
+                {storeName} (Legal Name: {BUSINESS_INFO.legalName})
               </p>
               <div className="space-y-5">
                 {contactInfo.map((item) => (
@@ -412,7 +413,7 @@ export function Contact() {
                 allowFullScreen
                 loading="eager"
                 referrerPolicy="no-referrer-when-downgrade"
-                title={`Naturanza Location — ${mapLocationLabel}`}
+                title={`${storeName} Location — ${mapLocationLabel}`}
               />
             </div>
           </div>

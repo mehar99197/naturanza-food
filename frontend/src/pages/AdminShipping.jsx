@@ -347,6 +347,7 @@ export function AdminShipping() {
                   { value: "packed", label: "Packed" },
                   { value: "shipped", label: "In Transit" },
                   { value: "delivered", label: "Delivered" },
+                  { value: "returned", label: "Returned" },
                 ].map((item) => (
                   <button
                     key={item.value}

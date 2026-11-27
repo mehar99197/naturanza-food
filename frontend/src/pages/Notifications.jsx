@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
 import { userAPI } from "@/services/api";
 import { NoIndexSEO } from "@/components/SEO";
 
@@ -108,6 +109,8 @@ const FILTERS = [
 
 export function Notifications() {
   const { isAuthenticated } = useAuth();
+  const { settings } = useSettings();
+  const storeName = settings.storeName || "Naturanza Food";
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -252,7 +255,7 @@ export function Notifications() {
 
   return (
     <>
-      <NoIndexSEO title="Notifications - Naturanza Food" />
+      <NoIndexSEO title={`Notifications - ${storeName}`} />
       <main className="pt-20 sm:pt-24 pb-14 sm:pb-16 bg-[#faf8f3] min-h-screen">
         <div className="container-custom max-w-3xl">
           {/* Header */}

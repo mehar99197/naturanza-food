@@ -25,6 +25,7 @@ import { useSettings } from "@/context/SettingsContext";
 import { formatPrice, computeStoreSaleDiscount } from "@/lib/utils";
 import api, { paymentAPI, cartAPI } from "@/services/api";
 import { NoIndexSEO } from "@/components/SEO";
+import { BUSINESS_INFO } from "@/config/legal";
 import { getAbsoluteImageUrl } from "@/lib/imageUtils";
 import { safeLocalStorage } from "@/lib/storage";
 
@@ -64,7 +65,8 @@ export function Checkout() {
   const { addOrder } = useOrders();
   const { user, loading: authLoading, isAuthenticated } = useAuth();
   const { settings } = useSettings();
-  const supportEmail = settings.storeEmail || "support@naturanzafood.com";
+  const storeName = settings.storeName || BUSINESS_INFO.brandName;
+  const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
   const [step, setStep] = useState("shipping");
   const [isProcessing, setIsProcessing] = useState(false);
   const [orderId, setOrderId] = useState(null);
@@ -557,12 +559,24 @@ export function Checkout() {
   const couponDiscount = parseFloat(appliedCoupon?.discount_amount) || 0;
   const discount = storeSaleActive ? storeSaleDiscount : couponDiscount;
   const selectedCityData = shippingCities.find(c => c.city_name === shippingData.city);
-  const freeShippingThreshold = Number(settings.shippingFree) || 5000;
+  const parsedFree = Number(settings.shippingFree);
+  const freeShippingThreshold =
+    settings.shippingFree !== "" &&
+    settings.shippingFree != null &&
+    Number.isFinite(parsedFree) &&
+    parsedFree >= 0
+      ? parsedFree
+      : 5000;
   const isShippingFree = paymentMethod !== 'cod' && (subtotal - discount) >= freeShippingThreshold;
   const deliveryFee = (selectedCityData && !isShippingFree) ? parseInt(selectedCityData.fee, 10) || 0 : 0;
   const hasDeliveryFee = selectedCityData !== undefined;
-  const finalTotal = subtotal - discount + deliveryFee;
-  const payOnDeliveryAmount = Math.max(0, subtotal - discount);
+  const parsedTaxRate = Number(settings.taxRate);
+  const effectiveTaxRate = Number.isFinite(parsedTaxRate) && parsedTaxRate > 0 ? parsedTaxRate : 0;
+  const taxableAmount = Math.max(0, subtotal - discount);
+  const taxAmount =
+    effectiveTaxRate > 0 ? Math.round(((taxableAmount * effectiveTaxRate) / 100) * 100) / 100 : 0;
+  const finalTotal = taxableAmount + taxAmount + deliveryFee;
+  const payOnDeliveryAmount = Math.max(0, taxableAmount + taxAmount);
 
   const codUsesSafepayAdvance =
     paymentMethod === "cod" &&
@@ -626,7 +640,7 @@ export function Checkout() {
 
     if (paymentMethod === "safepay" && !safepayGatewayConfigured) {
       setError(
-        "SafePay gateway keys are not configured yet on this server. Add SAFEPAY_API_KEY and SAFEPAY_SECRET_KEY in backend/.env or choose Cash on Delivery.",
+        "Online payment is temporarily unavailable. Please select Cash on Delivery or try again later.",
       );
       return;
     }
@@ -791,7 +805,7 @@ export function Checkout() {
               Your cart is empty
             </h1>
             <p className="mx-auto mt-2 max-w-sm text-sm font-medium text-slate-500">
-              Add your favorite Naturanza products, then come back here to
+              Add your favorite {storeName} products, then come back here to
               complete checkout.
             </p>
             <Link
@@ -810,7 +824,7 @@ export function Checkout() {
   if (step === "confirmation") {
     return (
       <>
-        <NoIndexSEO title="Order Confirmed - Naturanza Food" />
+        <NoIndexSEO title={`Order Confirmed - ${storeName}`} />
         <div className="container-custom max-w-2xl pt-24 sm:pt-28 pb-16">
           <div className="rounded-3xl border border-white/70 bg-white/90 p-6 text-center shadow-[0_20px_60px_rgba(15,23,42,0.1)] backdrop-blur sm:p-8 md:p-12">
             {/* Success Icon */}
@@ -1078,7 +1092,7 @@ export function Checkout() {
                     Shipping Information
                   </h2>
                   <p className="mt-1 text-xs font-medium text-slate-500 sm:text-sm">
-                    Where should we deliver your Naturanza order?
+                    Where should we deliver your {storeName} order?
                   </p>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2 sm:gap-5">
@@ -1415,7 +1429,7 @@ export function Checkout() {
                         </p>
                         {paymentMethodsLoaded && !safepayGatewayConfigured && (
                           <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                            SafePay API keys are not set in this local environment yet (`SAFEPAY_API_KEY` / `SAFEPAY_SECRET_KEY` in `backend/.env`).
+                            Online payment is temporarily unavailable. Please select Cash on Delivery or try again later.
                           </p>
                         )}
                       </div>
@@ -1758,7 +1772,9 @@ export function Checkout() {
                               </span>
                             </div>
                             <span className="text-[10px] text-slate-400">
-                              Free with online payment (SafePay) on orders of {formatPrice(freeShippingThreshold, settings.currency)}+
+                              {freeShippingThreshold === 0
+                                ? "Free with online payment (SafePay)"
+                                : `Free with online payment (SafePay) on orders of ${formatPrice(freeShippingThreshold, settings.currency)}+`}
                             </span>
                           </div>
                         )
@@ -1767,6 +1783,14 @@ export function Checkout() {
                       )}
                     </div>
                   </div>
+                  {taxAmount > 0 && (
+                    <div className="flex items-center justify-between text-sm text-slate-600 sm:text-base">
+                      <span>Tax ({effectiveTaxRate}%)</span>
+                      <span className="font-semibold text-slate-700">
+                        {formatPrice(taxAmount, settings.currency)}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between border-t border-slate-200 pt-2.5 font-display text-base font-bold sm:pt-3 sm:text-xl">
                     <span>Total</span>
                     <span className="text-emerald-700">

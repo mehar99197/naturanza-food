@@ -30,11 +30,14 @@ export function trackPageView(pagePath, pageTitle) {
   });
 }
 
-export function trackPurchase(orderData) {
+const resolveCurrency = (data, currency) =>
+  String(data?.currency || currency || 'PKR').trim().toUpperCase() || 'PKR';
+
+export function trackPurchase(orderData, currency = 'PKR') {
   trackEvent('purchase', {
     transaction_id: orderData.orderId,
     value: orderData.total,
-    currency: 'PKR',
+    currency: resolveCurrency(orderData, currency),
     items: orderData.items.map(item => ({
       item_id: item.id,
       item_name: item.name,
@@ -45,9 +48,9 @@ export function trackPurchase(orderData) {
   });
 }
 
-export function trackAddToCart(productData) {
+export function trackAddToCart(productData, currency = 'PKR') {
   trackEvent('add_to_cart', {
-    currency: 'PKR',
+    currency: resolveCurrency(productData, currency),
     value: productData.price,
     items: [{
       item_id: productData.id,
@@ -59,9 +62,9 @@ export function trackAddToCart(productData) {
   });
 }
 
-export function trackViewItem(productData) {
+export function trackViewItem(productData, currency = 'PKR') {
   trackEvent('view_item', {
-    currency: 'PKR',
+    currency: resolveCurrency(productData, currency),
     value: productData.price,
     items: [{
       item_id: productData.id,
@@ -90,9 +93,9 @@ export function trackLead(source) {
   });
 }
 
-export function trackBeginCheckout(checkoutData) {
+export function trackBeginCheckout(checkoutData, currency = 'PKR') {
   trackEvent('begin_checkout', {
-    currency: 'PKR',
+    currency: resolveCurrency(checkoutData, currency),
     value: checkoutData.total,
     items: checkoutData.items.map(item => ({
       item_id: item.id,

@@ -9,6 +9,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SEO } from '@/components/SEO';
 import { ArticleStructuredData } from '@/components/StructuredData';
+import { useSettings } from '@/context/SettingsContext';
 import { blogAPI, newsletterAPI } from '@/services/api';
 import { getAbsoluteImageUrl } from '@/lib/imageUtils';
 import { SITE_URL } from '@/config/site';
@@ -131,7 +132,7 @@ const makeMarkdownComponents = () => ({
 
 // ─── Newsletter CTA ────────────────────────────────────────────────────────────
 
-function NewsletterCTA({ sourceTitle }) {
+function NewsletterCTA({ sourceTitle, storeName }) {
   const [email, setEmail] = useState('');
   const [state, setState] = useState('idle'); // idle | loading | success | error
 
@@ -151,7 +152,7 @@ function NewsletterCTA({ sourceTitle }) {
     <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-green-700 via-green-600 to-emerald-600 p-7 sm:p-9 text-white shadow-lg mb-8">
       <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/10 blur-2xl" />
       <div className="pointer-events-none absolute -bottom-6 -left-6 h-28 w-28 rounded-full bg-white/10 blur-xl" />
-      <p className="text-xs font-bold uppercase tracking-widest text-green-200 mb-1">Naturanza Journal</p>
+      <p className="text-xs font-bold uppercase tracking-widest text-green-200 mb-1">{storeName} Journal</p>
       <h3 className="text-xl sm:text-2xl font-bold mb-2">Get our next article in your inbox</h3>
       <p className="text-green-100/90 text-sm mb-5">
         Tips on natural food, traditional remedies, and healthy living — no spam, unsubscribe anytime.
@@ -245,6 +246,8 @@ function MobileTOC({ items, activeId, onClickItem }) {
 
 export function BlogPost() {
   const { slug } = useParams();
+  const { settings } = useSettings();
+  const storeName = settings.storeName || 'Naturanza Food';
   const [post, setPost] = useState(null);
   const [related, setRelated] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -348,7 +351,13 @@ export function BlogPost() {
 
   const articleUrl = `${SITE_URL}/blog/${post.slug}`;
   const coverImage = post.image ? getAbsoluteImageUrl(post.image, { defaultFolder: 'blog' }) : null;
-  const authorInitial = (String(post.author || 'N').trim().charAt(0) || 'N').toUpperCase();
+  const authorName = String(post.author || '').trim();
+  const displayAuthor = authorName || storeName;
+  const isStoreAuthor =
+    !authorName ||
+    authorName.toLowerCase() === storeName.toLowerCase() ||
+    authorName.toLowerCase().includes('naturanza');
+  const authorInitial = (displayAuthor.charAt(0) || 'N').toUpperCase();
   const waText = encodeURIComponent(`${post.title} — ${articleUrl}`);
   const waUrl = `https://wa.me/?text=${waText}`;
 
@@ -360,6 +369,7 @@ export function BlogPost() {
         title={post.title}
         description={post.excerpt}
         keywords={post.keywords}
+        author={displayAuthor}
         url={articleUrl}
         image={coverImage || undefined}
         type="article"
@@ -368,7 +378,7 @@ export function BlogPost() {
         title={post.title}
         description={post.excerpt}
         url={articleUrl}
-        author={post.author}
+        author={displayAuthor}
         datePublished={post.date}
         image={coverImage || undefined}
       />
@@ -432,7 +442,7 @@ export function BlogPost() {
                   <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/25 text-sm font-bold text-white ring-2 ring-white/40 shadow-sm">
                     {authorInitial}
                   </span>
-                  <span className="font-medium">{post.author}</span>
+                  <span className="font-medium">{displayAuthor}</span>
                 </span>
                 <span className="text-white/40">·</span>
                 <span className="inline-flex items-center gap-1.5 text-white/80">
@@ -501,20 +511,28 @@ export function BlogPost() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-bold text-slate-900 text-base">{post.author}</p>
+                    <p className="font-bold text-slate-900 text-base">{displayAuthor}</p>
                     <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-semibold text-green-700 border border-green-100">
-                      ✍️ Writer
+                      ✍️ {isStoreAuthor ? 'Editorial Team' : 'Author'}
                     </span>
                   </div>
-                  <p className="text-xs text-green-600 font-medium mt-0.5">Naturanza Food</p>
-                  <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
-                    Writing about natural food, traditional remedies, and healthy living for Pakistani families.
-                  </p>
+                  {isStoreAuthor ? (
+                    <>
+                      <p className="text-xs text-green-600 font-medium mt-0.5">{storeName}</p>
+                      <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
+                        Sharing practical guides on pure natural ingredients, nutrition, and everyday wellness.
+                      </p>
+                    </>
+                  ) : post.author_bio ? (
+                    <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
+                      {post.author_bio}
+                    </p>
+                  ) : null}
                 </div>
               </div>
 
               {/* Newsletter CTA */}
-              <NewsletterCTA sourceTitle={post.title} />
+              <NewsletterCTA sourceTitle={post.title} storeName={storeName} />
 
               {/* Related articles */}
               {related.length > 0 && (

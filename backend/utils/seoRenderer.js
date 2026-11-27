@@ -20,6 +20,7 @@
 const fs = require("fs");
 const path = require("path");
 const { dbPool } = require("../config/db");
+const { getAdminSettings } = require("./adminSettings");
 const { getProductContentDefaults } = require("./productContentDefaults");
 
 const SITE_URL = (process.env.PUBLIC_SITE_URL || "https://naturanzafood.com").replace(/\/+$/, "");
@@ -28,12 +29,82 @@ const LEGAL_NAME = "Naturanza Foods";
 const BUSINESS_ADDRESS = "Nizam Pura, Chunian, District Kasur, Punjab, Pakistan";
 const SUPPORT_EMAIL = "support@naturanzafood.com";
 const SUPPORT_PHONE = "+92340 9502646";
+const DEFAULT_CURRENCY = "PKR";
+const DEFAULT_SHIPPING_FREE = 5000;
 const DEFAULT_OG_IMAGE = `${SITE_URL}/images/og-image.jpg`;
 const DEFAULT_TITLE = "Naturanza Food - Premium Organic & Natural Products | Buy Online in Pakistan";
 const DEFAULT_DESCRIPTION =
   "Shop pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural, sustainably sourced. Free shipping on prepaid online orders over Rs. 5,000 across Pakistan.";
+const DEFAULT_SHIPPING_DESCRIPTION =
+  "Shipping policy for Naturanza Food (Naturanza Foods): 3–5 working days delivery across Pakistan and free shipping on prepaid online orders over Rs. 5,000.";
+
+const SETTINGS_CACHE_TTL_MS = 60 * 1000;
+let cachedSeoSettings = null;
+let cachedSeoSettingsAt = 0;
+
+const DEFAULT_SEO_SETTINGS = {
+  storeName: SITE_NAME,
+  storeEmail: SUPPORT_EMAIL,
+  storePhone: SUPPORT_PHONE,
+  address: BUSINESS_ADDRESS,
+  shippingFree: DEFAULT_SHIPPING_FREE,
+  currency: DEFAULT_CURRENCY,
+  storeDiscountPct: 0,
+};
 
 const clampDiscountPercent = (value) => Math.min(Math.max(Number(value) || 0, 0), 90);
+
+const resolveSeoSettings = (overrides = null) => {
+  if (!overrides || typeof overrides !== "object") {
+    return DEFAULT_SEO_SETTINGS;
+  }
+
+  const storeName = String(overrides.storeName || "").trim() || SITE_NAME;
+  const storeEmail = String(overrides.storeEmail || "").trim() || SUPPORT_EMAIL;
+  const storePhone = String(overrides.storePhone || "").trim() || SUPPORT_PHONE;
+  const address = String(overrides.address || "").trim() || BUSINESS_ADDRESS;
+  const parsedShippingFree = Number(overrides.shippingFree);
+  const shippingFree =
+    Number.isFinite(parsedShippingFree) && parsedShippingFree >= 0
+      ? parsedShippingFree
+      : DEFAULT_SHIPPING_FREE;
+  const currency =
+    String(overrides.currency || "").trim().toUpperCase() || DEFAULT_CURRENCY;
+  const storeDiscountPct =
+    overrides.storeDiscountActive && Number(overrides.storeDiscountPercentage) > 0
+      ? clampDiscountPercent(overrides.storeDiscountPercentage)
+      : clampDiscountPercent(overrides.storeDiscountPct);
+
+  return {
+    storeName,
+    storeEmail,
+    storePhone,
+    address,
+    shippingFree,
+    currency,
+    storeDiscountPct,
+  };
+};
+
+const fetchSeoSettings = async () => {
+  const now = Date.now();
+  if (cachedSeoSettings && now - cachedSeoSettingsAt < SETTINGS_CACHE_TTL_MS) {
+    return cachedSeoSettings;
+  }
+  try {
+    const live = await getAdminSettings(dbPool);
+    cachedSeoSettings = resolveSeoSettings(live);
+    cachedSeoSettingsAt = now;
+    return cachedSeoSettings;
+  } catch {
+    return cachedSeoSettings || DEFAULT_SEO_SETTINGS;
+  }
+};
+
+const formatShippingThreshold = (amount, currency = DEFAULT_CURRENCY) => {
+  const rounded = Math.round(Number(amount) || 0).toLocaleString("en-US");
+  return currency === "PKR" ? `Rs. ${rounded}` : `${currency} ${rounded}`;
+};
 
 const computeEffectiveProductPrice = (product, storeDiscountPct = 0) => {
   const base = Number(product?.price);
@@ -146,7 +217,13 @@ const setHreflang = (html, url) =>
 const renderBodyFallback = (inner) =>
   `<noscript><div id="ssr-content">${inner}</div></noscript>`;
 
-const productBodyHtml = (product, meta, effectivePrice = Number(product.price)) => {
+const productBodyHtml = (
+  product,
+  meta,
+  effectivePrice = Number(product.price),
+  settings = null,
+) => {
+  const s = resolveSeoSettings(settings);
   const name = escapeAttr(product.name);
   const price = Number(effectivePrice);
   const availableStock =
@@ -164,12 +241,12 @@ const productBodyHtml = (product, meta, effectivePrice = Number(product.price)) 
       `<li>${name}</li>` +
       `</ol></nav>` +
       `<h1>${name}</h1>` +
-      `<img src="${escapeAttr(meta.image)}" alt="${name} — Naturanza Food" />` +
+      `<img src="${escapeAttr(meta.image)}" alt="${name} — ${escapeAttr(s.storeName)}" />` +
       `<p>${escapeAttr(meta.description)}</p>` +
-      `<p><strong>Price:</strong> <span>PKR</span> ` +
+      `<p><strong>Price:</strong> <span>${escapeAttr(s.currency)}</span> ` +
       `<span>${Number.isFinite(price) ? price.toFixed(2) : ""}</span></p>` +
       `<p><strong>Availability:</strong> ${inStock ? "In stock" : "Out of stock"}</p>` +
-      `<p><strong>Brand:</strong> ${escapeAttr(SITE_NAME)}</p>` +
+      `<p><strong>Brand:</strong> ${escapeAttr(s.storeName)}</p>` +
       (product.barcode ? `<p><strong>Product code:</strong> ${escapeAttr(product.barcode)}</p>` : "") +
       `<p><a href="/shop">Browse all products</a></p>`,
   );
@@ -177,37 +254,50 @@ const productBodyHtml = (product, meta, effectivePrice = Number(product.price)) 
 
 // Static compliance fallback content inside <noscript> so non-JS compliance
 // crawlers verifying merchant onboarding receive full policy text on first fetch.
-const COMPLIANCE_BODY_FALLBACKS = {
-  "/shipping": renderBodyFallback(
-    `<h1>Shipping &amp; Delivery Policy</h1>` +
-      `<p>${escapeAttr(SITE_NAME)} (Legal Name: ${escapeAttr(LEGAL_NAME)}) processes orders within 24 hours on business days and delivers within 3–5 working days across Pakistan.</p>` +
-      `<p>Prepaid online orders (via SafePay) of Rs. 5,000 or more qualify for Free Shipping anywhere in Pakistan. Cash on Delivery (COD) orders carry standard city-specific courier charges shown at checkout.</p>` +
-      `<p>Address: ${escapeAttr(BUSINESS_ADDRESS)} | Email: ${escapeAttr(SUPPORT_EMAIL)} | Phone: ${escapeAttr(SUPPORT_PHONE)}</p>`,
-  ),
-  "/returns": renderBodyFallback(
-    `<h1>Returns &amp; Refund Policy</h1>` +
-      `<p>${escapeAttr(SITE_NAME)} (Legal Name: ${escapeAttr(LEGAL_NAME)}) accepts returns and replacements within 7 days of delivery for damaged, defective, leaked, expired, or incorrect items in their original sealed packaging.</p>` +
-      `<p>Quality inspection is completed within 2 business days, and approved refunds are processed within 5–7 business days to the original payment method.</p>` +
-      `<p>Address: ${escapeAttr(BUSINESS_ADDRESS)} | Email: ${escapeAttr(SUPPORT_EMAIL)} | Phone: ${escapeAttr(SUPPORT_PHONE)}</p>`,
-  ),
-  "/privacy": renderBodyFallback(
-    `<h1>Privacy Policy</h1>` +
-      `<p>This Privacy Policy describes how ${escapeAttr(SITE_NAME)} (Legal Name: ${escapeAttr(LEGAL_NAME)}), registered at ${escapeAttr(BUSINESS_ADDRESS)}, collects, uses, and protects your personal information.</p>` +
-      `<p>Online payments are processed securely via SafePay; card details are never stored on our servers.</p>` +
-      `<p>Contact: ${escapeAttr(SUPPORT_EMAIL)} | Phone: ${escapeAttr(SUPPORT_PHONE)}</p>`,
-  ),
-  "/terms": renderBodyFallback(
-    `<h1>Terms of Service</h1>` +
-      `<p>This online store operates under ${escapeAttr(SITE_NAME)} (Legal Name: ${escapeAttr(LEGAL_NAME)}), registered at ${escapeAttr(BUSINESS_ADDRESS)}.</p>` +
-      `<p>Orders are delivered within 3–5 working days across Pakistan (free shipping on prepaid SafePay orders of Rs. 5,000 or more). Returns are accepted within 7 days for damaged, defective, or incorrect items, with approved refunds processed within 5–7 business days.</p>` +
-      `<p>Contact: ${escapeAttr(SUPPORT_EMAIL)} | Phone: ${escapeAttr(SUPPORT_PHONE)}</p>`,
-  ),
-  "/contact": renderBodyFallback(
-    `<h1>Contact Us</h1>` +
-      `<p>${escapeAttr(SITE_NAME)} (Legal Name: ${escapeAttr(LEGAL_NAME)})</p>` +
-      `<p>Address: ${escapeAttr(BUSINESS_ADDRESS)}</p>` +
-      `<p>Email: ${escapeAttr(SUPPORT_EMAIL)} | Phone: ${escapeAttr(SUPPORT_PHONE)}</p>`,
-  ),
+const buildComplianceBodyFallbacks = (settings = null) => {
+  const s = resolveSeoSettings(settings);
+  const freeShippingText = formatShippingThreshold(s.shippingFree, s.currency);
+  const prepaidFreeSentence =
+    s.shippingFree > 0
+      ? `Prepaid online orders (via SafePay) of ${escapeAttr(freeShippingText)} or more qualify for Free Shipping anywhere in Pakistan. `
+      : "";
+  const termsFreeClause =
+    s.shippingFree > 0
+      ? ` (free shipping on prepaid SafePay orders of ${escapeAttr(freeShippingText)} or more)`
+      : "";
+
+  return {
+    "/shipping": renderBodyFallback(
+      `<h1>Shipping &amp; Delivery Policy</h1>` +
+        `<p>${escapeAttr(s.storeName)} (Legal Name: ${escapeAttr(LEGAL_NAME)}) processes orders within 24 hours on business days and delivers within 3–5 working days across Pakistan.</p>` +
+        `<p>${prepaidFreeSentence}Cash on Delivery (COD) orders carry standard city-specific courier charges shown at checkout.</p>` +
+        `<p>Address: ${escapeAttr(s.address)} | Email: ${escapeAttr(s.storeEmail)} | Phone: ${escapeAttr(s.storePhone)}</p>`,
+    ),
+    "/returns": renderBodyFallback(
+      `<h1>Returns &amp; Refund Policy</h1>` +
+        `<p>${escapeAttr(s.storeName)} (Legal Name: ${escapeAttr(LEGAL_NAME)}) accepts returns and replacements within 7 days of delivery for damaged, defective, leaked, expired, or incorrect items in their original sealed packaging.</p>` +
+        `<p>Quality inspection is completed within 2 business days, and approved refunds are processed within 5–7 business days to the original payment method.</p>` +
+        `<p>Address: ${escapeAttr(s.address)} | Email: ${escapeAttr(s.storeEmail)} | Phone: ${escapeAttr(s.storePhone)}</p>`,
+    ),
+    "/privacy": renderBodyFallback(
+      `<h1>Privacy Policy</h1>` +
+        `<p>This Privacy Policy describes how ${escapeAttr(s.storeName)} (Legal Name: ${escapeAttr(LEGAL_NAME)}), registered at ${escapeAttr(s.address)}, collects, uses, and protects your personal information.</p>` +
+        `<p>Online payments are processed securely via SafePay; card details are never stored on our servers.</p>` +
+        `<p>Contact: ${escapeAttr(s.storeEmail)} | Phone: ${escapeAttr(s.storePhone)}</p>`,
+    ),
+    "/terms": renderBodyFallback(
+      `<h1>Terms of Service</h1>` +
+        `<p>This online store operates under ${escapeAttr(s.storeName)} (Legal Name: ${escapeAttr(LEGAL_NAME)}), registered at ${escapeAttr(s.address)}.</p>` +
+        `<p>Orders are delivered within 3–5 working days across Pakistan${termsFreeClause}. Returns are accepted within 7 days for damaged, defective, or incorrect items, with approved refunds processed within 5–7 business days.</p>` +
+        `<p>Contact: ${escapeAttr(s.storeEmail)} | Phone: ${escapeAttr(s.storePhone)}</p>`,
+    ),
+    "/contact": renderBodyFallback(
+      `<h1>Contact Us</h1>` +
+        `<p>${escapeAttr(s.storeName)} (Legal Name: ${escapeAttr(LEGAL_NAME)})</p>` +
+        `<p>Address: ${escapeAttr(s.address)}</p>` +
+        `<p>Email: ${escapeAttr(s.storeEmail)} | Phone: ${escapeAttr(s.storePhone)}</p>`,
+    ),
+  };
 };
 
 // A crawlable link graph for the two pages Google reaches first. Without this the
@@ -281,53 +371,76 @@ const CATEGORY_DESCRIPTION_DEFAULTS = {
 };
 
 // Static, indexable pages — titles mirror the client-side react-helmet titles.
-const STATIC_PAGES = {
-  "/": { title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION },
-  "/shop": {
-    title: `Shop All Products | ${SITE_NAME}`,
-    description:
-      "Browse our complete range of organic and natural products. Premium quality, sustainably sourced across Pakistan.",
-  },
-  "/about": {
-    title: `About Us | ${SITE_NAME}`,
-    description:
-      "Naturanza Food — Pakistan's trusted source for pure organic honey, ispaghol husk, organic spices, and natural wellness products.",
-  },
-  "/contact": {
-    title: `Contact Us | ${SITE_NAME}`,
-    description:
-      "Contact Naturanza Food (Naturanza Foods) at Nizam Pura, Chunian, District Kasur, Punjab, Pakistan. Email support@naturanzafood.com or call +92340 9502646.",
-  },
-  "/faq": {
-    title: `Frequently Asked Questions | ${SITE_NAME}`,
-    description: "Answers to common questions about ordering, shipping, payments, and returns at Naturanza Food.",
-  },
-  "/shipping": {
-    title: `Shipping and Delivery | ${SITE_NAME}`,
-    description:
-      "Shipping policy for Naturanza Food (Naturanza Foods): 3–5 working days delivery across Pakistan and free shipping on prepaid online orders over Rs. 5,000.",
-  },
-  "/returns": {
-    title: `Returns and Refunds Policy | ${SITE_NAME}`,
-    description:
-      "Returns and refunds policy for Naturanza Food (Naturanza Foods): 7-day return window for damaged, defective, or incorrect items and refunds processed within 5–7 business days.",
-  },
-  "/terms": {
-    title: `Terms of Service | ${SITE_NAME}`,
-    description: "Terms of service for using Naturanza Food (Legal Name: Naturanza Foods) website and services.",
-  },
-  "/privacy": {
-    title: `Privacy Policy | ${SITE_NAME}`,
-    description: "How Naturanza Food (Legal Name: Naturanza Foods) collects, uses, and protects your personal information.",
-  },
-  "/cookies": {
-    title: `Cookie Policy | ${SITE_NAME}`,
-    description: "How Naturanza Food uses cookies and local storage to improve your experience.",
-  },
-  "/blog": {
-    title: `Blog | ${SITE_NAME}`,
-    description: "Wellness tips, recipes, and insights on organic living from Naturanza Food.",
-  },
+const buildStaticPages = (settings = null) => {
+  const s = resolveSeoSettings(settings);
+  const shippingFreeText = formatShippingThreshold(s.shippingFree, s.currency);
+  const isDefaultShippingCopy =
+    s.storeName === SITE_NAME &&
+    s.shippingFree === DEFAULT_SHIPPING_FREE &&
+    s.currency === DEFAULT_CURRENCY;
+
+  const homeDescription = isDefaultShippingCopy
+    ? DEFAULT_DESCRIPTION
+    : s.shippingFree > 0
+      ? `Shop pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural, sustainably sourced. Free shipping on prepaid online orders over ${shippingFreeText} across Pakistan.`
+      : "Shop pure organic honey, ispaghol husk, organic spices, and natural wellness products. 100% natural, sustainably sourced across Pakistan.";
+
+  const shippingDescription = isDefaultShippingCopy
+    ? DEFAULT_SHIPPING_DESCRIPTION
+    : s.shippingFree > 0
+      ? `Shipping policy for ${s.storeName} (${LEGAL_NAME}): 3–5 working days delivery across Pakistan and free shipping on prepaid online orders over ${shippingFreeText}.`
+      : `Shipping policy for ${s.storeName} (${LEGAL_NAME}): 3–5 working days delivery across Pakistan.`;
+
+  return {
+    "/": {
+      title:
+        s.storeName === SITE_NAME
+          ? DEFAULT_TITLE
+          : `${s.storeName} - Premium Organic & Natural Products | Buy Online in Pakistan`,
+      description: homeDescription,
+    },
+    "/shop": {
+      title: `Shop All Products | ${s.storeName}`,
+      description:
+        "Browse our complete range of organic and natural products. Premium quality, sustainably sourced across Pakistan.",
+    },
+    "/about": {
+      title: `About Us | ${s.storeName}`,
+      description: `${s.storeName} — Pakistan's trusted source for pure organic honey, ispaghol husk, organic spices, and natural wellness products.`,
+    },
+    "/contact": {
+      title: `Contact Us | ${s.storeName}`,
+      description: `Contact ${s.storeName} (${LEGAL_NAME}) at ${s.address}. Email ${s.storeEmail} or call ${s.storePhone}.`,
+    },
+    "/faq": {
+      title: `Frequently Asked Questions | ${s.storeName}`,
+      description: `Answers to common questions about ordering, shipping, payments, and returns at ${s.storeName}.`,
+    },
+    "/shipping": {
+      title: `Shipping and Delivery | ${s.storeName}`,
+      description: shippingDescription,
+    },
+    "/returns": {
+      title: `Returns and Refunds Policy | ${s.storeName}`,
+      description: `Returns and refunds policy for ${s.storeName} (${LEGAL_NAME}): 7-day return window for damaged, defective, or incorrect items and refunds processed within 5–7 business days.`,
+    },
+    "/terms": {
+      title: `Terms of Service | ${s.storeName}`,
+      description: `Terms of service for using ${s.storeName} (Legal Name: ${LEGAL_NAME}) website and services.`,
+    },
+    "/privacy": {
+      title: `Privacy Policy | ${s.storeName}`,
+      description: `How ${s.storeName} (Legal Name: ${LEGAL_NAME}) collects, uses, and protects your personal information.`,
+    },
+    "/cookies": {
+      title: `Cookie Policy | ${s.storeName}`,
+      description: `How ${s.storeName} uses cookies and local storage to improve your experience.`,
+    },
+    "/blog": {
+      title: `Blog | ${s.storeName}`,
+      description: `Wellness tips, recipes, and insights on organic living from ${s.storeName}.`,
+    },
+  };
 };
 
 // Valid app routes that should NOT be indexed (private/auth/checkout/account/admin).
@@ -353,12 +466,15 @@ const NOINDEX_PREFIXES = [
   "/admin",
 ];
 
-const notFoundMeta = (url) => ({
-  title: `Page Not Found | ${SITE_NAME}`,
-  description: "The page you are looking for could not be found.",
-  url,
-  robots: "noindex, nofollow",
-});
+const notFoundMeta = (url, settings = null) => {
+  const s = resolveSeoSettings(settings);
+  return {
+    title: `Page Not Found | ${s.storeName}`,
+    description: "The page you are looking for could not be found.",
+    url,
+    robots: "noindex, nofollow",
+  };
+};
 
 const safeDecodeParam = (raw) => {
   try {
@@ -432,14 +548,15 @@ const barcodeToGtin = (barcode) => {
   return code ? { gtin: code } : {};
 };
 
-const buildProductMeta = (product, storeDiscountPct = 0) => {
+const buildProductMeta = (product, storeDiscountPct = 0, settings = null) => {
+  const s = resolveSeoSettings(settings);
   const url = `${SITE_URL}/product/${product.id}`;
   const image = absoluteImage(product.image_url);
   const defaultProductDescription = getProductContentDefaults(product)?.description;
   const baseDescription =
     truncate(product.description) ||
     truncate(defaultProductDescription) ||
-    `${product.name} — premium organic product from Naturanza Food. Order online with SafePay or Cash on Delivery across Pakistan.`;
+    `${product.name} — premium organic product from ${s.storeName}. Order online with SafePay or Cash on Delivery across Pakistan.`;
   // Surface the retail barcode in the description so a barcode/GTIN search can
   // match this exact product page.
   const description = product.barcode
@@ -452,7 +569,7 @@ const buildProductMeta = (product, storeDiscountPct = 0) => {
   const offers = {
     "@type": "Offer",
     url,
-    priceCurrency: "PKR",
+    priceCurrency: s.currency,
     availability:
       availableStock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
   };
@@ -461,11 +578,11 @@ const buildProductMeta = (product, storeDiscountPct = 0) => {
   }
 
   const meta = {
-    title: `${product.name} | ${SITE_NAME}`,
+    title: `${product.name} | ${s.storeName}`,
     description,
     url,
     image,
-    imageAlt: `${product.name} — ${SITE_NAME}`,
+    imageAlt: `${product.name} — ${s.storeName}`,
     ogType: "product",
     jsonLd: {
       "@context": "https://schema.org",
@@ -477,13 +594,13 @@ const buildProductMeta = (product, storeDiscountPct = 0) => {
       // retail code that may or may not be ours, the SKU is always ours.
       sku: String(product.id),
       category: product.category_name || undefined,
-      brand: { "@type": "Brand", name: SITE_NAME },
+      brand: { "@type": "Brand", name: s.storeName },
       ...barcodeToGtin(product.barcode),
       offers,
     },
   };
 
-  meta.bodyHtml = productBodyHtml(product, meta, price);
+  meta.bodyHtml = productBodyHtml(product, meta, price, s);
   return meta;
 };
 
@@ -515,8 +632,11 @@ const fetchActiveProducts = async (categorySlug = null) => {
 // Resolve { status, meta } for a request path.
 const resolveMeta = async (reqPath) => {
   const pathname = (reqPath || "/").split("?")[0].replace(/\/+$/, "") || "/";
+  const seoSettings = await fetchSeoSettings();
+  const staticPages = buildStaticPages(seoSettings);
+  const complianceBodyFallbacks = buildComplianceBodyFallbacks(seoSettings);
 
-  const staticPage = STATIC_PAGES[pathname];
+  const staticPage = staticPages[pathname];
   if (staticPage) {
     const meta = {
       ...staticPage,
@@ -530,12 +650,14 @@ const resolveMeta = async (reqPath) => {
       const products = await fetchActiveProducts();
       if (products.length > 0) {
         meta.bodyHtml = linkListBodyHtml(
-          pathname === "/" ? `${SITE_NAME} — Shop Organic & Natural Products` : "Shop All Products",
+          pathname === "/"
+            ? `${seoSettings.storeName} — Shop Organic & Natural Products`
+            : "Shop All Products",
           products,
         );
       }
-    } else if (COMPLIANCE_BODY_FALLBACKS[pathname]) {
-      meta.bodyHtml = COMPLIANCE_BODY_FALLBACKS[pathname];
+    } else if (complianceBodyFallbacks[pathname]) {
+      meta.bodyHtml = complianceBodyFallbacks[pathname];
     }
 
     return { status: 200, meta };
@@ -545,8 +667,8 @@ const resolveMeta = async (reqPath) => {
     return {
       status: 200,
       meta: {
-        title: SITE_NAME,
-        description: DEFAULT_DESCRIPTION,
+        title: seoSettings.storeName,
+        description: staticPages["/"].description,
         url: `${SITE_URL}${pathname}`,
         robots: "noindex, nofollow",
       },
@@ -560,9 +682,9 @@ const resolveMeta = async (reqPath) => {
       ? await Promise.all([fetchProduct(decoded), fetchActiveStoreDiscountPct()])
       : [null, 0];
     if (!product) {
-      return { status: 404, meta: notFoundMeta(`${SITE_URL}${pathname}`) };
+      return { status: 404, meta: notFoundMeta(`${SITE_URL}${pathname}`, seoSettings) };
     }
-    return { status: 200, meta: buildProductMeta(product, storeDiscountPct) };
+    return { status: 200, meta: buildProductMeta(product, storeDiscountPct, seoSettings) };
   }
 
   const categoryMatch = pathname.match(/^\/shop\/([^/]+)$/);
@@ -570,20 +692,20 @@ const resolveMeta = async (reqPath) => {
     const decoded = safeDecodeParam(categoryMatch[1]);
     const category = decoded ? await fetchCategory(decoded) : null;
     if (!category) {
-      return { status: 404, meta: notFoundMeta(`${SITE_URL}${pathname}`) };
+      return { status: 404, meta: notFoundMeta(`${SITE_URL}${pathname}`, seoSettings) };
     }
     const categoryProducts = await fetchActiveProducts(category.slug);
     const categoryFallbackDescription =
       CATEGORY_DESCRIPTION_DEFAULTS[String(category.slug || category.name || "").trim().toLowerCase()] ||
-      `Shop ${category.name} at Naturanza Food.`;
+      `Shop ${category.name} at ${seoSettings.storeName}.`;
     return {
       status: 200,
       meta: {
-        title: `${category.name} | ${SITE_NAME}`,
+        title: `${category.name} | ${seoSettings.storeName}`,
         description: truncate(category.description) || categoryFallbackDescription,
         url: `${SITE_URL}${pathname}`,
         image: category.image_url ? absoluteImage(category.image_url) : DEFAULT_OG_IMAGE,
-        imageAlt: `${category.name} — ${SITE_NAME}`,
+        imageAlt: `${category.name} — ${seoSettings.storeName}`,
         bodyHtml:
           categoryProducts.length > 0
             ? linkListBodyHtml(category.name, categoryProducts)
@@ -597,13 +719,13 @@ const resolveMeta = async (reqPath) => {
     const decoded = safeDecodeParam(blogMatch[1]);
     const blogPost = decoded ? await fetchBlogPost(decoded) : null;
     if (!blogPost) {
-      return { status: 404, meta: notFoundMeta(`${SITE_URL}${pathname}`) };
+      return { status: 404, meta: notFoundMeta(`${SITE_URL}${pathname}`, seoSettings) };
     }
     return {
       status: 200,
       meta: {
-        title: `${blogPost.title} | ${SITE_NAME}`,
-        description: truncate(blogPost.excerpt) || STATIC_PAGES["/blog"].description,
+        title: `${blogPost.title} | ${seoSettings.storeName}`,
+        description: truncate(blogPost.excerpt) || staticPages["/blog"].description,
         image: blogPost.image_url ? absoluteImage(blogPost.image_url) : DEFAULT_OG_IMAGE,
         url: `${SITE_URL}${pathname}`,
       },
@@ -611,7 +733,7 @@ const resolveMeta = async (reqPath) => {
   }
 
   // Anything else is a genuine 404 — return the correct status (no more soft-404s).
-  return { status: 404, meta: notFoundMeta(`${SITE_URL}${pathname}`) };
+  return { status: 404, meta: notFoundMeta(`${SITE_URL}${pathname}`, seoSettings) };
 };
 
 const renderPage = async (reqPath, distDir) => {

@@ -353,9 +353,16 @@ const sendCustomerOrderConfirmation = async ({
   customerName,
   totalAmount,
   items,
+  adminSettings = {},
 }) => {
   if (!customerEmail) return;
 
+  const storeName =
+    String(adminSettings?.storeName || "Naturanza Food").trim() || "Naturanza Food";
+  const safeStoreName = escapeHtml(storeName);
+  const currency = escapeHtml(
+    String(adminSettings?.currency || "PKR").trim() || "PKR",
+  );
   const orderNumber = formatOrderNumber(orderId);
   const orderDateRaw = order?.order_date || order?.created_at;
   const orderDate = orderDateRaw
@@ -399,11 +406,11 @@ const sendCustomerOrderConfirmation = async ({
     paymentMethod === "cod"
       ? `<tr>
             <td style="padding:8px 0;color:#64748b;font-size:13px;">Advance Paid (Delivery Fee)</td>
-            <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">PKR ${orderShipping.toFixed(2)}</td>
+            <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">${currency} ${orderShipping.toFixed(2)}</td>
           </tr>
           <tr>
             <td style="padding:8px 0;color:#64748b;font-size:13px;">Remaining COD Balance</td>
-            <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">PKR ${codRemaining.toFixed(2)}</td>
+            <td style="padding:8px 0;color:#0f172a;font-size:13px;text-align:right;">${currency} ${codRemaining.toFixed(2)}</td>
           </tr>`
       : "";
   const itemsHtml = (items || [])
@@ -413,8 +420,8 @@ const sendCustomerOrderConfirmation = async ({
           <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:center;">${i + 1}</td>
           <td style="padding:8px;border-bottom:1px solid #e2e8f0;">${escapeHtml(item.name || item.product_name)}</td>
           <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:center;">${safeNumber(item.quantity, 0)}</td>
-          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;">PKR ${safeNumber(item.final_price || item.price, 0).toFixed(2)}</td>
-          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;">PKR ${(safeNumber(item.final_price || item.price, 0) * safeNumber(item.quantity, 0)).toFixed(2)}</td>
+          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;">${currency} ${safeNumber(item.final_price || item.price, 0).toFixed(2)}</td>
+          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;">${currency} ${(safeNumber(item.final_price || item.price, 0) * safeNumber(item.quantity, 0)).toFixed(2)}</td>
         </tr>`,
     )
     .join("");
@@ -484,23 +491,23 @@ const sendCustomerOrderConfirmation = async ({
                 <tbody>
                   <tr>
                     <td style="padding:6px 0;color:#64748b;font-size:13px;">Subtotal</td>
-                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">PKR ${orderSubtotal.toFixed(2)}</td>
+                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">${currency} ${orderSubtotal.toFixed(2)}</td>
                   </tr>
                   <tr>
                     <td style="padding:6px 0;color:#64748b;font-size:13px;">Discount</td>
-                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">- PKR ${orderDiscount.toFixed(2)}</td>
+                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">- ${currency} ${orderDiscount.toFixed(2)}</td>
                   </tr>
                   <tr>
                     <td style="padding:6px 0;color:#64748b;font-size:13px;">Tax</td>
-                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">PKR ${orderTax.toFixed(2)}</td>
+                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">${currency} ${orderTax.toFixed(2)}</td>
                   </tr>
                   <tr>
                     <td style="padding:6px 0;color:#64748b;font-size:13px;">Shipping</td>
-                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">PKR ${orderShipping.toFixed(2)}</td>
+                    <td style="padding:6px 0;color:#0f172a;font-size:13px;text-align:right;">${currency} ${orderShipping.toFixed(2)}</td>
                   </tr>
                   <tr>
                     <td style="padding:8px 0;font-size:16px;font-weight:bold;color:#0f172a;">Total</td>
-                    <td style="padding:8px 0;font-size:16px;font-weight:bold;color:#16a34a;text-align:right;">PKR ${orderTotal.toFixed(2)}</td>
+                    <td style="padding:8px 0;font-size:16px;font-weight:bold;color:#16a34a;text-align:right;">${currency} ${orderTotal.toFixed(2)}</td>
                   </tr>
                   ${codRows}
                 </tbody>
@@ -510,7 +517,7 @@ const sendCustomerOrderConfirmation = async ({
           </tr>
           <tr>
             <td style="background-color:#f8fafc;padding:24px 40px;border-top:1px solid #e2e8f0;">
-              <p style="margin:0;color:#94a3b8;font-size:12px;text-align:center;">&copy; ${new Date().getFullYear()} Naturanza Food. All rights reserved.</p>
+              <p style="margin:0;color:#94a3b8;font-size:12px;text-align:center;">&copy; ${new Date().getFullYear()} ${safeStoreName}. All rights reserved.</p>
             </td>
           </tr>
         </table>
@@ -524,6 +531,7 @@ const sendCustomerOrderConfirmation = async ({
     to: customerEmail,
     subject: `Order Confirmed - ${orderNumber}`,
     html,
+    storeName,
   });
 };
 
@@ -893,10 +901,11 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
 
     // SECURITY: recompute all financials server-side; client-supplied
     // discount_amount/tax/shipping_cost are ignored. Mirrors the storefront
-    // formula (total = subtotal - discount + shipping; no tax line). Discount is
-    // only honoured from a currently-valid coupon; shipping comes from the city
-    // fee table — the same sources the storefront reads, so totals match.
-    const tax = 0;
+    // formula (total = subtotal - discount + tax + shipping). Discount is
+    // only honoured from a currently-valid coupon or active store-wide sale;
+    // tax comes from adminSettings.taxRate (or active default tax_rates row);
+    // shipping comes from the city fee table — the same sources the storefront
+    // reads, so totals match.
     let discountAmount = 0;
 
     // Store-wide sale (admin setting) takes priority over coupons. When active,
@@ -1015,6 +1024,31 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
     if (!qualifiesForFreeShipping) {
       shippingCost = safeNumber(cityFee.fee);
     }
+
+    const configuredTaxRate = Number(adminSettings.taxRate);
+    let effectiveTaxRate =
+      Number.isFinite(configuredTaxRate) && configuredTaxRate > 0 ? configuredTaxRate : 0;
+    if (effectiveTaxRate === 0) {
+      try {
+        const [[defaultTaxRow]] = await connection.query(
+          `SELECT rate_percent
+             FROM tax_rates
+            WHERE is_default = TRUE AND is_active = TRUE
+            ORDER BY updated_at DESC
+            LIMIT 1`,
+        );
+        const fallbackRate = Number(defaultTaxRow?.rate_percent);
+        if (Number.isFinite(fallbackRate) && fallbackRate > 0) {
+          effectiveTaxRate = fallbackRate;
+        }
+      } catch {
+        // Ignore if tax_rates table is unavailable in a minimal DB.
+      }
+    }
+    const tax =
+      effectiveTaxRate > 0
+        ? Math.round(((Math.max(0, subtotal - discountAmount) * effectiveTaxRate) / 100) * 100) / 100
+        : 0;
 
     totalAmount = Math.max(0, subtotal - discountAmount + tax + shippingCost);
 
@@ -1262,6 +1296,7 @@ router.post('/create', authenticateToken, restrictBody('shipping_address', 'phon
           customerName: order?.customer_name || customerName,
           totalAmount,
           items: cartItems,
+          adminSettings,
         }).catch((err) => console.error("Failed to send customer confirmation email:", err));
       });
     }

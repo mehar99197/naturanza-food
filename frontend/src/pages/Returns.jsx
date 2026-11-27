@@ -9,6 +9,8 @@ const normalizePhoneLink = (value) => String(value || '').replace(/[^\d+]/g, '')
 
 export function Returns() {
   const { settings } = useSettings();
+  const storeName = settings.storeName || BUSINESS_INFO.brandName;
+  const officeAddress = settings.address || BUSINESS_INFO.officeAddress;
   const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.returnsEmail;
   const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
   const phoneLink = normalizePhoneLink(supportPhone);
@@ -16,7 +18,7 @@ export function Returns() {
   const sections = [
     {
       title: 'Return Eligibility Window',
-      content: `${BUSINESS_INFO.brandName} (Legal Name: ${BUSINESS_INFO.legalName}) offers a ${RETURNS_POLICY.returnWindow} return and replacement window from the date of delivery for items that arrive damaged, defective, leaked, expired, or incorrect.`,
+      content: `${storeName} (Legal Name: ${BUSINESS_INFO.legalName}) offers a ${RETURNS_POLICY.returnWindow} return and replacement window from the date of delivery for items that arrive damaged, defective, leaked, expired, or incorrect.`,
     },
     {
       title: 'Conditions for Eligible Returns',
@@ -53,7 +55,7 @@ export function Returns() {
               Returns &amp; Refund Policy
             </h1>
             <p className="text-sm md:text-base text-[#6b7a6b] mt-3 max-w-2xl mx-auto">
-              Our return, replacement, and refund process at {BUSINESS_INFO.brandName} (Legal Name:{' '}
+              Our return, replacement, and refund process at {storeName} (Legal Name:{' '}
               {BUSINESS_INFO.legalName}) is transparent, fair, and customer-focused.
             </p>
             <p className="text-xs text-[#8a958a] mt-2">
@@ -115,7 +117,7 @@ export function Returns() {
               <div className="flex items-start gap-2">
                 <MapPin className="w-4 h-4 text-[#3d7a3d] mt-0.5 flex-shrink-0" />
                 <span>
-                  {BUSINESS_INFO.brandName} ({BUSINESS_INFO.legalName}), {BUSINESS_INFO.officeAddress}
+                  {storeName} ({BUSINESS_INFO.legalName}), {officeAddress}
                 </span>
               </div>
             </div>

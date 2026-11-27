@@ -129,7 +129,7 @@ export function AdminStaffLogin() {
                     onChange={(e) => setEmail(e.target.value)}
                     onKeyDown={handleEnterSubmit}
                     className="w-full rounded-2xl border border-green-100 bg-white px-4 py-2.5 pl-10 text-sm text-slate-800 placeholder:text-slate-400 shadow-sm outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
-                    placeholder="staff@naturanza.com"
+                    placeholder="staff@naturanzafood.com"
                     disabled={loading}
                     autoComplete="email"
                   />

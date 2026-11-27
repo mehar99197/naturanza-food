@@ -1125,12 +1125,23 @@ router.get("/dashboard/stats", async (req, res) => {
 
     let productStats = null;
     if (canProducts) {
+      let lowStockThreshold = 10;
+      try {
+        const adminSettings = await getAdminSettings(db.promise());
+        const configured = Number(adminSettings?.lowStockThreshold);
+        if (Number.isFinite(configured) && configured >= 0) {
+          lowStockThreshold = Math.min(Math.floor(configured), 10000);
+        }
+      } catch {
+        lowStockThreshold = 10;
+      }
       [[productStats]] = await db.promise().query(
         `SELECT
                   COUNT(*) AS totalProducts,
-                  SUM(CASE WHEN stock_quantity < 10 THEN 1 ELSE 0 END) AS lowStockProducts
+                  SUM(CASE WHEN stock_quantity < ? THEN 1 ELSE 0 END) AS lowStockProducts
                FROM products
                WHERE deleted_at IS NULL`,
+        [lowStockThreshold],
       );
     }
 
@@ -1288,11 +1299,13 @@ router.post("/settings/test-email", restrictBody('email'), async (req, res) => {
       return res.status(400).json({ error: "A valid email address is required" });
     }
 
-    const subject = "Naturanza Admin Test Email";
+    const storeName =
+      String(settings.storeName || "Naturanza Food").trim() || "Naturanza Food";
+    const subject = `${storeName} Admin Test Email`;
     const html = `
       <div style="font-family: Arial, sans-serif; color: #1f2937;">
         <h2 style="margin: 0 0 8px; color: #0f172a;">Test Email Successful</h2>
-        <p style="margin: 0 0 12px;">This is a test email from your Naturanza admin settings.</p>
+        <p style="margin: 0 0 12px;">This is a test email from your ${escapeHtml(storeName)} admin settings.</p>
         <p style="margin: 0; font-size: 12px; color: #6b7280;">Sent to ${escapeHtml(targetEmail)}</p>
       </div>
     `;
@@ -1301,6 +1314,7 @@ router.post("/settings/test-email", restrictBody('email'), async (req, res) => {
       to: targetEmail,
       subject,
       html,
+      storeName,
     });
 
     if (!result?.success) {
@@ -1881,7 +1895,24 @@ router.delete("/users/:id", requireSuperAdmin, async (req, res) => {
 // Low stock alert
 router.get("/inventory/low-stock", async (req, res) => {
   try {
-    const parsedThreshold = Number.parseInt(String(req.query.threshold ?? "10"), 10);
+    const hasExplicitThreshold =
+      req.query.threshold !== undefined &&
+      req.query.threshold !== null &&
+      String(req.query.threshold).trim() !== "";
+    let defaultThreshold = 10;
+    if (!hasExplicitThreshold) {
+      try {
+        const adminSettings = await getAdminSettings(db.promise());
+        const configured = Number(adminSettings?.lowStockThreshold);
+        if (Number.isFinite(configured) && configured >= 0) {
+          defaultThreshold = configured;
+        }
+      } catch {
+        defaultThreshold = 10;
+      }
+    }
+    const rawThreshold = hasExplicitThreshold ? req.query.threshold : defaultThreshold;
+    const parsedThreshold = Number.parseInt(String(rawThreshold), 10);
     const threshold = Number.isInteger(parsedThreshold)
       ? Math.min(Math.max(parsedThreshold, 0), 10000)
       : 10;

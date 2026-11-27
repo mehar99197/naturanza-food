@@ -12,6 +12,7 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../config/db');
+const { getAdminSettings } = require('../utils/adminSettings');
 const { getProductContentDefaults } = require('../utils/productContentDefaults');
 const pool = db.promise();
 
@@ -93,14 +94,16 @@ const fetchActiveStoreDiscountPct = async (dbClient = pool) => {
   }
 };
 
-const buildItemXml = (product, storeDiscountPct = 0) => {
+const buildItemXml = (product, storeDiscountPct = 0, options = {}) => {
+  const storeName = String(options?.storeName || SITE_NAME).trim() || SITE_NAME;
+  const currency = String(options?.currency || 'PKR').trim().toUpperCase() || 'PKR';
   const link = `${BASE_URL}/product/${product.id}`;
   const finalPrice = computeEffectiveFeedPrice(product, storeDiscountPct).toFixed(2);
   const fallbackDescription = getProductContentDefaults(product)?.description;
   const description =
     truncate(product.description) ||
     truncate(fallbackDescription) ||
-    `${product.name} — premium organic product from ${SITE_NAME}.`;
+    `${product.name} — premium organic product from ${storeName}.`;
   const inStock = Number(product.stock_quantity || 0) - Number(product.reserved_stock || 0) > 0;
   const hasRealGtin = isRealGtin(product.barcode);
 
@@ -111,9 +114,9 @@ const buildItemXml = (product, storeDiscountPct = 0) => {
     <link>${escapeXml(link)}</link>
     <g:image_link>${escapeXml(absoluteImage(product.image_url))}</g:image_link>
     <g:availability>${inStock ? 'in_stock' : 'out_of_stock'}</g:availability>
-    <g:price>${finalPrice} PKR</g:price>
+    <g:price>${finalPrice} ${escapeXml(currency)}</g:price>
     <g:condition>new</g:condition>
-    <g:brand>${escapeXml(SITE_NAME)}</g:brand>`;
+    <g:brand>${escapeXml(storeName)}</g:brand>`;
 
   if (hasRealGtin) {
     xml += `
@@ -131,18 +134,23 @@ const buildItemXml = (product, storeDiscountPct = 0) => {
 
 router.get('/merchant-feed.xml', async (req, res) => {
   try {
-    const [products, storeDiscountPct] = await Promise.all([
+    const [products, settings] = await Promise.all([
       fetchFeedProducts(),
-      fetchActiveStoreDiscountPct(),
+      getAdminSettings(pool).catch(() => null),
     ]);
+    const storeDiscountPct = settings
+      ? (settings.storeDiscountActive ? clampDiscountPercent(settings.storeDiscountPercentage) : 0)
+      : await fetchActiveStoreDiscountPct();
+    const storeName = String(settings?.storeName || SITE_NAME).trim() || SITE_NAME;
+    const currency = String(settings?.currency || 'PKR').trim().toUpperCase() || 'PKR';
     const items = products
-      .map((product) => buildItemXml(product, storeDiscountPct))
+      .map((product) => buildItemXml(product, storeDiscountPct, { storeName, currency }))
       .join('');
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">
 <channel>
-  <title>${escapeXml(SITE_NAME)} Product Feed</title>
+  <title>${escapeXml(storeName)} Product Feed</title>
   <link>${escapeXml(BASE_URL)}</link>
   <description>Product feed for Google Merchant Center</description>
 ${items}</channel>

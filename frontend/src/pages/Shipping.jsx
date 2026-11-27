@@ -10,13 +10,18 @@ const normalizePhoneLink = (value) => String(value || '').replace(/[^\d+]/g, '')
 
 export function Shipping() {
   const { settings } = useSettings();
+  const storeName = settings.storeName || BUSINESS_INFO.brandName;
+  const officeAddress = settings.address || BUSINESS_INFO.officeAddress;
   const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.shippingEmail;
   const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
   const phoneLink = normalizePhoneLink(supportPhone);
   const currency = settings.currency || 'PKR';
   const parsedFreeShipping = Number(settings.shippingFree);
   const freeShippingAmount =
-    Number.isFinite(parsedFreeShipping) && parsedFreeShipping > 0
+    settings.shippingFree !== '' &&
+    settings.shippingFree != null &&
+    Number.isFinite(parsedFreeShipping) &&
+    parsedFreeShipping >= 0
       ? parsedFreeShipping
       : SHIPPING_POLICY.freeShippingThresholdAmount;
   const hasFlatShipping =
@@ -34,7 +39,7 @@ export function Shipping() {
   const sections = [
     {
       title: 'Order Processing & Dispatch',
-      content: `Orders placed on ${BUSINESS_INFO.brandName} (operated by ${BUSINESS_INFO.legalName}) are verified and processed within ${SHIPPING_POLICY.processingWindow} (Monday to Saturday) from our fulfillment facility in ${SHIPPING_POLICY.dispatchCity}. Orders placed on Sundays or public holidays are dispatched on the next working day.`,
+      content: `Orders placed on ${storeName} (operated by ${BUSINESS_INFO.legalName}) are verified and processed within ${SHIPPING_POLICY.processingWindow} (Monday to Saturday) from our fulfillment facility in ${SHIPPING_POLICY.dispatchCity}. Orders placed on Sundays or public holidays are dispatched on the next working day.`,
     },
     {
       title: 'Delivery Timeline Across Pakistan',
@@ -42,7 +47,11 @@ export function Shipping() {
     },
     {
       title: 'Shipping Charges & Free Delivery Threshold',
-      content: `We deliver nationwide across Pakistan. Standard shipping charges (typically ${formattedFlatRate}, or the city-specific courier rate) are calculated and displayed transparently at checkout before you pay. Prepaid online orders (via SafePay) of ${formattedFreeThreshold} or more qualify for Free Shipping anywhere in Pakistan. Cash on Delivery (COD) orders carry the applicable city-specific courier fee (where advance delivery-fee confirmation applies, the delivery fee is paid via SafePay and the remaining product total is paid in cash upon delivery).`,
+      content: `We deliver nationwide across Pakistan. Standard shipping charges (typically ${formattedFlatRate}, or the city-specific courier rate) are calculated and displayed transparently at checkout before you pay. ${
+        freeShippingAmount === 0
+          ? 'Prepaid online orders (via SafePay) qualify for Free Shipping anywhere in Pakistan.'
+          : `Prepaid online orders (via SafePay) of ${formattedFreeThreshold} or more qualify for Free Shipping anywhere in Pakistan.`
+      } Cash on Delivery (COD) orders carry the applicable city-specific courier fee (where advance delivery-fee confirmation applies, the delivery fee is paid via SafePay and the remaining product total is paid in cash upon delivery).`,
     },
     {
       title: 'Accepted Payment Methods',
@@ -72,7 +81,7 @@ export function Shipping() {
             </h1>
             <p className="text-sm md:text-base text-[#6b7a6b] mt-3 max-w-2xl mx-auto">
               Clear and transparent shipping timelines, rates, and delivery terms for orders placed
-              with {BUSINESS_INFO.brandName} (Legal Name: {BUSINESS_INFO.legalName}).
+              with {storeName} (Legal Name: {BUSINESS_INFO.legalName}).
             </p>
             <p className="text-xs text-[#8a958a] mt-2">
               Last updated: {BUSINESS_INFO.lastUpdated}
@@ -128,7 +137,7 @@ export function Shipping() {
               <div className="flex items-start gap-2">
                 <MapPin className="w-4 h-4 text-[#3d7a3d] mt-0.5 flex-shrink-0" />
                 <span>
-                  {BUSINESS_INFO.brandName} ({BUSINESS_INFO.legalName}), {BUSINESS_INFO.officeAddress}
+                  {storeName} ({BUSINESS_INFO.legalName}), {officeAddress}
                 </span>
               </div>
             </div>

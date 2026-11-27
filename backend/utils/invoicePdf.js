@@ -356,7 +356,7 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         .font('Helvetica-Bold')
         .fontSize(20)
         .fillColor(PRIMARY_GREEN)
-        .text('Naturanza Invoice', rightX, margin + 4, {
+        .text(`${company.brandName || 'Naturanza Food'} Invoice`, rightX, margin + 4, {
           width: rightWidth,
           align: 'right',
           lineBreak: false,
@@ -712,7 +712,7 @@ const createInvoicePdfBuffer = async (order, options = {}) => {
         .font('Helvetica-Bold')
         .fontSize(10)
         .fillColor(PRIMARY_GREEN)
-        .text('Thank you for choosing Naturanza! Your wellness journey matters to us.', margin, footerY, {
+        .text(`Thank you for choosing ${company.brandName || 'Naturanza Food'}! Your wellness journey matters to us.`, margin, footerY, {
           width: contentWidth,
           align: 'center',
         });

@@ -298,7 +298,7 @@ if (selectedOrder) {
    trackingNumber={
     selectedOrder.shipment?.tracking_number ||
     selectedOrder.tracking_number ||
-    `TRK-${selectedOrder.id.toString().padStart(10, '0')}`
+    'Pending assignment'
    }
    estimatedDelivery={selectedOrder.estimated_delivery || 'Calculating...'}
   />

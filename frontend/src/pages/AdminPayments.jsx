@@ -408,9 +408,11 @@ export function AdminPayments() {
                 >
                   <option value="all">All Statuses</option>
                   <option value="paid">Paid</option>
+                  <option value="partial">Partial</option>
                   <option value="pending">Pending</option>
                   <option value="failed">Failed</option>
                   <option value="cancelled">Cancelled</option>
+                  <option value="refunded">Refunded</option>
                 </select>
               </div>
             </div>

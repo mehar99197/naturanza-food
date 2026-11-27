@@ -18,6 +18,8 @@ export function Footer({ variant = 'full' }) {
  const [openSection, setOpenSection] = useState(null);
  const [categories, setCategories] = useState([]);
 
+ const storeName = settings.storeName || BUSINESS_INFO.brandName;
+ const currentYear = new Date().getFullYear();
  const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
  const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
  const phoneLink = normalizePhoneLink(supportPhone);
@@ -133,7 +135,7 @@ export function Footer({ variant = 'full' }) {
  <div className="h-12 w-32 flex items-center justify-center">
  <img 
  src="/images/f_logo.png"
- alt="Naturanza Food" 
+ alt={storeName} 
  className="h-full object-contain brightness-0 invert drop-shadow-lg md:group-hover:drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]"
  />
  </div>
@@ -191,7 +193,7 @@ export function Footer({ variant = 'full' }) {
  <div className="flex flex-col md:flex-row items-center justify-between gap-3 text-center md:text-left">
  <div className="space-y-1">
  <p className="text-white/80 text-xs md:text-sm font-medium">
- © 2026 {BUSINESS_INFO.brandName} ({BUSINESS_INFO.legalName}). All rights reserved.
+ © {currentYear} {storeName} ({BUSINESS_INFO.legalName}). All rights reserved.
  </p>
  <p className="text-white/65 text-xs">
  {locationLabel} ·{' '}
@@ -248,7 +250,7 @@ export function Footer({ variant = 'full' }) {
  <div className="rounded-3xl bg-white/[0.05] backdrop-blur-md px-4 py-5 sm:px-6 sm:py-6 md:px-8 md:py-7">
  <div className="flex flex-col md:flex-row items-center justify-between gap-6 md:gap-8 lg:gap-10">
  <div className="text-center md:text-left">
- <h3 className="font-display text-lg sm:text-xl md:text-2xl font-black mb-2 md:mb-3 bg-gradient-to-r from-white via-green-100 to-emerald-200 bg-clip-text text-transparent">Join the Naturanza Family</h3>
+ <h3 className="font-display text-lg sm:text-xl md:text-2xl font-black mb-2 md:mb-3 bg-gradient-to-r from-white via-green-100 to-emerald-200 bg-clip-text text-transparent">Join the {storeName} Family</h3>
  <p className="text-white/90 text-xs md:text-sm font-medium">Get exclusive offers and wellness tips delivered to your inbox.</p>
  </div>
  <form onSubmit={handleSubscribe} className="flex flex-col sm:flex-row w-full md:w-auto md:min-w-[360px] gap-2 md:gap-3">
@@ -305,7 +307,7 @@ export function Footer({ variant = 'full' }) {
  <div className="h-14 w-36 flex items-center justify-center">
  <img 
  src="/images/f_logo.png"
- alt="Naturanza Food" 
+ alt={storeName} 
  className="h-full object-contain brightness-0 invert drop-shadow-2xl"
  />
  </div>
@@ -461,7 +463,7 @@ export function Footer({ variant = 'full' }) {
  <div className="h-16 w-40 md:h-20 md:w-48 lg:h-20 lg:w-48 flex items-center justify-center">
  <img 
  src="/images/f_logo.png" 
- alt="Naturanza Food" 
+ alt={storeName} 
  className="h-full object-contain brightness-0 invert drop-shadow-2xl md:group-hover:drop-shadow-[0_0_30px_rgba(255,255,255,0.5)]"
  />
  </div>
@@ -585,7 +587,7 @@ export function Footer({ variant = 'full' }) {
  <div className="container-custom py-3 md:py-5 pb-20 md:pb-5">
  <div className="flex flex-col md:flex-row items-center justify-between gap-3 md:gap-4">
   <p className="text-white/80 text-xs md:text-sm font-medium">
-  © 2026 {BUSINESS_INFO.brandName} ({BUSINESS_INFO.legalName}). All rights reserved.
+  © {currentYear} {storeName} ({BUSINESS_INFO.legalName}). All rights reserved.
   </p>
   <div className="flex flex-wrap justify-center gap-3 md:gap-6 md:pr-16 lg:pr-20">
  <Link to="/terms" className="text-white/80 md:hover:text-white text-xs md:text-sm font-medium md:hover:translate-x-1 inline-block">

@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS = {
  emailNotifications: true,
  orderNotifications: true,
  lowStockAlerts: true,
+ lowStockThreshold: 10,
  address: 'Nizam Pura, Chunian, District Kasur, Punjab, Pakistan',
  supportHours: 'Available 24/7',
  facebookUrl: '',
@@ -62,6 +63,13 @@ const normalizeSettings = (payload = {}) => {
     emailNotifications: Boolean(next.emailNotifications),
     orderNotifications: Boolean(next.orderNotifications),
     lowStockAlerts: Boolean(next.lowStockAlerts),
+    lowStockThreshold:
+      next.lowStockThreshold !== '' &&
+      next.lowStockThreshold != null &&
+      Number.isFinite(Number(next.lowStockThreshold)) &&
+      Number(next.lowStockThreshold) >= 0
+        ? Number(next.lowStockThreshold)
+        : DEFAULT_SETTINGS.lowStockThreshold,
     address: String(next.address ?? DEFAULT_SETTINGS.address),
     supportHours: String(next.supportHours ?? DEFAULT_SETTINGS.supportHours),
     facebookUrl: String(next.facebookUrl ?? ''),

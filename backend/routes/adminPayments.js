@@ -86,9 +86,12 @@ router.get(
           AND payment_status IN ('pending', 'partial')
       `);
 
+      const settings = await getAdminSettings().catch(() => ({ currency: "PKR" }));
+      const currency = settings.currency || "PKR";
+
       return res.json({
         success: true,
-        currency: "PKR",
+        currency,
         total_revenue: Number(txRow.total_revenue) || 0,
         prepaid_revenue: Number(txRow.safepay_full_revenue) || 0,
         safepay_revenue:
@@ -301,6 +304,9 @@ router.post(
           ? Math.max(0, totalAmount - shippingCost)
           : totalAmount;
 
+      const settings = await getAdminSettings().catch(() => ({ currency: "PKR" }));
+      const currency = settings.currency || "PKR";
+
       await conn.query(
         `UPDATE orders
             SET payment_status = 'paid',
@@ -312,11 +318,12 @@ router.post(
       await conn.query(
         `INSERT INTO payment_transactions
            (order_id, user_id, transaction_type, provider, amount, currency, status, payload, processed_at)
-         VALUES (?, ?, 'payment', 'cod', ?, 'PKR', 'paid', ?, NOW())`,
+         VALUES (?, ?, 'payment', 'cod', ?, ?, 'paid', ?, NOW())`,
         [
           order.id,
           order.user_id || null,
           collectedAmount,
+          currency,
           JSON.stringify({
             stage: "final_collection",
             collected_by: req.user.id,
@@ -334,7 +341,7 @@ router.post(
             [
               order.user_id,
               "COD Payment Received",
-              `Cash on Delivery payment of PKR ${collectedAmount.toFixed(2)} for Order #${order.id} has been recorded.`,
+              `Cash on Delivery payment of ${currency} ${collectedAmount.toFixed(2)} for Order #${order.id} has been recorded.`,
               JSON.stringify({ order_id: order.id, amount: collectedAmount, provider: "cod" }),
             ],
           )
@@ -352,7 +359,7 @@ router.post(
 
       await logAdminAction(
         req.user.id,
-        `Marked COD payment collected for order #${order.id} (PKR ${collectedAmount.toFixed(2)})`,
+        `Marked COD payment collected for order #${order.id} (${currency} ${collectedAmount.toFixed(2)})`,
         getClientIP(req),
       );
 

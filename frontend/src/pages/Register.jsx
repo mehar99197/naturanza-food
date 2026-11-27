@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useForm, useWatch } from "react-hook-form";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
 import { sanitizeEmail, sanitizeInput } from "@/lib/sanitize";
 import LeftPanel from "@/components/auth/LeftPanel";
 import AuthSocialButtons from "@/components/auth/AuthSocialButtons";
@@ -54,6 +55,8 @@ const inputClassName =
 const Register = () => {
   const navigate = useNavigate();
   const { register: registerUser, loginWithGoogle } = useAuth();
+  const { settings } = useSettings();
+  const storeName = settings.storeName || "Naturanza Food";
 
   const {
     register,
@@ -145,7 +148,7 @@ const Register = () => {
       <div className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:block lg:w-[42%] xl:w-[44%]">
         <LeftPanel
           heading="Start Your Natural Wellness Journey"
-          description="Join thousands who trust Naturanza for pure organic herbal products."
+          description={`Join thousands who trust ${storeName} for pure organic herbal products.`}
           trustPoints={leftPoints}
         />
       </div>

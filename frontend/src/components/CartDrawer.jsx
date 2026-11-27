@@ -248,9 +248,16 @@ export function CartDrawer() {
  <div className="shrink-0 border-t border-slate-200/80 bg-white/92 p-4 backdrop-blur-xl sm:p-6">
  {/* Free shipping progress — advance payment only (not COD) */}
  {(() => {
-   const threshold = Number(settings.shippingFree) || 5000;
+   const parsedFree = Number(settings.shippingFree);
+   const threshold =
+     settings.shippingFree !== '' &&
+     settings.shippingFree != null &&
+     Number.isFinite(parsedFree) &&
+     parsedFree >= 0
+       ? parsedFree
+       : 5000;
    const remaining = Math.max(0, threshold - discountedTotal);
-   const pct = Math.min(100, (discountedTotal / threshold) * 100);
+   const pct = threshold === 0 ? 100 : Math.min(100, (discountedTotal / threshold) * 100);
    const qualified = remaining === 0;
    return (
      <div className="mb-3.5 rounded-xl border border-emerald-200/60 bg-emerald-50/60 px-3 py-2.5">

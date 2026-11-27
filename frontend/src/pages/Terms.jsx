@@ -9,13 +9,18 @@ const normalizePhoneLink = (value) => String(value || '').replace(/[^\d+]/g, '')
 
 export function Terms() {
   const { settings } = useSettings();
+  const storeName = settings.storeName || BUSINESS_INFO.brandName;
+  const officeAddress = settings.address || BUSINESS_INFO.officeAddress;
   const legalEmail = settings.storeEmail || BUSINESS_INFO.contacts.legalEmail;
   const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
   const phoneLink = normalizePhoneLink(supportPhone);
   const currency = settings.currency || 'PKR';
   const parsedFreeShipping = Number(settings.shippingFree);
   const freeShippingAmount =
-    Number.isFinite(parsedFreeShipping) && parsedFreeShipping > 0
+    settings.shippingFree !== '' &&
+    settings.shippingFree != null &&
+    Number.isFinite(parsedFreeShipping) &&
+    parsedFreeShipping >= 0
       ? parsedFreeShipping
       : SHIPPING_POLICY.freeShippingThresholdAmount;
   const formattedFreeThreshold = formatPrice(freeShippingAmount, currency) || SHIPPING_POLICY.freeShippingThreshold;
@@ -23,7 +28,7 @@ export function Terms() {
   const sections = [
     {
       title: 'Acceptance of Terms & Merchant Identity',
-      content: `By accessing or purchasing from ${BUSINESS_INFO.websiteUrl}, you agree to be bound by these Terms of Service. This online store operates under the brand name ${BUSINESS_INFO.brandName} (Legal Name: ${BUSINESS_INFO.legalName}), registered at ${BUSINESS_INFO.officeAddress}.`,
+      content: `By accessing or purchasing from ${BUSINESS_INFO.websiteUrl}, you agree to be bound by these Terms of Service. This online store operates under the brand name ${storeName} (Legal Name: ${BUSINESS_INFO.legalName}), registered at ${officeAddress}.`,
     },
     {
       title: 'Orders, Pricing & Payments',
@@ -32,7 +37,11 @@ export function Terms() {
     },
     {
       title: 'Shipping & Delivery',
-      content: `Confirmed orders are typically dispatched within ${SHIPPING_POLICY.processingWindow} and delivered within ${SHIPPING_POLICY.standardWindow} across Pakistan. Prepaid online orders (SafePay) of ${formattedFreeThreshold} or more qualify for free shipping across Pakistan, while Cash on Delivery (COD) orders carry standard city-specific courier fees displayed at checkout. Full shipping rates and timelines are outlined in our Shipping Policy.`,
+      content: `Confirmed orders are typically dispatched within ${SHIPPING_POLICY.processingWindow} and delivered within ${SHIPPING_POLICY.standardWindow} across Pakistan. ${
+        freeShippingAmount === 0
+          ? 'Prepaid online orders (SafePay) qualify for free shipping across Pakistan'
+          : `Prepaid online orders (SafePay) of ${formattedFreeThreshold} or more qualify for free shipping across Pakistan`
+      }, while Cash on Delivery (COD) orders carry standard city-specific courier fees displayed at checkout. Full shipping rates and timelines are outlined in our Shipping Policy.`,
     },
     {
       title: 'Returns, Cancellations & Refunds',
@@ -45,7 +54,7 @@ export function Terms() {
     },
     {
       title: 'Limitation of Liability',
-      content: `${BUSINESS_INFO.brandName} (${BUSINESS_INFO.legalName}) shall not be liable for indirect, incidental, or consequential damages arising from improper product storage/use, third-party courier force majeure delays, or temporary service interruptions, to the fullest extent permitted by applicable law.`,
+      content: `${storeName} (${BUSINESS_INFO.legalName}) shall not be liable for indirect, incidental, or consequential damages arising from improper product storage/use, third-party courier force majeure delays, or temporary service interruptions, to the fullest extent permitted by applicable law.`,
     },
     {
       title: 'Governing Law & Jurisdiction',
@@ -65,7 +74,7 @@ export function Terms() {
             </span>
             <h1 className="text-2xl md:text-4xl font-bold text-[#2d3a2d] mt-3">Terms of Service</h1>
             <p className="text-sm md:text-base text-[#6b7a6b] mt-3 max-w-2xl mx-auto">
-              Please read these Terms of Service carefully before using {BUSINESS_INFO.brandName}{' '}
+              Please read these Terms of Service carefully before using {storeName}{' '}
               (Legal Name: {BUSINESS_INFO.legalName}).
             </p>
             <p className="text-xs text-[#8a958a] mt-2">
@@ -122,7 +131,7 @@ export function Terms() {
               <div className="flex items-start gap-2">
                 <MapPin className="w-4 h-4 text-[#3d7a3d] mt-0.5 flex-shrink-0" />
                 <span>
-                  {BUSINESS_INFO.brandName} ({BUSINESS_INFO.legalName}), {BUSINESS_INFO.officeAddress}
+                  {storeName} ({BUSINESS_INFO.legalName}), {officeAddress}
                 </span>
               </div>
             </div>

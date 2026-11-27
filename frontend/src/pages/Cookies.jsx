@@ -7,6 +7,8 @@ const normalizePhoneLink = (value) => String(value || '').replace(/[^\d+]/g, '')
 
 export function Cookies() {
   const { settings } = useSettings();
+  const storeName = settings.storeName || BUSINESS_INFO.brandName;
+  const officeAddress = settings.address || BUSINESS_INFO.officeAddress;
   const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
   const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
   const phoneLink = normalizePhoneLink(supportPhone);
@@ -29,7 +31,7 @@ export function Cookies() {
     },
     {
       title: 'Cookie Consent',
-      content: `By continuing to browse ${BUSINESS_INFO.websiteDomain}, operated by ${BUSINESS_INFO.brandName} (Legal Name: ${BUSINESS_INFO.legalName}), you consent to necessary cookies required for core storefront operations.`,
+      content: `By continuing to browse ${BUSINESS_INFO.websiteDomain}, operated by ${storeName} (Legal Name: ${BUSINESS_INFO.legalName}), you consent to necessary cookies required for core storefront operations.`,
     },
   ];
 
@@ -46,7 +48,7 @@ export function Cookies() {
             <h1 className="text-2xl md:text-4xl font-bold text-[#2d3a2d] mt-3">Cookie Policy</h1>
             <p className="text-sm md:text-base text-[#6b7a6b] mt-3 max-w-2xl mx-auto">
               This page explains how cookies and similar technologies are used on{' '}
-              {BUSINESS_INFO.brandName} (Legal Name: {BUSINESS_INFO.legalName}).
+              {storeName} (Legal Name: {BUSINESS_INFO.legalName}).
             </p>
             <p className="text-xs text-[#8a958a] mt-2">
               Last updated: {BUSINESS_INFO.lastUpdated}
@@ -98,7 +100,7 @@ export function Cookies() {
               <div className="flex items-start gap-2">
                 <MapPin className="w-4 h-4 text-[#3d7a3d] mt-0.5 flex-shrink-0" />
                 <span>
-                  {BUSINESS_INFO.brandName} ({BUSINESS_INFO.legalName}), {BUSINESS_INFO.officeAddress}
+                  {storeName} ({BUSINESS_INFO.legalName}), {officeAddress}
                 </span>
               </div>
             </div>

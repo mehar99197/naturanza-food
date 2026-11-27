@@ -7,11 +7,17 @@ import { formatPrice } from '@/lib/utils';
 
 export function FAQ() {
   const { settings } = useSettings();
+  const storeName = settings.storeName || BUSINESS_INFO.brandName;
+  const officeAddress = settings.address || BUSINESS_INFO.officeAddress;
+  const supportHours = settings.supportHours || BUSINESS_INFO.supportHours;
   const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
   const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
   const parsedFreeShipping = Number(settings.shippingFree);
   const freeShippingAmount =
-    Number.isFinite(parsedFreeShipping) && parsedFreeShipping > 0
+    settings.shippingFree !== '' &&
+    settings.shippingFree != null &&
+    Number.isFinite(parsedFreeShipping) &&
+    parsedFreeShipping >= 0
       ? parsedFreeShipping
       : SHIPPING_POLICY.freeShippingThresholdAmount;
   const formattedFreeThreshold =
@@ -20,7 +26,11 @@ export function FAQ() {
   const faqs = [
     {
       question: 'How long does delivery take?',
-      answer: `Most orders are delivered within ${SHIPPING_POLICY.standardWindow} across Pakistan after dispatch, depending on your city. Prepaid online orders (via SafePay) of ${formattedFreeThreshold} or more qualify for free shipping, while Cash on Delivery orders carry standard city-specific courier charges.`,
+      answer: `Most orders are delivered within ${SHIPPING_POLICY.standardWindow} across Pakistan after dispatch, depending on your city. ${
+        freeShippingAmount === 0
+          ? 'Prepaid online orders (via SafePay) qualify for free shipping'
+          : `Prepaid online orders (via SafePay) of ${formattedFreeThreshold} or more qualify for free shipping`
+      }, while Cash on Delivery orders carry standard city-specific courier charges.`,
     },
     {
       question: 'What payment methods do you accept?',
@@ -42,7 +52,7 @@ export function FAQ() {
     },
     {
       question: 'How can I contact support quickly?',
-      answer: `You can reach ${BUSINESS_INFO.brandName} (${BUSINESS_INFO.legalName}) at ${supportEmail} or call ${supportPhone} (${BUSINESS_INFO.supportHours}). Registered address: ${BUSINESS_INFO.officeAddress}.`,
+      answer: `You can reach ${storeName} (${BUSINESS_INFO.legalName}) at ${supportEmail} or call ${supportPhone} (${supportHours}). Registered address: ${officeAddress}.`,
     },
     {
       question: 'Do you deliver outside Pakistan?',

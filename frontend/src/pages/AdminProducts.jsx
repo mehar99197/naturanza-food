@@ -181,6 +181,15 @@ export function AdminProducts() {
   } = useProducts();
   const { categories, loading: adminDataLoading, error: adminDataError } = useAdminData();
   const { settings } = useSettings();
+  const rawLowStockThreshold = settings?.lowStockThreshold;
+  const parsedLowStockThreshold =
+    rawLowStockThreshold === "" || rawLowStockThreshold === null || rawLowStockThreshold === undefined
+      ? NaN
+      : Number(rawLowStockThreshold);
+  const lowStockThreshold =
+    Number.isFinite(parsedLowStockThreshold) && parsedLowStockThreshold >= 0
+      ? parsedLowStockThreshold
+      : 10;
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -233,7 +242,7 @@ export function AdminProducts() {
   const stats = useMemo(() => {
     const active = products.filter((item) => normalizeStatus(item) === "active").length;
     const inactive = products.length - active;
-    const lowStock = products.filter((item) => Number(item.stock_quantity || 0) < 10).length;
+    const lowStock = products.filter((item) => Number(item.stock_quantity || 0) < lowStockThreshold).length;
 
     return {
       total: products.length,
@@ -241,7 +250,7 @@ export function AdminProducts() {
       inactive,
       lowStock,
     };
-  }, [products]);
+  }, [products, lowStockThreshold]);
 
   const assignableCategories = useMemo(
     () =>
@@ -726,7 +735,7 @@ export function AdminProducts() {
               mobileRows.map((product) => {
                 const status = normalizeStatus(product);
                 const stock = Number(product.stock_quantity || 0);
-                const isLowStock = stock < 10;
+                const isLowStock = stock < lowStockThreshold;
                 const productImage = getProductImageSrc(product);
 
                 return (
@@ -851,7 +860,7 @@ export function AdminProducts() {
                   productRows.map((product) => {
                     const status = normalizeStatus(product);
                     const stock = Number(product.stock_quantity || 0);
-                    const isLowStock = stock < 10;
+                    const isLowStock = stock < lowStockThreshold;
                     const productImage = getProductImageSrc(product);
 
                     return (

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { AdminLayout } from "@/components/AdminLayout";
 import { useSettings } from "@/context/SettingsContext";
+import { formatPrice } from "@/lib/utils";
 import { newsletterAPI } from "@/services/api";
 
 const formatDateTime = (value) => {
@@ -43,7 +44,7 @@ const statusBadge = (status) => {
 };
 
 export function AdminSubscribers() {
-  const { updateSettings } = useSettings();
+  const { settings, updateSettings } = useSettings();
 
   const [subscribers, setSubscribers] = useState([]);
   const [counts, setCounts] = useState({ active: 0, pending: 0, unsubscribed: 0, total: 0 });
@@ -115,11 +116,11 @@ export function AdminSubscribers() {
     const value = Number(promoCoupon.discount_value);
     if (!Number.isFinite(value) || value <= 0) return null;
     if (promoCoupon.discount_type === "fixed") {
-      return `Rs ${value.toLocaleString("en-PK")} off`;
+      return `${formatPrice(value, settings?.currency || "PKR")} off`;
     }
     const v = value % 1 === 0 ? value.toFixed(0) : value;
     return `${v}% off`;
-  }, [promoCoupon]);
+  }, [promoCoupon, settings?.currency]);
 
   const filteredSubscribers = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();

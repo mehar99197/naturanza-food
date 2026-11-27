@@ -8,6 +8,8 @@ const normalizePhoneLink = (value) => String(value || '').replace(/[^\d+]/g, '')
 
 export function Privacy() {
   const { settings } = useSettings();
+  const storeName = settings.storeName || BUSINESS_INFO.brandName;
+  const officeAddress = settings.address || BUSINESS_INFO.officeAddress;
   const supportEmail = settings.storeEmail || BUSINESS_INFO.contacts.supportEmail;
   const supportPhone = settings.storePhone || BUSINESS_INFO.contacts.phone;
   const privacyEmail = settings.storeEmail || BUSINESS_INFO.contacts.privacyEmail;
@@ -16,7 +18,7 @@ export function Privacy() {
   const sections = [
     {
       title: 'Who We Are',
-      content: `This Privacy Policy explains how ${BUSINESS_INFO.brandName} (Legal Name: ${BUSINESS_INFO.legalName}), located at ${BUSINESS_INFO.officeAddress}, collects, uses, and protects your personal information when you browse or place orders on ${BUSINESS_INFO.websiteUrl}.`,
+      content: `This Privacy Policy explains how ${storeName} (Legal Name: ${BUSINESS_INFO.legalName}), located at ${officeAddress}, collects, uses, and protects your personal information when you browse or place orders on ${BUSINESS_INFO.websiteUrl}.`,
     },
     {
       title: 'Information We Collect',
@@ -57,7 +59,7 @@ export function Privacy() {
             </span>
             <h1 className="text-2xl md:text-4xl font-bold text-[#2d3a2d] mt-3">Privacy Policy</h1>
             <p className="text-sm md:text-base text-[#6b7a6b] mt-3 max-w-2xl mx-auto">
-              Your privacy matters to us. Learn how {BUSINESS_INFO.brandName} (Legal Name:{' '}
+              Your privacy matters to us. Learn how {storeName} (Legal Name:{' '}
               {BUSINESS_INFO.legalName}) handles and protects your personal information.
             </p>
             <p className="text-xs text-[#8a958a] mt-2">
@@ -121,7 +123,7 @@ export function Privacy() {
               <div className="flex items-start gap-2">
                 <MapPin className="w-4 h-4 text-[#3d7a3d] mt-0.5 flex-shrink-0" />
                 <span>
-                  {BUSINESS_INFO.brandName} ({BUSINESS_INFO.legalName}), {BUSINESS_INFO.officeAddress}
+                  {storeName} ({BUSINESS_INFO.legalName}), {officeAddress}
                 </span>
               </div>
             </div>

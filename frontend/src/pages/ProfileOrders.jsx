@@ -450,7 +450,7 @@ export function ProfileOrders() {
             trackingNumber={
               selectedOrder.shipment?.tracking_number ||
               selectedOrder.tracking_number ||
-              `TRK-${String(selectedOrder.id).padStart(10, "0")}`
+              "Pending assignment"
             }
             estimatedDelivery={
               selectedOrder.estimated_delivery

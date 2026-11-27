@@ -378,9 +378,11 @@ export function AdminOrders() {
                 {[
                   { value: "all", label: "All" },
                   { value: "pending", label: "Pending" },
+                  { value: "confirmed", label: "Confirmed" },
                   { value: "processing", label: "Processing" },
                   { value: "shipped", label: "Shipped" },
                   { value: "delivered", label: "Delivered" },
+                  { value: "cancelled", label: "Cancelled" },
                 ].map((item) => (
                   <button
                     key={item.value}

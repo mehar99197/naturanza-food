@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useAdminNotifications } from "@/context/AdminNotificationsContext";
+import { useOptionalSettings } from "@/context/SettingsContext";
 import { NoIndexSEO } from "@/components/SEO";
 import { prefetchAdminRoute } from "@/utils/adminPrefetch";
 import { getAbsoluteImageUrl } from "@/lib/imageUtils";
@@ -120,6 +121,9 @@ function AdminLayoutShell({ children }) {
   const navigate = useNavigate();
   const { admin, adminLogout, canAccess, isSuperAdmin } = useAdminAuth();
   const { unreadCount, isMuted } = useAdminNotifications();
+  const { settings } = useOptionalSettings();
+  const storeName = String(settings?.storeName || "").trim() || "Naturanza";
+  const storeInitial = storeName.charAt(0).toUpperCase() || "N";
   const [isMobile, setIsMobile] = useState(isMobileViewport);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [adminImageError, setAdminImageError] = useState(false);
@@ -315,11 +319,11 @@ function AdminLayoutShell({ children }) {
             {!isSidebarCollapsed ? (
               <div className="flex items-center gap-3 pr-10">
                 <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500 text-sm font-black text-white shadow-[0_10px_22px_rgba(16,185,129,0.35)]">
-                  N
+                  {storeInitial}
                 </div>
 
                 <div className="min-w-0">
-                  <p className="truncate text-base font-semibold text-white">Naturanza</p>
+                  <p className="truncate text-base font-semibold text-white">{storeName}</p>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">
                     Admin Panel
                   </p>
@@ -430,7 +434,7 @@ function AdminLayoutShell({ children }) {
                       {admin?.name || "Admin User"}
                     </p>
                     <p className="truncate text-[11px] text-slate-300">
-                      {admin?.email || "admin@naturanza.com"}
+                      {admin?.email || settings?.storeEmail || "support@naturanzafood.com"}
                     </p>
                   </div>
                 </div>
@@ -481,12 +485,12 @@ function AdminLayoutShell({ children }) {
               </button>
 
               <div className="hidden h-9 w-9 items-center justify-center rounded-xl bg-[#16a34a]/15 text-sm font-black text-[#15803d] sm:inline-flex">
-                N
+                {storeInitial}
               </div>
 
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#15803d]/70">
-                  Naturanza Admin
+                  {storeName} Admin
                 </p>
                 <p className="truncate text-lg font-bold leading-tight text-[#1f2937] sm:text-xl">
                   {activeNavItem?.label || "Dashboard"}

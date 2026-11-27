@@ -23,6 +23,7 @@ export function SafepayPaymentResult({ mode = "result" }) {
   const { clearCart } = useCart();
   const { fetchOrders } = useOrders();
   const { settings } = useSettings();
+  const storeName = settings.storeName || "Naturanza Food";
 
   const orderIdParam = Number.parseInt(searchParams.get("order_id") || "", 10);
   const trackerParam = (
@@ -121,7 +122,7 @@ export function SafepayPaymentResult({ mode = "result" }) {
 
   return (
     <>
-      <NoIndexSEO title="SafePay Payment Status - Naturanza Food" />
+      <NoIndexSEO title={`SafePay Payment Status - ${storeName}`} />
       <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#ecfdf5_0%,_#f8fafc_38%,_#faf8f3_100%)] pt-24 sm:pt-28 pb-16 px-4">
         <div className="container-custom max-w-2xl">
           <div className="rounded-3xl border border-white/70 bg-white/95 p-6 text-center shadow-[0_20px_60px_rgba(15,23,42,0.1)] backdrop-blur sm:p-10">

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, Eye, EyeOff, MailCheck, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
 import LeftPanel from "@/components/auth/LeftPanel";
 import { NoIndexSEO } from "@/components/SEO";
 
@@ -19,6 +20,8 @@ const PASSWORD_RULE = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,128
 
 const VerifyEmail = () => {
   const { verifyEmail, resendVerification } = useAuth();
+  const { settings } = useSettings();
+  const storeName = settings.storeName || "Naturanza Food";
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -133,7 +136,7 @@ const VerifyEmail = () => {
         <div className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:block lg:w-[42%] xl:w-[44%]">
           <LeftPanel
             heading="Verify Your Email to Continue"
-            description="To keep Naturanza Food safe, we confirm every new account with a one-time code sent to your email."
+            description={`To keep ${storeName} safe, we confirm every new account with a one-time code sent to your email.`}
             trustPoints={leftPoints}
           />
         </div>

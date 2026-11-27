@@ -168,6 +168,7 @@ export function ProductDetail() {
   const { addToCart } = useCart();
   const { isAuthenticated, user } = useAuth();
   const { settings } = useSettings();
+  const storeName = settings.storeName || 'Naturanza Food';
   const { isInWishlist, isUpdating, toggleWishlist } = useWishlist();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -355,12 +356,15 @@ export function ProductDetail() {
     ? convertFromPkr(currentPrice, seoCurrency) ?? currentPrice
     : currentPrice;
 
+  const isOrganic = product?.is_organic !== false && Number(product?.is_organic) !== 0;
+  const fallbackProductCopy = `100% pure, naturally sourced${isOrganic ? ' organic' : ''} product from ${storeName}.`;
+
   const getMetaDescription = (paragraphs, productName) => {
     if (paragraphs[0]) {
       const desc = paragraphs[0].trim();
       return desc.length > 155 ? desc.substring(0, 152) + '...' : desc;
     }
-    return `Buy ${productName} at Naturanza Food. Premium organic and natural product. Order online with SafePay or Cash on Delivery across Pakistan.`;
+    return `Buy ${productName} at ${storeName}. Premium ${isOrganic ? 'organic and natural' : 'natural'} product. Order online with SafePay or Cash on Delivery across Pakistan.`;
   };
 
   const productMetaDescription = getMetaDescription(descriptionParagraphs, product?.name || 'Product');
@@ -507,7 +511,7 @@ export function ProductDetail() {
       if (descriptionParagraphs.length === 0) {
         return (
           <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-3 text-sm text-gray-700">
-            100% pure, naturally sourced organic product from Naturanza Food.
+            {fallbackProductCopy}
           </div>
         );
       }
@@ -801,7 +805,7 @@ export function ProductDetail() {
               ) : null}
 
               <p className="mt-3 text-sm leading-relaxed text-gray-600">
-                {descriptionParagraphs[0] || '100% pure, naturally sourced organic product from Naturanza Food.'}
+                {descriptionParagraphs[0] || fallbackProductCopy}
               </p>
 
               <div className="mt-4 flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
@@ -951,12 +955,14 @@ export function ProductDetail() {
                   {/* Main Image - Center */}
                   <div className="flex-1 rounded-2xl border border-gray-300 bg-gradient-to-br from-[#9CA896] to-[#8B9A7E] p-8 shadow-sm relative overflow-hidden">
                     {/* 100% Organic Badge */}
-                    <div className="absolute top-6 right-6 z-10">
-                      <div className="flex flex-col items-center justify-center w-24 h-24 rounded-full bg-gradient-to-br from-[#5a7a4a] to-[#4a6a3a] border-4 border-white text-white shadow-xl">
-                        <Leaf className="h-7 w-7 mb-0.5" strokeWidth={2.5} />
-                        <span className="text-[11px] font-bold leading-tight text-center tracking-tight">100%<br/>ORGANIC</span>
+                    {isOrganic ? (
+                      <div className="absolute top-6 right-6 z-10">
+                        <div className="flex flex-col items-center justify-center w-24 h-24 rounded-full bg-gradient-to-br from-[#5a7a4a] to-[#4a6a3a] border-4 border-white text-white shadow-xl">
+                          <Leaf className="h-7 w-7 mb-0.5" strokeWidth={2.5} />
+                          <span className="text-[11px] font-bold leading-tight text-center tracking-tight">100%<br/>ORGANIC</span>
+                        </div>
                       </div>
-                    </div>
+                    ) : null}
 
                     <div className="relative aspect-square">
                       <img
@@ -992,18 +998,20 @@ export function ProductDetail() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-                        <Leaf className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">100% Organic</p>
-                        <p className="text-xs text-gray-500">Certified Natural</p>
+                <div className={`grid ${isOrganic ? 'grid-cols-2' : 'grid-cols-1'} gap-4`}>
+                  {isOrganic ? (
+                    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                          <Leaf className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">100% Organic</p>
+                          <p className="text-xs text-gray-500">Certified Natural</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  ) : null}
                   <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
                     <div className="flex items-center gap-3">
                       <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
@@ -1068,7 +1076,7 @@ export function ProductDetail() {
                   ) : null}
 
                   <p className="mt-4 text-[15px] leading-relaxed text-gray-600">
-                    {descriptionParagraphs[0] || '100% pure, naturally sourced organic product from Naturanza Food.'}
+                    {descriptionParagraphs[0] || fallbackProductCopy}
                   </p>
 
                   {/* Key Benefits */}
@@ -1171,11 +1179,13 @@ export function ProductDetail() {
                   </div>
 
                   {/* Bottom Feature Badges - Reference Design Style */}
-                  <div className="mt-5 grid grid-cols-4 gap-3">
-                    <div className="flex items-center gap-2">
-                      <Check className="h-5 w-5 text-emerald-600 flex-shrink-0" strokeWidth={2.5} />
-                      <span className="text-xs font-semibold text-gray-800 leading-tight">100% Organic</span>
-                    </div>
+                  <div className={`mt-5 grid ${isOrganic ? 'grid-cols-4' : 'grid-cols-3'} gap-3`}>
+                    {isOrganic ? (
+                      <div className="flex items-center gap-2">
+                        <Check className="h-5 w-5 text-emerald-600 flex-shrink-0" strokeWidth={2.5} />
+                        <span className="text-xs font-semibold text-gray-800 leading-tight">100% Organic</span>
+                      </div>
+                    ) : null}
                     <div className="flex items-center gap-2">
                       <Shield className="h-5 w-5 text-blue-600 flex-shrink-0" strokeWidth={2.5} />
                       <span className="text-xs font-semibold text-gray-800 leading-tight">Chemical-Free</span>
