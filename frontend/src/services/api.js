@@ -282,16 +282,24 @@ axiosInstance.interceptors.request.use(async (config) => {
   let authScope = "none";
 
   // Admin scope is strictly isolated from customer tokens so an admin page
-  // never accidentally authenticates an admin API call with a storefront token.
+  // never accidentally authenticates an admin API call with a storefront token,
+  // and a storefront page never falls back to the HttpOnly adminAccessToken cookie.
   if (isAdminRoute || isAdminPage) {
     token = adminToken || null;
     authScope = "admin";
   } else if (isUserScopedRoute) {
     token = userToken || null;
-    authScope = token ? "user" : "none";
+    authScope = "user";
   }
 
   config._authScope = authScope;
+  config.headers = config.headers || {};
+
+  if (authScope === "admin" || authScope === "user") {
+    config.headers["X-Auth-Scope"] = authScope;
+  } else if (config.headers["X-Auth-Scope"]) {
+    delete config.headers["X-Auth-Scope"];
+  }
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;

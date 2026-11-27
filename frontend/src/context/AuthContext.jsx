@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   AUTH_SESSION_SYNC_EVENT,
   clearUserAccessToken,
@@ -152,8 +153,10 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
+  const location = useLocation();
+  const isAdminPage = /^\/admin(\/|$)/.test(String(location?.pathname || ""));
   const [user, setUser] = useState(() => getCachedUserData());
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!isAdminPage);
   const [error, setError] = useState(null);
   const bootstrapRunIdRef = useRef(0);
 
@@ -302,15 +305,23 @@ export const AuthProvider = ({ children }) => {
   }, [applyUserState, fetchProfileIfAvailable]);
 
   useEffect(() => {
+    // Keep customer auth strictly isolated from /admin/* tabs so opening the
+    // Admin Panel in another tab never calls /auth/profile or overwrites
+    // customer localStorage (`userData` / `profileImage`).
+    if (isAdminPage) {
+      setLoading(false);
+      return undefined;
+    }
+
     void bootstrapAuth();
 
     return () => {
       bootstrapRunIdRef.current += 1;
     };
-  }, [bootstrapAuth]);
+  }, [bootstrapAuth, isAdminPage]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || isAdminPage) {
       return undefined;
     }
 
@@ -367,11 +378,11 @@ export const AuthProvider = ({ children }) => {
       window.removeEventListener(AUTH_SESSION_SYNC_EVENT, handleSessionSync);
       window.removeEventListener("storage", handleStorageSync);
     };
-  }, [applyUserState, refreshProfile]);
+  }, [applyUserState, isAdminPage, refreshProfile]);
 
   // Periodic token refresh - runs every 12 minutes to keep session alive
   useEffect(() => {
-    if (typeof window === "undefined" || !user) {
+    if (typeof window === "undefined" || !user || isAdminPage) {
       return;
     }
 
@@ -402,7 +413,7 @@ export const AuthProvider = ({ children }) => {
         clearInterval(intervalId);
       }
     };
-  }, [user]);
+  }, [isAdminPage, user]);
 
   const register = async (userData) => {
     try {

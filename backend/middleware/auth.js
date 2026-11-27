@@ -9,13 +9,63 @@ const isAdminUser = (user) =>
     ADMIN_ROLES.has(String(user?.role || "").trim().toLowerCase()) ||
     ADMIN_ROLES.has(String(user?.admin_role || "").trim().toLowerCase());
 
+// Customer-only endpoints must NEVER fall back to the HttpOnly `adminAccessToken`
+// cookie. Otherwise, having an admin tab and a storefront user tab open in the
+// same browser causes customer profile/cart/order requests without a Bearer
+// token to silently authenticate as the admin account and overwrite the user tab.
+const CUSTOMER_ONLY_PATH_PREFIXES = [
+    "/api/auth/profile",
+    "/api/auth/addresses",
+    "/api/auth/change-password",
+    "/api/profile",
+    "/api/cart",
+    "/api/wishlist",
+    "/api/orders/my-orders",
+    "/api/orders/create",
+    "/api/returns/my",
+    "/api/returns/request",
+    "/api/reviews/my-reviews",
+];
+
+const getRequestPath = (req) =>
+    String(req?.originalUrl || req?.url || "")
+        .split("?")[0]
+        .trim()
+        .toLowerCase();
+
+const getRequestAuthScope = (req) =>
+    String(req?.headers?.["x-auth-scope"] || "")
+        .trim()
+        .toLowerCase();
+
+const isCustomerOnlyPath = (req) => {
+    const fullPath = getRequestPath(req);
+    return CUSTOMER_ONLY_PATH_PREFIXES.some(
+        (prefix) => fullPath === prefix || fullPath.startsWith(`${prefix}/`),
+    );
+};
+
+const canFallbackToAdminCookie = (req, { optional = false } = {}) => {
+    const scope = getRequestAuthScope(req);
+    if (scope === "user" || isCustomerOnlyPath(req)) {
+        return false;
+    }
+    if (optional) {
+        return scope === "admin" || String(req?.query?.includeInactive || "") === "true";
+    }
+    return true;
+};
+
 // Middleware to verify JWT token
 const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers["authorization"];
     const bearerToken = authHeader && authHeader.startsWith("Bearer ")
         ? authHeader.slice(7).trim()
         : null;
-    const token = bearerToken || req.cookies?.adminAccessToken || null;
+    const token =
+        bearerToken ||
+        (canFallbackToAdminCookie(req) ? req.cookies?.adminAccessToken : null) ||
+        null;
 
     if (!token) {
         return res.status(401).json({ error: "Access token required" });
@@ -93,11 +143,14 @@ const optionalAuthenticateToken = async (req, res, next) => {
     const bearerToken = authHeader && authHeader.startsWith("Bearer ")
         ? authHeader.slice(7).trim()
         : null;
-    // Admin access tokens are also stored in an HttpOnly cookie. On a hard
-    // reload the in-memory Bearer token is empty, so optional product reads
-    // must use the cookie or they receive the public response with inventory
-    // intentionally removed (which rendered admin stock as zero).
-    const token = bearerToken || req.cookies?.adminAccessToken || null;
+    // Admin access tokens are stored in an HttpOnly cookie. On a hard reload of
+    // an admin page the in-memory Bearer token is empty, so admin product/category
+    // reads use the cookie when explicitly scoped to admin (never on storefront
+    // customer browsing in another tab).
+    const token =
+        bearerToken ||
+        (canFallbackToAdminCookie(req, { optional: true }) ? req.cookies?.adminAccessToken : null) ||
+        null;
 
     if (!token) {
         return next();
@@ -186,4 +239,10 @@ const isAdmin = (req, res, next) => {
     return enforceSuperAdminIpAllowlist(req, res, next);
 };
 
-module.exports = { authenticateToken, optionalAuthenticateToken, isAdmin, isAdminUser };
+module.exports = {
+    authenticateToken,
+    optionalAuthenticateToken,
+    isAdmin,
+    isAdminUser,
+    canFallbackToAdminCookie,
+};

@@ -416,6 +416,7 @@ const corsOptions = {
     "X-CSRF-Token",
     "X-Step-Up-Password",
     "X-Step-Up-Otp",
+    "X-Auth-Scope",
   ],
   exposedHeaders: ["Content-Disposition", "Content-Type", "Content-Length"],
 };

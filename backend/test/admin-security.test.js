@@ -259,3 +259,67 @@ test('admin hardening invariants hold across routes and index.js', () => {
   assert.match(secSrc, /requireStepUp\(\)/);
   assert.match(secSrc, /recordFailedLoginAtomic/);
 });
+
+test('adminAccessToken cookie never authenticates customer-only routes or user-scoped requests', () => {
+  const { canFallbackToAdminCookie } = require('../middleware/auth');
+
+  for (const url of [
+    '/api/auth/profile',
+    '/api/auth/addresses',
+    '/api/profile',
+    '/api/profile/security',
+    '/api/cart',
+    '/api/wishlist',
+    '/api/orders/my-orders',
+    '/api/orders/create',
+    '/api/returns/my',
+    '/api/reviews/my-reviews',
+  ]) {
+    assert.equal(
+      canFallbackToAdminCookie({ originalUrl: url, headers: {} }),
+      false,
+      `${url} must never fall back to adminAccessToken cookie`,
+    );
+  }
+
+  // Explicit X-Auth-Scope: user blocks admin cookie fallback on shared routes too
+  assert.equal(
+    canFallbackToAdminCookie({
+      originalUrl: '/api/auth/notifications',
+      headers: { 'x-auth-scope': 'user' },
+    }),
+    false,
+  );
+
+  // Admin routes & admin-scoped notifications still use the HttpOnly admin cookie
+  assert.equal(
+    canFallbackToAdminCookie({
+      originalUrl: '/api/admin/verify',
+      headers: { 'x-auth-scope': 'admin' },
+    }),
+    true,
+  );
+  assert.equal(
+    canFallbackToAdminCookie({
+      originalUrl: '/api/auth/notifications',
+      headers: { 'x-auth-scope': 'admin' },
+    }),
+    true,
+  );
+
+  // Optional auth on storefront product reads ignores admin cookie unless admin-scoped
+  assert.equal(
+    canFallbackToAdminCookie(
+      { originalUrl: '/api/products', headers: {}, query: {} },
+      { optional: true },
+    ),
+    false,
+  );
+  assert.equal(
+    canFallbackToAdminCookie(
+      { originalUrl: '/api/products?includeInactive=true', headers: { 'x-auth-scope': 'admin' }, query: { includeInactive: 'true' } },
+      { optional: true },
+    ),
+    true,
+  );
+});
