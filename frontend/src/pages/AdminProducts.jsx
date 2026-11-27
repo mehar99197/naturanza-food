@@ -40,6 +40,7 @@ const initialFormState = {
   stock_quantity: "0",
   discount_percentage: "0",
   is_featured: false,
+  show_in_hero: true,
   is_active: true,
 };
 
@@ -299,6 +300,10 @@ export function AdminProducts() {
       stock_quantity: String(product.stock_quantity || 0),
       discount_percentage: String(product.discount_percentage || 0),
       is_featured: Boolean(product.is_featured),
+      show_in_hero:
+        product.show_in_hero === undefined || product.show_in_hero === null
+          ? true
+          : Boolean(product.show_in_hero),
       is_active: normalizeStatus(product) === "active",
     });
     setError("");
@@ -359,6 +364,7 @@ export function AdminProducts() {
         stock_quantity: Math.max(0, Number(formData.stock_quantity) || 0),
         discount_percentage: Math.min(90, Math.max(0, Number(formData.discount_percentage) || 0)),
         is_featured: Boolean(formData.is_featured),
+        show_in_hero: Boolean(formData.show_in_hero),
         is_active: Boolean(formData.is_active),
       };
 
@@ -1331,7 +1337,7 @@ export function AdminProducts() {
                       </h3>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                       <label className="group flex cursor-pointer items-start gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-3.5 transition-all duration-200 hover:border-emerald-200 hover:bg-emerald-50">
                         <input
                           type="checkbox"
@@ -1362,6 +1368,23 @@ export function AdminProducts() {
                           <span className="text-sm font-semibold text-slate-800">Featured</span>
                           <span className="mt-0.5 hidden text-xs text-slate-500 sm:block">
                             Highlight this product in premium placements.
+                          </span>
+                        </span>
+                      </label>
+
+                      <label className="group flex cursor-pointer items-start gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-3.5 transition-all duration-200 hover:border-emerald-200 hover:bg-emerald-50">
+                        <input
+                          type="checkbox"
+                          checked={formData.show_in_hero}
+                          onChange={(event) =>
+                            setFormData((prev) => ({ ...prev, show_in_hero: event.target.checked }))
+                          }
+                          className="mt-0.5 h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span>
+                          <span className="text-sm font-semibold text-slate-800">Hero Carousel</span>
+                          <span className="mt-0.5 hidden text-xs text-slate-500 sm:block">
+                            Show this product in the homepage top slider.
                           </span>
                         </span>
                       </label>

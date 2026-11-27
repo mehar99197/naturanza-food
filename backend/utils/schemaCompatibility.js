@@ -826,6 +826,7 @@ const ensureProductionSchema = async (db) => {
     benefits: "TEXT NULL",
     usage: "TEXT NULL",
     reserved_stock: "INT NOT NULL DEFAULT 0",
+    show_in_hero: "BOOLEAN NOT NULL DEFAULT TRUE",
     deleted_at: "DATETIME NULL DEFAULT NULL",
   });
 

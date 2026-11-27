@@ -18,6 +18,13 @@ const isTruthyFlag = (value) => {
   return normalized === 'true' || normalized === '1' || normalized === 'yes';
 };
 
+const isExplicitlyFalseFlag = (value) => {
+  if (value === false || value === 0) return true;
+  if (value === undefined || value === null || value === '') return false;
+  const normalized = String(value).trim().toLowerCase();
+  return normalized === 'false' || normalized === '0' || normalized === 'no';
+};
+
 export const isHoneyProduct = (product) => {
   const text = `${product?.name || ''} ${product?.slug || ''}`.toLowerCase();
   return text.includes('honey');
@@ -50,7 +57,12 @@ export const createCleanExcerpt = (text, maxLength = 155) => {
 
 export const buildHeroSlides = (activeProducts = []) => {
   const list = (Array.isArray(activeProducts) ? activeProducts : [])
-    .filter((item) => item && (item.id !== undefined || item.product_id !== undefined))
+    .filter(
+      (item) =>
+        item &&
+        (item.id !== undefined || item.product_id !== undefined) &&
+        !isExplicitlyFalseFlag(item.show_in_hero),
+    )
     .map((item, index) => ({ item, index }))
     .sort((a, b) => {
       const honeyDiff = Number(isHoneyProduct(b.item)) - Number(isHoneyProduct(a.item));

@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS products (
     reserved_stock INT NOT NULL DEFAULT 0,
     is_organic BOOLEAN DEFAULT FALSE,
     is_featured BOOLEAN DEFAULT FALSE,
+    show_in_hero BOOLEAN NOT NULL DEFAULT TRUE,
     is_active BOOLEAN DEFAULT TRUE,
     -- Set when a product is deleted but its row has to stay for order history.
     -- Every product query skips a row that carries a timestamp here.

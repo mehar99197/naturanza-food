@@ -24,7 +24,7 @@ router.post(
   authenticateToken,
   isAdmin,
   requirePermission("manage_products"),
-  restrictBody('name', 'slug', 'barcode', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'is_organic', 'ingredients', 'benefits', 'usage'),
+  restrictBody('name', 'slug', 'barcode', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'show_in_hero', 'is_organic', 'ingredients', 'benefits', 'usage'),
   asyncHandler(productController.createProduct),
 );
 
@@ -33,7 +33,7 @@ router.put(
   authenticateToken,
   isAdmin,
   requirePermission("manage_products"),
-  restrictBody('name', 'slug', 'barcode', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'is_organic', 'ingredients', 'benefits', 'usage'),
+  restrictBody('name', 'slug', 'barcode', 'price', 'description', 'category_id', 'image_url', 'gallery_images', 'stock_quantity', 'discount_percentage', 'is_active', 'is_featured', 'show_in_hero', 'is_organic', 'ingredients', 'benefits', 'usage'),
   asyncHandler(productController.updateProduct),
 );
 

@@ -449,8 +449,8 @@ const createProduct = async (payload = {}) => {
 
     const [result] = await connection.query(
       `INSERT INTO products
-      (name, slug, description, ingredients, benefits, \`usage\`, price, category_id, image_url, images, stock_quantity, is_organic, is_featured, is_active, discount_percentage)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (name, slug, description, ingredients, benefits, \`usage\`, price, category_id, image_url, images, stock_quantity, is_organic, is_featured, show_in_hero, is_active, discount_percentage)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         slug,
@@ -465,6 +465,7 @@ const createProduct = async (payload = {}) => {
          normalizeNonNegativeNumber(payload.stock_quantity || 0, "stock_quantity"),
         Boolean(payload.is_organic),
         Boolean(payload.is_featured),
+        payload.show_in_hero === undefined ? true : Boolean(payload.show_in_hero),
         payload.is_active === undefined ? true : Boolean(payload.is_active),
          normalizeDiscountPercentage(payload.discount_percentage || 0),
       ],
@@ -586,6 +587,7 @@ const updateProduct = async (productId, payload = {}) => {
       ["stock_quantity", "stock_quantity = ?", (value) => normalizeNonNegativeNumber(value, "stock_quantity")],
       ["is_organic", "is_organic = ?", (value) => Boolean(value)],
       ["is_featured", "is_featured = ?", (value) => Boolean(value)],
+      ["show_in_hero", "show_in_hero = ?", (value) => Boolean(value)],
       ["is_active", "is_active = ?", (value) => Boolean(value)],
       ["discount_percentage", "discount_percentage = ?", normalizeDiscountPercentage],
     ];

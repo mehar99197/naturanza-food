@@ -889,3 +889,26 @@ test("Invoice generation preserves registered legal entity Naturanza Foods along
     }
   }
 });
+
+test("Hero carousel respects per-product show_in_hero visibility toggle", async () => {
+  const { buildHeroSlides } = await importFrontendModule("src/lib/heroSlideUtils.js");
+
+  const products = [
+    { id: 1, name: "Organic Honey", price: 2000, show_in_hero: 1 },
+    { id: 2, name: "Red Chili", price: 350, show_in_hero: 0 },
+    { id: 3, name: "Turmeric", price: 420, show_in_hero: false },
+    { id: 4, name: "Ispaghol Husk", price: 650, show_in_hero: true },
+    { id: 5, name: "Legacy Product", price: 500 },
+  ];
+
+  const slides = buildHeroSlides(products);
+  const slideIds = slides.map((s) => s.id);
+  assert.deepEqual(slideIds, [1, 4, 5]);
+  assert.ok(!slideIds.includes(2), "show_in_hero=0 must hide product from hero carousel");
+  assert.ok(!slideIds.includes(3), "show_in_hero=false must hide product from hero carousel");
+
+  const routesSrc = readBackend("routes/products.js");
+  assert.match(routesSrc, /show_in_hero/);
+  const modelSrc = readBackend("models/productModel.js");
+  assert.match(modelSrc, /show_in_hero/);
+});
